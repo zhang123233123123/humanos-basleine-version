@@ -1,0 +1,124 @@
+{
+  "timeAxisLabels": 14,
+  "calendarBounds": {
+    "start": 8,
+    "end": 21
+  },
+  "taskSessions": 0,
+  "contextEvents": 18,
+  "fixedEvents": 1,
+  "recurringRoutines": 7,
+  "temporaryConstraints": 1,
+  "taskDurations": {
+    "System implementation": 300,
+    "Experiment design": 120,
+    "Literature review": 200
+  },
+  "selectedPlanWork": 0,
+  "selectedPlanCapacity": 0,
+  "candidateSignatures": [],
+  "flexibleActivities": 2,
+  "flexibleDurations": [
+    40,
+    30,
+    60,
+    15
+  ],
+  "buffers": 6,
+  "distinctTaskHeights": [],
+  "momentaryValues": [
+    "6/7",
+    "5/7",
+    "3/7"
+  ],
+  "dailyCheckIn": {
+    "opened": true,
+    "savedForToday": true
+  },
+  "partialStatusProbe": "partially_scheduled",
+  "constraintRevalidationViolations": [],
+  "parserProbe": [
+    {
+      "title": "开组会",
+      "due": "明天下午3点",
+      "duration": 60,
+      "task_type": "fixed_event"
+    },
+    {
+      "title": "写完论文",
+      "due": "周三",
+      "duration": 180,
+      "task_type": "flexible_task"
+    }
+  ],
+  "singleSchedulerSource": "blocked_offline",
+  "decisionTraceCards": 1,
+  "pendingText": "",
+  "pendingContainsObjectObject": false,
+  "taskCardsAreCompact": true,
+  "rawIsoVisible": false,
+  "calendarLegendItems": 5,
+  "legendExplainsTaskColors": false,
+  "contextDialogAudit": {
+    "editableCount": 11,
+    "structuredIds": [
+      "context-8ccdf218-8c13-4622-b98e-17d6102771f6",
+      "context-4698ccaf-7612-43cd-87f2-b42f19bc1c77",
+      "context-8d7a2f9f-633b-4ed0-a784-9812522061b6",
+      "context-30e9a462-4622-4a15-9219-7e7dd146a459",
+      "context-d55dbaab-53d6-44f0-b677-5932dd1901b5"
+    ],
+    "dialogOpened": true,
+    "dialogTime": "每天 12:00–13:00"
+  },
+  "apiBase": "",
+  "userId": "static-1786070991233",
+  "engineLabel": "",
+  "provider": "",
+  "model": "",
+  "planStatus": "",
+  "validation": null,
+  "unscheduled": [],
+  "contextParallelFeature": {
+    "source": "DeepSeek parallel-compatibility-v2",
+    "acceptanceFlow": "full-plan replan followed by Python validation",
+    "coveredBy": "test_flexible_activity_parallel_pair_is_semantic_model_output"
+  },
+  "parallelFeature": {
+    "suggestionVisibleBefore": true,
+    "ordinaryDraftHasNoDecision": true,
+    "optionalSuggestionDoesNotBlock": true,
+    "visibleMainPlanActions": [
+      "Add plan to calendar"
+    ],
+    "acceptedStatus": "accepted",
+    "linkedSessionCount": 2,
+    "distinctTaskCount": 2,
+    "sameGroup": true,
+    "overlapErrors": [],
+    "parallelCardsVisible": 2,
+    "sameTimelineRow": true,
+    "leftRightColumns": true,
+    "podcastTitleVisible": true,
+    "compactTaskTimeVisible": true,
+    "persistedLinkedSessions": 2,
+    "persistedDistinctTasks": 2,
+    "confirmedSummaryVisible": true,
+    "staleNoPlanVisible": false,
+    "selectionClearedAfterConfirmation": true,
+    "cancelButtonVisible": true,
+    "feedbackVisible": true,
+    "mandatoryDecision": {
+      "cardCount": 1,
+      "concreteReasonVisible": true,
+      "actions": [
+        "Add available time",
+        "Move deadline",
+        "Reduce scope"
+      ],
+      "finalConfirmationBlocked": true,
+      "decisionCardHasNestedScroll": false
+    },
+    "remainingGroupSessionsAfterCancel": 0
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "passed": true,
+  "checkpoints": 14,
+  "simulated_start": "2026-08-03T00:45:00.000Z",
+  "simulated_end": "2026-08-09T16:00:00.000Z",
+  "screenshots": 12,
+  "tested": [
+    "shared clock",
+    "daily check-in",
+    "up next",
+    "ready",
+    "explicit start",
+    "pause",
+    "resume",
+    "session end",
+    "three feedback outcomes",
+    "refresh recovery",
+    "week rollover"
+  ],
+  "planner_fixture": "deterministic; it does not claim a live DeepSeek call"
+}

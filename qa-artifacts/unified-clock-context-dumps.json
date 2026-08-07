@@ -1,0 +1,13 @@
+[
+  {
+    "id": "dump_b2abfa818007",
+    "user_id": "user_3636485cfa97",
+    "task_id": "T1",
+    "progress": "Implemented the first integration boundary.",
+    "open_questions": "[]",
+    "next_action": "Continue with the test-clock API adapter.",
+    "stop_reason": "interrupted",
+    "materials": "[]",
+    "created_at": 1785720000000
+  }
+]

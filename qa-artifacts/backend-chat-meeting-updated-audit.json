@@ -1,0 +1,27 @@
+{
+  "day": "周六",
+  "start": 14,
+  "end": 15,
+  "visibleContextBlocks": [
+    {
+      "day_index": 5,
+      "start": 14,
+      "end": 15,
+      "kind": "context"
+    }
+  ],
+  "draftBlockCount": 15,
+  "taskContextPollution": [],
+  "assistantTail": [
+    {
+      "title": "You",
+      "text": "My research meeting tomorrow has moved to 14:00–15:00."
+    },
+    {
+      "title": "HumanOS",
+      "text": "Updated “research meeting” to Saturday 14:00–15:00. This is fixed time. I will not search for another position; I will keep it there, check conflicts, and generate one revised draft plan around it."
+    }
+  ],
+  "selectedPlanOnly": true,
+  "parallelSuggestionVisible": false
+}

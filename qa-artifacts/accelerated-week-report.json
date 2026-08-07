@@ -1,0 +1,114 @@
+{
+  "simulation": "7 days accelerated in one process",
+  "week_id": "2026-08-03",
+  "confirmed_plan_id": "plan_a559be55422e",
+  "daily_results": [
+    {
+      "day": "Monday",
+      "task": "Review research notes",
+      "outcome": "completed",
+      "actual_minutes": 60,
+      "remaining_minutes": 0,
+      "task_status": "completed",
+      "session_status": "completed",
+      "finish_idempotent": true,
+      "feedback_idempotent": true,
+      "interruption": null
+    },
+    {
+      "day": "Tuesday",
+      "task": "Code interview transcripts",
+      "outcome": "completed",
+      "actual_minutes": 55,
+      "remaining_minutes": 0,
+      "task_status": "completed",
+      "session_status": "completed",
+      "finish_idempotent": true,
+      "feedback_idempotent": true,
+      "interruption": {
+        "paused_minutes": 20,
+        "next_action": "Continue from participant quote 12",
+        "resumed_same_session": true
+      }
+    },
+    {
+      "day": "Wednesday",
+      "task": "Revise literature review",
+      "outcome": "partial",
+      "actual_minutes": 35,
+      "remaining_minutes": 25,
+      "task_status": "queued",
+      "session_status": "completed",
+      "finish_idempotent": true,
+      "feedback_idempotent": true,
+      "interruption": null
+    },
+    {
+      "day": "Thursday",
+      "task": "Prepare findings diagram",
+      "outcome": "not_started",
+      "actual_minutes": 0,
+      "remaining_minutes": 45,
+      "task_status": "queued",
+      "session_status": "not_started",
+      "finish_idempotent": true,
+      "feedback_idempotent": true,
+      "interruption": null
+    },
+    {
+      "day": "Friday",
+      "task": "Write findings section",
+      "outcome": "completed",
+      "actual_minutes": 60,
+      "remaining_minutes": 0,
+      "task_status": "completed",
+      "session_status": "completed",
+      "finish_idempotent": true,
+      "feedback_idempotent": true,
+      "interruption": null
+    },
+    {
+      "day": "Saturday",
+      "task": "Format references",
+      "outcome": "completed",
+      "actual_minutes": 45,
+      "remaining_minutes": 0,
+      "task_status": "completed",
+      "session_status": "completed",
+      "finish_idempotent": true,
+      "feedback_idempotent": true,
+      "interruption": null
+    },
+    {
+      "day": "Sunday",
+      "task": "Prepare weekly reflection",
+      "outcome": "completed",
+      "actual_minutes": 30,
+      "remaining_minutes": 0,
+      "task_status": "completed",
+      "session_status": "completed",
+      "finish_idempotent": true,
+      "feedback_idempotent": true,
+      "interruption": null
+    }
+  ],
+  "totals": {
+    "days": 7,
+    "daily_checkins": 7,
+    "feedback_records": 7,
+    "context_dumps": 1,
+    "idempotent_action_records": 16,
+    "completed_tasks": 5,
+    "unfinished_tasks": 2
+  },
+  "rollover": {
+    "new_week_id": "2026-08-10",
+    "carried_task_titles": [
+      "Revise literature review",
+      "Prepare findings diagram"
+    ],
+    "old_plan_superseded": true,
+    "routine_reused": true,
+    "daily_checkin_reset": true
+  }
+}

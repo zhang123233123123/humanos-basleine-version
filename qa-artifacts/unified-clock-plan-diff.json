@@ -1,0 +1,88 @@
+{
+  "unchanged": [
+    {
+      "block_id": "T1-V2-2",
+      "task_id": "T1",
+      "day_index": 4,
+      "start": 10.0,
+      "end": 10.75,
+      "session_minutes": 45,
+      "planned_work_minutes": 45
+    },
+    {
+      "block_id": "T1-V2-3",
+      "task_id": "T1",
+      "day_index": 4,
+      "start": 11.0,
+      "end": 11.5,
+      "session_minutes": 30,
+      "planned_work_minutes": 25
+    },
+    {
+      "block_id": "T2-V2-1",
+      "task_id": "T2",
+      "day_index": 4,
+      "start": 13.0,
+      "end": 13.75,
+      "session_minutes": 45,
+      "planned_work_minutes": 45
+    },
+    {
+      "block_id": "T2-V2-2",
+      "task_id": "T2",
+      "day_index": 5,
+      "start": 9.0,
+      "end": 10.25,
+      "session_minutes": 75,
+      "planned_work_minutes": 75
+    },
+    {
+      "block_id": "T3-V2-1",
+      "task_id": "T3",
+      "day_index": 3,
+      "start": 10.0,
+      "end": 11.5,
+      "session_minutes": 90,
+      "planned_work_minutes": 90
+    }
+  ],
+  "moved": [
+    {
+      "block_id": "T1-V2-1",
+      "task_id": "T1",
+      "before": {
+        "block_id": "T1-V2-1",
+        "task_id": "T1",
+        "day_index": 4,
+        "start": 9.0,
+        "end": 9.75,
+        "session_minutes": 45,
+        "planned_work_minutes": 45
+      },
+      "after": {
+        "block_id": "T1-V2-1",
+        "task_id": "T1",
+        "day_index": 4,
+        "start": 8.0,
+        "end": 8.75,
+        "session_minutes": 45,
+        "planned_work_minutes": 45
+      }
+    }
+  ],
+  "resized": [],
+  "added": [],
+  "removed": [],
+  "task_metadata_changed": [],
+  "parallel_decision_changed": [],
+  "has_changes": true,
+  "summary": {
+    "unchanged": 5,
+    "moved": 1,
+    "resized": 0,
+    "added": 0,
+    "removed": 0,
+    "task_metadata_changed": 0,
+    "parallel_decision_changed": 0
+  }
+}

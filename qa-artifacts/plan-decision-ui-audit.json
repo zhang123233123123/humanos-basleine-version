@@ -1,0 +1,28 @@
+{
+  "readyAudit": {
+    "title": "Your plan is ready",
+    "count": "1 tasks",
+    "confirmDisabled": false,
+    "technical": false
+  },
+  "decisionAudit": {
+    "title": "HumanOS needs one decision",
+    "count": "1 decision required",
+    "message": "\n    \n    \n      Needs your decision\n      Experiment design conflicts with Lunch.\n      \n        Move deadlineAdd available timeSplit into shorter sessionsChange Lunch\n      \n    \n    \n    \n    \n    ",
+    "confirmDisabled": true,
+    "marked": true
+  },
+  "dragAudit": {
+    "start": 9,
+    "toast": "Couldn’t move — overlaps Lunch 12:00–13:00.",
+    "planValid": true,
+    "hasConflictCard": false,
+    "confirmDisabled": false,
+    "events": [
+      {
+        "type": "failed_edit_attempt",
+        "effective": false
+      }
+    ]
+  }
+}

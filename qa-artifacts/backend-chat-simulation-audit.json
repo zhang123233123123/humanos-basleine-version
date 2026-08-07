@@ -1,0 +1,92 @@
+{
+  "tasks": [
+    {
+      "id": "task_585db4e11a53",
+      "title": "开组会",
+      "due": "明天下午3点",
+      "deadline_time": "",
+      "duration": 60,
+      "task_type": "fixed_event",
+      "status": "queued"
+    },
+    {
+      "id": "task_8d636abbbb47",
+      "title": "写完论文",
+      "due": "周三",
+      "deadline_time": "",
+      "duration": 180,
+      "task_type": "flexible_task",
+      "status": "queued"
+    }
+  ],
+  "blocks": [
+    {
+      "kind": "fixed_event",
+      "day_index": 5,
+      "start": 15,
+      "end": 16,
+      "conflict": false,
+      "violations": []
+    }
+  ],
+  "needsClarification": [],
+  "provider": "deepseek",
+  "model": "deepseek-chat",
+  "decisionEvidenceItems": 0,
+  "decisionTraceHeight": 508,
+  "parsePreview": {
+    "taskCountBefore": 3,
+    "taskCountDuringPreview": 3,
+    "previews": [
+      {
+        "title": "开组会",
+        "due": "明天下午3点",
+        "duration": 60,
+        "task_type": "fixed_event",
+        "evidence": [
+          "明天下午三点开组会，持续1小时"
+        ],
+        "confidence": 0.85
+      },
+      {
+        "title": "写完论文",
+        "due": "周三",
+        "duration": 180,
+        "task_type": "flexible_task",
+        "evidence": [
+          "周三前写完论文，预计3小时"
+        ],
+        "confidence": 0.85
+      }
+    ],
+    "dialogOpen": true
+  },
+  "candidateCount": 1,
+  "candidateTabs": 0,
+  "assistantTail": [
+    {
+      "text": "Updated “research meeting” to Saturday 14:00–15:00. This is fixed time. I will not search for another position; I will keep it there, check conflicts, and generate one revised draft plan around it."
+    },
+    {
+      "text": "Choose a shorter, lower-demand task that can be started now.\n7 current or future session(s) were released; past records were kept. 280 minutes of work and the next re-entry step were saved."
+    },
+    {
+      "text": "Resume task: System implementation. Previous progress: Completed the API interface skeleton. First action: Continue connecting the scheduling endpoint\nStart with a 45-minute re-entry session."
+    },
+    {
+      "text": "Literature review: The AI candidate did not cover the task's full remaining work duration."
+    },
+    {
+      "text": "明天下午三点开组会，持续1小时；周三前写完论文，预计3小时。"
+    },
+    {
+      "text": "I identified 2 items. Review or edit them first; I will create and schedule them only after confirmation."
+    },
+    {
+      "text": "开组会 is a fixed event. HumanOS keeps the stated time and checks for conflicts.\n写完论文 is a flexible task. HumanOS proposes sessions inside availability and before the deadline."
+    },
+    {
+      "text": "写完论文: There is not enough available time before the deadline to schedule all remaining work."
+    }
+  ]
+}

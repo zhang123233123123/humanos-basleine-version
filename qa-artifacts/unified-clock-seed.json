@@ -1,0 +1,16 @@
+{
+  "user_id": "user_5d72c1b71789",
+  "email": "clock-qa@example.com",
+  "password": "testing123",
+  "week_id": "2026-08-03",
+  "plan_id": "plan_c15a7417dd6b",
+  "plan_revision": 1,
+  "task_ids": [
+    "T1",
+    "T2",
+    "T3",
+    "T4",
+    "T5"
+  ],
+  "fixture_source": "deterministic; it does not claim a live DeepSeek call"
+}

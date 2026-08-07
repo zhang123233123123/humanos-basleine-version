@@ -1,0 +1,117 @@
+{
+  "timeAxisLabels": 14,
+  "calendarBounds": {
+    "start": 8,
+    "end": 21
+  },
+  "taskSessions": 15,
+  "contextEvents": 18,
+  "fixedEvents": 1,
+  "recurringRoutines": 7,
+  "temporaryConstraints": 1,
+  "taskDurations": {
+    "System implementation": 300,
+    "Experiment design": 120,
+    "Literature review": 200
+  },
+  "selectedPlanWork": 620,
+  "selectedPlanCapacity": 630,
+  "candidateSignatures": [
+    "[[\"task_9871eb4baad6\",0,9,9.75],[\"task_9871eb4baad6\",1,9,9.75],[\"task_9871eb4baad6\",2,9,9.75],[\"task_9871eb4baad6\",3,9,9.75],[\"task_9871eb4baad6\",4,9,9.75],[\"task_9871eb4baad6\",0,10,10.75],[\"task_9871eb4baad6\",1,8.5,9],[\"task_4eac15550416\",5,9,9.75],[\"task_4eac15550416\",2,8.25,9],[\"task_4eac15550416\",1,10,10.75],[\"task_4eac15550416\",3,8.25,9],[\"task_4eac15550416\",1,8,8.5],[\"task_1ab8d89edcaa\",5,10,10.75],[\"task_1ab8d89edcaa\",4,11.25,12],[\"task_1ab8d89edcaa\",5,11,11.5]]",
+    "[[\"task_9871eb4baad6\",0,9,9.75],[\"task_9871eb4baad6\",0,10,10.75],[\"task_9871eb4baad6\",0,11,11.75],[\"task_9871eb4baad6\",0,13,13.75],[\"task_9871eb4baad6\",0,14,14.75],[\"task_9871eb4baad6\",0,15,15.75],[\"task_9871eb4baad6\",0,16,16.5],[\"task_4eac15550416\",0,16.75,17.5],[\"task_4eac15550416\",0,17.75,18.5],[\"task_4eac15550416\",1,9,9.75],[\"task_4eac15550416\",1,8.25,9],[\"task_4eac15550416\",1,10,10.5],[\"task_1ab8d89edcaa\",1,10.75,11.5],[\"task_1ab8d89edcaa\",1,13,13.75],[\"task_1ab8d89edcaa\",1,14,14.5]]"
+  ],
+  "flexibleActivities": 2,
+  "flexibleDurations": [
+    40,
+    30,
+    60,
+    15
+  ],
+  "buffers": 6,
+  "distinctTaskHeights": [
+    50,
+    32
+  ],
+  "momentaryValues": [
+    "6/7",
+    "5/7",
+    "3/7"
+  ],
+  "dailyCheckIn": {
+    "opened": false,
+    "savedForToday": true
+  },
+  "partialStatusProbe": "partially_scheduled",
+  "constraintRevalidationViolations": [
+    "This overlaps System implementation from 10:00–10:45."
+  ],
+  "parserProbe": [
+    {
+      "title": "开组会",
+      "due": "明天下午3点",
+      "duration": 60,
+      "task_type": "fixed_event"
+    },
+    {
+      "title": "写完论文",
+      "due": "周三",
+      "duration": 180,
+      "task_type": "flexible_task"
+    }
+  ],
+  "singleSchedulerSource": "backend/humanos_graph.py",
+  "decisionTraceCards": 1,
+  "pendingText": "\n    \n    \n    \n    \n    ",
+  "pendingContainsObjectObject": false,
+  "taskCardsAreCompact": true,
+  "rawIsoVisible": false,
+  "calendarLegendItems": 5,
+  "legendExplainsTaskColors": false,
+  "contextDialogAudit": {
+    "editableCount": 11,
+    "structuredIds": [
+      "context-bcffe621-4a9b-4e62-a9e3-80b702c8200d",
+      "context-6a91d186-6279-486d-82ea-e6131c18ceb9",
+      "context-0231a7b7-1bb5-417e-8dfe-0650b4f5da0f",
+      "context-f3fb0346-a146-402f-a0dd-9c00af628a2c",
+      "context-fdfb9276-53df-4b59-823b-db441c294814"
+    ],
+    "dialogOpened": true,
+    "dialogTime": "每天 12:00–13:00"
+  },
+  "apiBase": "http://127.0.0.1:8897",
+  "userId": "user_2361492b32e3",
+  "engineLabel": "",
+  "provider": "deepseek",
+  "model": "deepseek-chat",
+  "planStatus": "",
+  "validation": {
+    "valid": true,
+    "violations": []
+  },
+  "unscheduled": [],
+  "contextParallelFeature": {
+    "source": "DeepSeek parallel-compatibility-v2",
+    "acceptanceFlow": "full-plan replan followed by Python validation",
+    "coveredBy": "test_flexible_activity_parallel_pair_is_semantic_model_output"
+  },
+  "parallelFeature": {
+    "suggestionVisibleBefore": true,
+    "ordinaryDraftHasNoDecision": true,
+    "optionalSuggestionDoesNotBlock": true,
+    "visibleMainPlanActions": [
+      "Add plan to calendar"
+    ],
+    "acceptedStatus": "accepted",
+    "linkedSessionCount": 2,
+    "distinctTaskCount": 2,
+    "sameGroup": true,
+    "overlapErrors": [],
+    "parallelCardsVisible": 2,
+    "sameTimelineRow": true,
+    "leftRightColumns": true,
+    "podcastTitleVisible": true,
+    "compactTaskTimeVisible": true,
+    "backendPersistenceProbe": "kept separate from the live schedule test"
+  }
+}

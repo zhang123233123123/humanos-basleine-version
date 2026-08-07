@@ -1,0 +1,240 @@
+[
+  {
+    "id": "evt_6433d4ee34c5",
+    "user_id": "user_3636485cfa97",
+    "type": "profile_upserted",
+    "payload_json": "{\"role\":\"硕士生\",\"deep_work_window\":\"09:00-11:30\",\"low_energy_window\":\"14:00-15:30\",\"control_preference\":\"ai_proposed_user_editable\",\"blocker_patterns\":[\"task_ambiguity\",\"fatigue\",\"context_loss\"],\"task_preferences\":{\"writing\":\"morning_deep_work\",\"admin\":\"low_energy_slots\",\"reading\":\"moderate_energy\",\"onboarding_completed\":false,\"planning_gap\":\"\",\"common_blockers\":[],\"preferred_session_minutes\":45,\"rest_between_tasks_minutes\":15,\"day_rhythm\":{\"morning_energy\":6,\"afternoon_energy\":4,\"evening_energy\":5},\"learning_mode\":\"reading_writing\",\"current_courses\":\"\",\"near_deadlines\":\"\",\"short_term_goal\":\"\",\"support_need\":\"clarify_next_action\"},\"weekly_context\":{\"week_of\":\"2026-08-03\",\"weekly_available_windows\":\"\",\"fixed_events\":[],\"context_items\":[],\"weekly_goal\":\"\",\"current_tasks\":\"\",\"temporary_constraints\":[],\"other_commitments\":[],\"task_deadlines\":[],\"weekly_note\":\"\",\"keep_buffer\":true,\"buffer_preference\":\"保留可调整时间与无任务时段\"},\"learned_patterns\":[],\"timezone\":\"Asia/Shanghai\",\"active_week_id\":null,\"active_plan_revision\":null,\"last_daily_checkin_date\":null,\"research_context\":{\"planning_tools\":[],\"primary_planning_tool\":null,\"planning_tool_use_frequency\":null,\"source\":\"user_self_report\",\"captured_at\":\"2026-08-03T08:45:00+08:00\",\"revision\":1},\"research_context_revision\":1}",
+    "created_at": 1785717900000
+  },
+  {
+    "id": "evt_5b8fdb3bc923",
+    "user_id": "user_3636485cfa97",
+    "type": "user_registered",
+    "payload_json": "{\"email\":\"clock-qa@example.com\"}",
+    "created_at": 1785717900000
+  },
+  {
+    "id": "evt_80a550e4864d",
+    "user_id": "user_3636485cfa97",
+    "type": "profile_upserted",
+    "payload_json": "{\"role\":\"student\",\"deep_work_window\":\"09:00-11:30\",\"low_energy_window\":\"14:00-15:30\",\"control_preference\":\"ai_proposed_user_editable\",\"blocker_patterns\":[\"task_ambiguity\",\"fatigue\",\"context_loss\"],\"task_preferences\":{\"onboarding_completed\":true,\"preferred_session_minutes\":45,\"rest_between_tasks_minutes\":15},\"weekly_context\":{\"week_id\":\"2026-08-03\",\"week_of\":\"2026-08-03\",\"available_windows\":[{\"day_index\":0,\"start\":8.0,\"end\":18.0},{\"day_index\":1,\"start\":8.0,\"end\":18.0},{\"day_index\":2,\"start\":8.0,\"end\":18.0},{\"day_index\":3,\"start\":8.0,\"end\":18.0},{\"day_index\":4,\"start\":8.0,\"end\":18.0},{\"day_index\":5,\"start\":9.0,\"end\":13.0}],\"weekly_available_windows\":\"Monday-Friday 08:00-18:00; Saturday 09:00-13:00\",\"context_items\":[{\"id\":\"ctx-lunch\",\"type\":\"recurring_routine\",\"title\":\"Lunch\",\"days\":[0,1,2,3,4,5,6],\"start\":12.0,\"end\":13.0,\"occurrence_mode\":\"repeat_every_day\",\"shift_minutes\":0,\"confirmed\":true},{\"id\":\"ctx-meeting\",\"type\":\"fixed_event\",\"title\":\"Research meeting\",\"days\":[1],\"start\":10.5,\"end\":11.5,\"confirmed\":true},{\"id\":\"ctx-out\",\"type\":\"temporary_constraint\",\"title\":\"Out of office\",\"days\":[3],\"start\":14.0,\"end\":17.0,\"confirmed\":true},{\"id\":\"ctx-laundry\",\"type\":\"flexible_activity\",\"title\":\"Laundry\",\"days\":[3],\"start\":17.0,\"end\":18.0,\"duration_minutes\":40,\"occurrence_mode\":\"once_this_week\",\"confirmed\":true,\"parallel_session\":{\"day_index\":3,\"start\":17.0,\"end\":17.5,\"parallel_group_id\":\"parallel-laundry-podcast\",\"parallel_context_ids\":[\"ctx-laundry\",\"ctx-podcast\"],\"allowed_overlap_minutes\":30,\"user_confirmed\":true}},{\"id\":\"ctx-podcast\",\"type\":\"flexible_activity\",\"title\":\"English podcast\",\"days\":[3],\"start\":17.0,\"end\":18.0,\"duration_minutes\":30,\"occurrence_mode\":\"once_this_week\",\"confirmed\":true,\"parallel_session\":{\"day_index\":3,\"start\":17.0,\"end\":17.5,\"parallel_group_id\":\"parallel-laundry-podcast\",\"parallel_context_ids\":[\"ctx-laundry\",\"ctx-podcast\"],\"allowed_overlap_minutes\":30,\"user_confirmed\":true}}],\"keep_buffer\":true,\"weekly_goal\":\"Complete a stable implementation and experiment design.\"},\"learned_patterns\":[],\"timezone\":\"Asia/Singapore\",\"active_week_id\":\"2026-08-03\",\"active_plan_revision\":null,\"last_daily_checkin_date\":null,\"research_context\":{\"planning_tools\":[{\"tool_type\":\"digital_calendar\",\"tool_name\":\"Google Calendar\",\"frequency\":\"daily\",\"reliance\":5},{\"tool_type\":\"task_manager\",\"tool_name\":\"Notion\",\"frequency\":\"weekly\",\"reliance\":3}],\"primary_planning_tool\":null,\"planning_tool_use_frequency\":null,\"source\":\"user_self_report\",\"revision\":2,\"captured_at\":\"2026-08-03T08:45:00+08:00\"},\"research_context_revision\":2}",
+    "created_at": 1785717900000
+  },
+  {
+    "id": "evt_455aa6e19b1e",
+    "user_id": "user_3636485cfa97",
+    "type": "task_created",
+    "payload_json": "{\"task_id\":\"T1\",\"title\":\"System implementation\"}",
+    "created_at": 1785717900000
+  },
+  {
+    "id": "evt_9ec015c2941e",
+    "user_id": "user_3636485cfa97",
+    "type": "task_created",
+    "payload_json": "{\"task_id\":\"T2\",\"title\":\"Experiment design\"}",
+    "created_at": 1785717900000
+  },
+  {
+    "id": "evt_7375ce223ff9",
+    "user_id": "user_3636485cfa97",
+    "type": "task_created",
+    "payload_json": "{\"task_id\":\"T3\",\"title\":\"Literature review\"}",
+    "created_at": 1785717900000
+  },
+  {
+    "id": "evt_28e7df32449b",
+    "user_id": "user_3636485cfa97",
+    "type": "task_created",
+    "payload_json": "{\"task_id\":\"T4\",\"title\":\"Email supervisor\"}",
+    "created_at": 1785717900000
+  },
+  {
+    "id": "evt_93c56283b571",
+    "user_id": "user_3636485cfa97",
+    "type": "task_created",
+    "payload_json": "{\"task_id\":\"T5\",\"title\":\"Analyze pilot data\"}",
+    "created_at": 1785717900000
+  },
+  {
+    "id": "evt_40f4e92014ae",
+    "user_id": "user_3636485cfa97",
+    "type": "plan_confirmed",
+    "payload_json": "{\"plan_id\":\"plan_8064eaafea75\",\"week_id\":\"2026-08-03\",\"plan_revision\":1}",
+    "created_at": 1785717900000
+  },
+  {
+    "id": "evt_442b650199ed",
+    "user_id": "user_3636485cfa97",
+    "type": "user_logged_in",
+    "payload_json": "{\"email\":\"clock-qa@example.com\"}",
+    "created_at": 1785717900000
+  },
+  {
+    "id": "evt_e3b3ad9e112d",
+    "user_id": "user_3636485cfa97",
+    "type": "runtime_state_saved",
+    "payload_json": "{\"id\":\"state_fef48cd6486b\",\"user_id\":\"user_3636485cfa97\",\"focus\":7,\"energy\":6,\"stress\":3,\"mood\":null,\"attention_residue\":\"\",\"emotion\":\"positive\",\"readiness\":\"unsure\",\"daily_note\":\"\",\"source\":\"self_report\",\"confidence_level\":\"high\",\"created_at\":1785717900000}",
+    "created_at": 1785717900000
+  },
+  {
+    "id": "evt_4d995335ecca",
+    "user_id": "user_3636485cfa97",
+    "type": "test_clock_advanced",
+    "payload_json": "{\"simulated_now\":\"2026-08-03T08:59:00+08:00\",\"week_id\":\"2026-08-03\",\"advance_minutes\":null,\"advance_days\":null,\"time_scale\":0.0}",
+    "created_at": 1785718740000
+  },
+  {
+    "id": "evt_98c209e620d4",
+    "user_id": "user_3636485cfa97",
+    "type": "test_clock_advanced",
+    "payload_json": "{\"simulated_now\":\"2026-08-03T09:00:00+08:00\",\"week_id\":\"2026-08-03\",\"advance_minutes\":null,\"advance_days\":null,\"time_scale\":0.0}",
+    "created_at": 1785718800000
+  },
+  {
+    "id": "evt_fde336ddc2e9",
+    "user_id": "user_3636485cfa97",
+    "type": "test_clock_advanced",
+    "payload_json": "{\"simulated_now\":\"2026-08-03T09:20:00+08:00\",\"week_id\":\"2026-08-03\",\"advance_minutes\":20,\"advance_days\":null,\"time_scale\":0.0}",
+    "created_at": 1785720000000
+  },
+  {
+    "id": "evt_8de691a8fe55",
+    "user_id": "user_3636485cfa97",
+    "type": "task_updated",
+    "payload_json": "{\"task_id\":\"T1\",\"patch\":{\"status\":\"paused\",\"checkpoints\":[{\"label\":\"Pause reason\",\"text\":\"interrupted\"},{\"label\":\"Current progress\",\"text\":\"Implemented the first integration boundary.\"},{\"label\":\"Next action\",\"text\":\"Continue with the test-clock API adapter.\"}],\"execution\":{\"original_estimate_minutes\":180,\"accumulated_actual_minutes\":0,\"remaining_duration_minutes\":160,\"progress_percent\":11,\"sessions\":[],\"scheduled_duration_minutes\":180,\"unallocated_schedule_minutes\":0,\"last_stop_reason\":\"interrupted\"},\"contextWindow\":{\"progress\":\"Implemented the first integration boundary.\",\"nextStep\":\"Continue with the test-clock API adapter.\",\"openQuestions\":\"\"}}}",
+    "created_at": 1785720000000
+  },
+  {
+    "id": "evt_f97412bbe6c2",
+    "user_id": "user_3636485cfa97",
+    "type": "context_dump_saved",
+    "payload_json": "{\"id\":\"dump_b2abfa818007\",\"user_id\":\"user_3636485cfa97\",\"task_id\":\"T1\",\"progress\":\"Implemented the first integration boundary.\",\"open_questions\":[],\"next_action\":\"Continue with the test-clock API adapter.\",\"stop_reason\":\"interrupted\",\"materials\":[],\"created_at\":1785720000000}",
+    "created_at": 1785720000000
+  },
+  {
+    "id": "evt_af18d6d38e6e",
+    "user_id": "user_3636485cfa97",
+    "type": "state_transition_recorded",
+    "payload_json": "{\"id\":\"transition_24381f30d3fc\",\"user_id\":\"user_3636485cfa97\",\"task_id\":\"T1\",\"before_state\":{\"task_id\":\"T1\",\"task_status\":\"running\",\"task_demand\":{\"estimated_cognitive_load\":\"medium\",\"expected_difficulty\":6,\"task_features\":{},\"evidence\":[\"user expected_difficulty=6/7\"],\"confidence_level\":\"high\",\"source\":\"user_self_report\",\"user_confirmed\":true},\"momentary_state\":{\"focus\":7,\"energy\":6,\"stress\":3,\"source\":\"self_report\"}},\"action\":{\"action\":\"switch_to_lighter_task\",\"label\":\"Switch to a lighter task\",\"detail\":\"Choose a shorter, lower-demand task that can be started now.\"},\"predicted_state\":{\"qualitative_outlook\":\"Choose a shorter, lower-demand task that can be started now.\",\"uncertainty\":\"medium\"},\"actual_state\":{},\"outcome\":{\"pending_execution_feedback\":true},\"created_at\":1785720000000}",
+    "created_at": 1785720000000
+  },
+  {
+    "id": "evt_1426ffb05d7e",
+    "user_id": "user_3636485cfa97",
+    "type": "task_updated",
+    "payload_json": "{\"task_id\":\"T1\",\"patch\":{\"id\":\"T1\",\"title\":\"System implementation\",\"due\":\"2026-08-07 18:00\",\"duration\":180,\"priority\":\"high\",\"status\":\"paused\",\"context\":\"Deterministic unified-clock QA fixture.\",\"slot\":{\"sessions\":[{\"block_id\":\"T1-MON-1\",\"task_id\":\"T1\",\"day_index\":0,\"start\":9,\"end\":9.75,\"session_minutes\":45,\"planned_work_minutes\":45,\"week_id\":\"2026-08-03\",\"plan_revision\":1,\"start_at\":\"2026-08-03T09:00:00+08:00\",\"end_at\":\"2026-08-03T09:45:00+08:00\",\"plan_status\":\"confirmed\",\"session_index\":1,\"session_count\":4,\"padding_minutes\":0},{\"block_id\":\"T1-MON-2\",\"task_id\":\"T1\",\"day_index\":0,\"start\":10,\"end\":10.75,\"session_minutes\":45,\"planned_work_minutes\":45,\"week_id\":\"2026-08-03\",\"plan_revision\":1,\"start_at\":\"2026-08-03T10:00:00+08:00\",\"end_at\":\"2026-08-03T10:45:00+08:00\",\"plan_status\":\"confirmed\",\"session_index\":2,\"session_count\":4,\"padding_minutes\":0},{\"block_id\":\"T1-WED-1\",\"task_id\":\"T1\",\"day_index\":2,\"start\":9,\"end\":9.75,\"session_minutes\":45,\"planned_work_minutes\":45,\"week_id\":\"2026-08-03\",\"plan_revision\":1,\"start_at\":\"2026-08-05T09:00:00+08:00\",\"end_at\":\"2026-08-05T09:45:00+08:00\",\"plan_status\":\"confirmed\",\"session_index\":3,\"session_count\":4,\"padding_minutes\":0},{\"block_id\":\"T1-FRI-1\",\"task_id\":\"T1\",\"day_index\":4,\"start\":9,\"end\":9.75,\"session_minutes\":45,\"planned_work_minutes\":45,\"week_id\":\"2026-08-03\",\"plan_revision\":1,\"start_at\":\"2026-08-07T09:00:00+08:00\",\"end_at\":\"2026-08-07T09:45:00+08:00\",\"plan_status\":\"confirmed\",\"session_index\":4,\"session_count\":4,\"padding_minutes\":0}],\"start\":9,\"end\":9.75,\"day_index\":0,\"color\":\"blue\"},\"checkpoints\":[{\"label\":\"Pause reason\",\"text\":\"Interrupted\"},{\"label\":\"Current progress\",\"text\":\"Implemented the first integration boundary.\"},{\"label\":\"Next step\",\"text\":\"Continue with the test-clock API adapter.\"}],\"contextWindow\":{\"taskType\":\"fixed_event\",\"deadline\":\"2026-08-07 18:00\",\"estimatedDuration\":180,\"timezone\":null,\"startAt\":null,\"deadlineAt\":null,\"deadlineAssumption\":null,\"progress\":\"Implemented the first integration boundary.\",\"nextStep\":\"Continue with the test-clock API adapter.\",\"openQuestions\":\"No open questions have been recorded.\",\"materials\":\"No materials are linked yet. Add papers, links, or filenames in the task context.\",\"recoveryCue\":\"Open the current materials at the scheduled time, then take the next action.\",\"decisionTrace\":null,\"interruption\":{\"stopped_at\":\"2026-08-03T01:20:00.000Z\",\"reason\":\"interrupted\",\"calendar_action\":\"keep\",\"released_session_count\":0,\"retained_session_count\":4,\"actual_minutes\":20}},\"type\":\"general\",\"cognitive_load\":\"medium\",\"ambiguity\":\"low\",\"switch_cost\":\"medium\",\"reentry_cost\":\"medium\",\"task_demand\":{\"estimated_cognitive_load\":\"medium\",\"expected_difficulty\":6,\"task_features\":{},\"evidence\":[\"user expected_difficulty=6/7\"],\"confidence_level\":\"high\",\"source\":\"user_self_report\",\"user_confirmed\":true},\"execution\":{\"original_estimate_minutes\":180,\"accumulated_actual_minutes\":20,\"remaining_duration_minutes\":160,\"progress_percent\":11,\"sessions\":[],\"scheduled_duration_minutes\":180,\"unallocated_schedule_minutes\":0,\"scheduled_capacity_minutes\":180,\"schedule_padding_minutes\":0,\"last_stop_reason\":\"interrupted\"},\"resource_modality\":[],\"parallelizable\":false,\"expected_difficulty\":6,\"task_type\":\"fixed_event\",\"week_id\":\"2026-08-03\",\"removed_from_week\":false,\"archived_at\":null,\"user_id\":\"user_3636485cfa97\"}}",
+    "created_at": 1785720000000
+  },
+  {
+    "id": "evt_786fcab830a2",
+    "user_id": "user_3636485cfa97",
+    "type": "test_clock_advanced",
+    "payload_json": "{\"simulated_now\":\"2026-08-03T09:35:00+08:00\",\"week_id\":\"2026-08-03\",\"advance_minutes\":15,\"advance_days\":null,\"time_scale\":0.0}",
+    "created_at": 1785720900000
+  },
+  {
+    "id": "evt_fc4804924efd",
+    "user_id": "user_3636485cfa97",
+    "type": "test_clock_advanced",
+    "payload_json": "{\"simulated_now\":\"2026-08-03T10:00:00+08:00\",\"week_id\":\"2026-08-03\",\"advance_minutes\":25,\"advance_days\":null,\"time_scale\":0.0}",
+    "created_at": 1785722400000
+  },
+  {
+    "id": "evt_2423616adbbc",
+    "user_id": "user_3636485cfa97",
+    "type": "task_updated",
+    "payload_json": "{\"task_id\":\"T1\",\"patch\":{\"execution\":{\"original_estimate_minutes\":180,\"accumulated_actual_minutes\":65,\"remaining_duration_minutes\":115,\"progress_percent\":11,\"sessions\":[{\"feedback_id\":\"feedback_e41f8a050142\",\"actual_minutes\":45,\"completion\":\"partial\",\"perceived_difficulty\":5}],\"scheduled_duration_minutes\":180,\"unallocated_schedule_minutes\":0,\"scheduled_capacity_minutes\":180,\"schedule_padding_minutes\":0,\"last_stop_reason\":\"interrupted\",\"last_perceived_difficulty\":5},\"task_demand\":{\"estimated_cognitive_load\":\"medium\",\"expected_difficulty\":6,\"task_features\":{},\"evidence\":[\"user expected_difficulty=6/7\"],\"confidence_level\":\"high\",\"source\":\"user_self_report\",\"user_confirmed\":true,\"calibration_history\":[{\"feedback_id\":\"feedback_e41f8a050142\",\"expected_difficulty\":6,\"perceived_difficulty\":5}],\"last_calibrated_at\":1785722400000},\"status\":\"queued\"}}",
+    "created_at": 1785722400000
+  },
+  {
+    "id": "evt_d86dd406ef05",
+    "user_id": "user_3636485cfa97",
+    "type": "execution_feedback_saved",
+    "payload_json": "{\"id\":\"feedback_e41f8a050142\",\"user_id\":\"user_3636485cfa97\",\"task_id\":\"T1\",\"trigger\":\"task_block_ended\",\"task_evaluation\":{\"completion\":\"partial\",\"actual_minutes\":45,\"perceived_difficulty\":5,\"remaining_duration_minutes\":115},\"state_evaluation\":{\"next_preference\":\"continue\",\"focus\":7,\"energy\":6,\"stress\":3,\"source\":\"self_report\"},\"recommendation_evaluation\":{\"rating\":\"helpful\"},\"parallel_evaluation\":null,\"execution_session_id\":\"exec_2a158a8c7a1d\",\"request_id\":\"feedback-exec_2a158a8c7a1d-1786077114892\",\"research_context_revision\":2,\"created_at\":1785722400000}",
+    "created_at": 1785722400000
+  },
+  {
+    "id": "evt_28b643b00d7c",
+    "user_id": "user_3636485cfa97",
+    "type": "user_logged_in",
+    "payload_json": "{\"email\":\"clock-qa@example.com\"}",
+    "created_at": 1785722400000
+  },
+  {
+    "id": "evt_acca84589650",
+    "user_id": "user_3636485cfa97",
+    "type": "task_updated",
+    "payload_json": "{\"task_id\":\"T4\",\"patch\":{\"execution\":{\"original_estimate_minutes\":30,\"accumulated_actual_minutes\":30,\"remaining_duration_minutes\":0,\"progress_percent\":0,\"sessions\":[{\"feedback_id\":\"feedback_94bdebc37ee1\",\"actual_minutes\":30,\"completion\":\"completed\",\"perceived_difficulty\":2}],\"scheduled_duration_minutes\":30,\"unallocated_schedule_minutes\":0,\"last_perceived_difficulty\":2},\"task_demand\":{\"estimated_cognitive_load\":\"low\",\"expected_difficulty\":2,\"task_features\":{},\"evidence\":[\"user expected_difficulty=2/7\"],\"confidence_level\":\"high\",\"source\":\"user_self_report\",\"user_confirmed\":true,\"calibration_history\":[{\"feedback_id\":\"feedback_94bdebc37ee1\",\"expected_difficulty\":2,\"perceived_difficulty\":2}],\"last_calibrated_at\":1785722400000},\"status\":\"completed\"}}",
+    "created_at": 1785722400000
+  },
+  {
+    "id": "evt_36fac423085b",
+    "user_id": "user_3636485cfa97",
+    "type": "execution_feedback_saved",
+    "payload_json": "{\"id\":\"feedback_94bdebc37ee1\",\"user_id\":\"user_3636485cfa97\",\"task_id\":\"T4\",\"trigger\":\"task_completed\",\"task_evaluation\":{\"completion\":\"completed\",\"actual_minutes\":30,\"perceived_difficulty\":2},\"state_evaluation\":{\"focus\":5,\"energy\":5,\"stress\":3},\"recommendation_evaluation\":{\"rating\":\"helpful\"},\"parallel_evaluation\":null,\"execution_session_id\":\"exec_afe95179ac5e\",\"request_id\":\"qa-completed\",\"research_context_revision\":2,\"created_at\":1785722400000}",
+    "created_at": 1785722400000
+  },
+  {
+    "id": "evt_2999d2674ca4",
+    "user_id": "user_3636485cfa97",
+    "type": "task_updated",
+    "payload_json": "{\"task_id\":\"T2\",\"patch\":{\"execution\":{\"original_estimate_minutes\":120,\"accumulated_actual_minutes\":0,\"remaining_duration_minutes\":120,\"progress_percent\":0,\"sessions\":[{\"feedback_id\":\"feedback_c26dc92ce221\",\"actual_minutes\":0,\"completion\":\"not_started\",\"perceived_difficulty\":6}],\"scheduled_duration_minutes\":120,\"unallocated_schedule_minutes\":0,\"last_perceived_difficulty\":6},\"task_demand\":{\"estimated_cognitive_load\":\"medium\",\"expected_difficulty\":6,\"task_features\":{},\"evidence\":[\"user expected_difficulty=6/7\"],\"confidence_level\":\"high\",\"source\":\"user_self_report\",\"user_confirmed\":true,\"calibration_history\":[{\"feedback_id\":\"feedback_c26dc92ce221\",\"expected_difficulty\":6,\"perceived_difficulty\":6}],\"last_calibrated_at\":1785722400000},\"status\":\"queued\"}}",
+    "created_at": 1785722400000
+  },
+  {
+    "id": "evt_854ff500dc15",
+    "user_id": "user_3636485cfa97",
+    "type": "execution_feedback_saved",
+    "payload_json": "{\"id\":\"feedback_c26dc92ce221\",\"user_id\":\"user_3636485cfa97\",\"task_id\":\"T2\",\"trigger\":\"task_completed\",\"task_evaluation\":{\"completion\":\"not_started\",\"actual_minutes\":0,\"perceived_difficulty\":6},\"state_evaluation\":{\"focus\":2,\"energy\":2,\"stress\":6},\"recommendation_evaluation\":{\"rating\":\"not_helpful\"},\"parallel_evaluation\":null,\"execution_session_id\":\"exec_81357af7349d\",\"request_id\":\"qa-not-started\",\"research_context_revision\":2,\"created_at\":1785722400000}",
+    "created_at": 1785722400000
+  },
+  {
+    "id": "evt_d2eb2539a8d9",
+    "user_id": "user_3636485cfa97",
+    "type": "test_clock_advanced",
+    "payload_json": "{\"simulated_now\":\"2026-08-04T08:00:00+08:00\",\"week_id\":\"2026-08-03\",\"advance_minutes\":null,\"advance_days\":null,\"time_scale\":0.0}",
+    "created_at": 1785801600000
+  },
+  {
+    "id": "evt_9761b0aebe79",
+    "user_id": "user_3636485cfa97",
+    "type": "runtime_state_saved",
+    "payload_json": "{\"id\":\"state_93a1d3942c6d\",\"user_id\":\"user_3636485cfa97\",\"focus\":5,\"energy\":4,\"stress\":5,\"mood\":null,\"attention_residue\":\"\",\"emotion\":\"neutral\",\"readiness\":\"unsure\",\"daily_note\":\"\",\"source\":\"self_report\",\"confidence_level\":\"high\",\"created_at\":1785801600000}",
+    "created_at": 1785801600000
+  },
+  {
+    "id": "evt_edb44d931567",
+    "user_id": "user_3636485cfa97",
+    "type": "user_logged_in",
+    "payload_json": "{\"email\":\"clock-qa@example.com\"}",
+    "created_at": 1785801600000
+  },
+  {
+    "id": "evt_6021b0523a79",
+    "user_id": "user_3636485cfa97",
+    "type": "test_clock_advanced",
+    "payload_json": "{\"simulated_now\":\"2026-08-09T23:59:00+08:00\",\"week_id\":\"2026-08-03\",\"advance_minutes\":null,\"advance_days\":null,\"time_scale\":0.0}",
+    "created_at": 1786291140000
+  },
+  {
+    "id": "evt_476208dd64e9",
+    "user_id": "user_3636485cfa97",
+    "type": "test_clock_advanced",
+    "payload_json": "{\"simulated_now\":\"2026-08-10T00:00:00+08:00\",\"week_id\":\"2026-08-10\",\"advance_minutes\":1,\"advance_days\":null,\"time_scale\":0.0}",
+    "created_at": 1786291200000
+  },
+  {
+    "id": "evt_bdf5be4ea6fc",
+    "user_id": "user_3636485cfa97",
+    "type": "task_updated",
+    "payload_json": "{\"task_id\":\"T1\",\"patch\":{\"due\":\"2026-08-08 18:00\"}}",
+    "created_at": 1785974400000
+  },
+  {
+    "id": "evt_f88de93cbd8b",
+    "user_id": "user_3636485cfa97",
+    "type": "plan_confirmed",
+    "payload_json": "{\"plan_id\":\"plan_c3db13461bdf\",\"week_id\":\"2026-08-03\",\"plan_revision\":2}",
+    "created_at": 1785974400000
+  }
+]

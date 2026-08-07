@@ -1,0 +1,20 @@
+{
+  "header": "Today · Friday 7 August",
+  "state": "Confirmed",
+  "now": "Session endedAnalyze interview transcripts08:20–09:05 · 0 min tracked automaticallyHow did it go?Did not startStart now",
+  "afterCount": 1,
+  "summary": "1 work sessions · 45 min work0 min buffer protected0 conflicts",
+  "railOverflow": "auto",
+  "calendarOverflow": "auto",
+  "compactStrip": false,
+  "mainButtons": [
+    {
+      "text": "Did not start",
+      "height": 50
+    },
+    {
+      "text": "Start now",
+      "height": 36
+    }
+  ]
+}

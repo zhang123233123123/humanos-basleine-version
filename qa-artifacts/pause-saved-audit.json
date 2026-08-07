@@ -1,0 +1,10 @@
+{
+  "mode": "plan",
+  "toast": "Pause saved · continuation set for 09:30.",
+  "sessionId": "exec_6dee5142c435",
+  "taskStatus": "paused",
+  "caption": "Worked 20 min · Paused · resumes 09:30",
+  "scope": "today_after_pause",
+  "changed": 1,
+  "confirmLabel": "Update today"
+}

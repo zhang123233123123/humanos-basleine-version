@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: humanos-backend
+    runtime: python
+    region: frankfurt
+    plan: starter
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: python backend/humanos_server.py
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_MODEL
+        value: deepseek-chat
+      - key: HUMANOS_DB_PATH
+        value: /var/data/humanos.db
+    disk:
+      name: humanos-data
+      mountPath: /var/data
+      sizeGB: 1

@@ -1,0 +1,131 @@
+{
+  "version": 1,
+  "timezone": "Asia/Singapore",
+  "week_id": "2026-08-03",
+  "qa_user": {
+    "id": "user_2e2141ddbca9",
+    "email": "clock-qa@example.com",
+    "password": "testing123"
+  },
+  "scenarios": [
+    {
+      "id": "base",
+      "label": "Base reset",
+      "kind": "snapshot",
+      "simulated_time": "2026-08-03T08:45:00+08:00",
+      "database": "base.db",
+      "description": "Independent baseline before the first session.",
+      "ui_hint": null
+    },
+    {
+      "id": "before_15",
+      "label": "Session -15 min",
+      "kind": "snapshot",
+      "simulated_time": "2026-08-03T08:45:00+08:00",
+      "database": "before_15.db",
+      "description": "Fifteen minutes before the first session.",
+      "ui_hint": null
+    },
+    {
+      "id": "ready",
+      "label": "Ready",
+      "kind": "snapshot",
+      "simulated_time": "2026-08-03T09:00:00+08:00",
+      "database": "ready.db",
+      "description": "Session is ready but has not been started.",
+      "ui_hint": null
+    },
+    {
+      "id": "running_20",
+      "label": "Running 20 min",
+      "kind": "snapshot",
+      "simulated_time": "2026-08-03T09:20:00+08:00",
+      "database": "running_20.db",
+      "description": "The user explicitly started the session 20 minutes ago.",
+      "ui_hint": null
+    },
+    {
+      "id": "paused",
+      "label": "Paused",
+      "kind": "snapshot",
+      "simulated_time": "2026-08-03T09:25:00+08:00",
+      "database": "paused.db",
+      "description": "The user explicitly paused after 20 minutes.",
+      "ui_hint": null
+    },
+    {
+      "id": "ended",
+      "label": "Ended \u00b7 feedback due",
+      "kind": "snapshot",
+      "simulated_time": "2026-08-03T09:45:00+08:00",
+      "database": "ended.db",
+      "description": "The session ended and still needs feedback.",
+      "ui_hint": null
+    },
+    {
+      "id": "partial_feedback",
+      "label": "Partial feedback",
+      "kind": "snapshot",
+      "simulated_time": "2026-08-03T09:46:00+08:00",
+      "database": "partial_feedback.db",
+      "description": "Partial completion feedback has been saved.",
+      "ui_hint": null
+    },
+    {
+      "id": "plan_edit",
+      "label": "Plan edit",
+      "kind": "snapshot",
+      "simulated_time": "2026-08-03T08:45:00+08:00",
+      "database": "plan_edit.db",
+      "description": "Open a confirmed task for a QA plan edit.",
+      "ui_hint": {
+        "type": "open_task",
+        "task_id": "T1"
+      }
+    },
+    {
+      "id": "rationale_prompt",
+      "label": "Rationale prompt",
+      "kind": "snapshot",
+      "simulated_time": "2026-08-03T08:45:00+08:00",
+      "database": "rationale_prompt.db",
+      "description": "Show the optional research rationale prompt for a draft edit.",
+      "ui_hint": {
+        "type": "rationale_prompt",
+        "summary": {
+          "moved": 1,
+          "resized": 0,
+          "added": 0,
+          "removed": 0
+        }
+      }
+    },
+    {
+      "id": "plan_v2",
+      "label": "Plan v2 confirmed",
+      "kind": "snapshot",
+      "simulated_time": "2026-08-03T08:45:00+08:00",
+      "database": "plan_v2.db",
+      "description": "A second confirmed plan revision replaces future v1 sessions.",
+      "ui_hint": null
+    },
+    {
+      "id": "sunday_2359",
+      "label": "Sunday 23:59",
+      "kind": "snapshot",
+      "simulated_time": "2026-08-09T23:59:00+08:00",
+      "database": "sunday_2359.db",
+      "description": "One minute before the ISO week changes.",
+      "ui_hint": null
+    },
+    {
+      "id": "new_week",
+      "label": "New week",
+      "kind": "snapshot",
+      "simulated_time": "2026-08-10T00:00:00+08:00",
+      "database": "new_week.db",
+      "description": "The clock entered a new week; rollover remains a user decision.",
+      "ui_hint": null
+    }
+  ]
+}

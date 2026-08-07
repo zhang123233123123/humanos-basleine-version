@@ -1,0 +1,12 @@
+{
+  "passed": true,
+  "task_id_preserved": true,
+  "illegal_drag_rejected": true,
+  "legal_move_recorded": true,
+  "undo_recorded": true,
+  "rationale_asked_once": true,
+  "v1_status": "superseded",
+  "v2_status": "confirmed",
+  "old_ready_sessions_retired": true,
+  "active_v2_ready_sessions": 6
+}

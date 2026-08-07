@@ -1,0 +1,134 @@
+{
+  "account": {
+    "user_id": "user_e72c47def734",
+    "email": "777@gmail.com"
+  },
+  "profile": {
+    "user_id": "user_e72c47def734",
+    "role": "master_student",
+    "deep_work_window": "09:00-11:30",
+    "low_energy_window": "14:00-15:30",
+    "control_preference": "ai_proposed_user_editable",
+    "timezone": "Asia/Shanghai",
+    "task_preferences": {
+      "onboarding_completed": true,
+      "preferred_session_minutes": 45,
+      "rest_between_tasks_minutes": 15,
+      "day_rhythm": {
+        "morning_energy": 6,
+        "afternoon_energy": 5,
+        "evening_energy": 3
+      },
+      "learning_mode": "reading_writing",
+      "recovery_preference": "ai_proposed_user_editable"
+    },
+    "weekly_context": {
+      "week_of": "2026-08-03",
+      "weekly_available_windows": "周四 08:00-23:00；周五 09:00-22:00；周六 06:30-16:00",
+      "current_tasks": "Review supervisor comments, Revise literature review, Analyze interview transcripts, Create findings diagram, Write findings section, Prepare supervisor update, Format references and figures",
+      "fixed_events": [
+        "Fixed 周四 21:00-22:00 research meeting",
+        "Routine 每天 12:00-13:00 lunch",
+        "Flexible 每天 Listen to English speeches duration 30 minutes",
+        "Flexible 每天 do the laundry duration 40 minutes"
+      ],
+      "context_items": [
+        {
+          "id": "context-syy7-research-meeting",
+          "type": "fixed_event",
+          "category": "fixed_event",
+          "title": "research meeting",
+          "day": "周四",
+          "days": [3],
+          "start": 21,
+          "end": 22,
+          "duration_minutes": 60,
+          "shift_minutes": 0,
+          "confirmed": true,
+          "confidence": "high",
+          "source": "user",
+          "evidence": ["Provided by the user"]
+        },
+        {
+          "id": "context-syy7-lunch",
+          "type": "recurring_routine",
+          "category": "recurring_routine",
+          "title": "lunch",
+          "day": "每天",
+          "days": [0, 1, 2, 3, 4, 5, 6],
+          "start": 12,
+          "end": 13,
+          "duration_minutes": 60,
+          "shift_minutes": 30,
+          "confirmed": true,
+          "confidence": "high",
+          "source": "user",
+          "evidence": ["Provided by the user"]
+        },
+        {
+          "id": "context-syy7-english-speeches",
+          "type": "flexible_activity",
+          "category": "flexible_activity",
+          "title": "Listen to English speeches",
+          "day": "每天",
+          "days": [0, 1, 2, 3, 4, 5, 6],
+          "start": null,
+          "end": null,
+          "duration_minutes": 30,
+          "shift_minutes": 0,
+          "confirmed": true,
+          "confidence": "high",
+          "source": "user",
+          "evidence": ["Provided by the user"]
+        },
+        {
+          "id": "context-syy7-laundry",
+          "type": "flexible_activity",
+          "category": "flexible_activity",
+          "title": "do the laundry",
+          "day": "每天",
+          "days": [0, 1, 2, 3, 4, 5, 6],
+          "start": null,
+          "end": null,
+          "duration_minutes": 40,
+          "shift_minutes": 0,
+          "confirmed": true,
+          "confidence": "high",
+          "source": "user",
+          "evidence": ["Provided by the user"]
+        }
+      ],
+      "weekly_goal": "Complete a reviewable first draft of my paper by Saturday 14:00.",
+      "temporary_constraints": [],
+      "other_commitments": [],
+      "task_deadlines": [
+        "Review supervisor comments: 周四 15:00前完成",
+        "Revise literature review: 周五 17:00前完成",
+        "Analyze interview transcripts: 周五 18:00前完成",
+        "Create findings diagram: 周六 11:00前完成",
+        "Write findings section: 周六 13:00前完成",
+        "Prepare supervisor update: 周五 17:30前完成",
+        "Format references and figures: 周六 14:00前完成"
+      ],
+      "weekly_note": "",
+      "keep_buffer": true,
+      "buffer_preference": "Keep adjustable buffer and unscheduled time"
+    }
+  },
+  "runtime_state": {
+    "user_id": "user_e72c47def734",
+    "focus": 3,
+    "energy": 4,
+    "stress": 6,
+    "emotion": "neutral"
+  },
+  "tasks": [
+    {"title": "Review supervisor comments", "due": "周四 15:00前完成", "duration": 45, "priority": "高", "expected_difficulty": 4, "cognitive_load": "medium"},
+    {"title": "Revise literature review", "due": "周五 17:00前完成", "duration": 120, "priority": "高", "expected_difficulty": 6, "cognitive_load": "high"},
+    {"title": "Analyze interview transcripts", "due": "周五 18:00前完成", "duration": 150, "priority": "高", "expected_difficulty": 6, "cognitive_load": "high"},
+    {"title": "Create findings diagram", "due": "周六 11:00前完成", "duration": 75, "priority": "中", "expected_difficulty": 4, "cognitive_load": "medium"},
+    {"title": "Write findings section", "due": "周六 13:00前完成", "duration": 120, "priority": "高", "expected_difficulty": 6, "cognitive_load": "high"},
+    {"title": "Prepare supervisor update", "due": "周五 17:30前完成", "duration": 45, "priority": "高", "expected_difficulty": 4, "cognitive_load": "medium"},
+    {"title": "Format references and figures", "due": "周六 14:00前完成", "duration": 45, "priority": "中", "expected_difficulty": 2, "cognitive_load": "low"}
+  ]
+}

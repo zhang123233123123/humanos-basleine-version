@@ -1,0 +1,146 @@
+[
+  {
+    "id": "exec_2a158a8c7a1d",
+    "task_id": "T1",
+    "block_id": "T1-MON-1",
+    "plan_revision": 1,
+    "status": "completed",
+    "planned_start_at": "2026-08-03T09:00:00+08:00",
+    "planned_end_at": "2026-08-03T09:45:00+08:00"
+  },
+  {
+    "id": "exec_3dc3f725be36",
+    "task_id": "T1",
+    "block_id": "T1-MON-2",
+    "plan_revision": 1,
+    "status": "superseded",
+    "planned_start_at": "2026-08-03T10:00:00+08:00",
+    "planned_end_at": "2026-08-03T10:45:00+08:00"
+  },
+  {
+    "id": "exec_16d96ca7728f",
+    "task_id": "T3",
+    "block_id": "T3-MON-1",
+    "plan_revision": 1,
+    "status": "superseded",
+    "planned_start_at": "2026-08-03T11:00:00+08:00",
+    "planned_end_at": "2026-08-03T11:45:00+08:00"
+  },
+  {
+    "id": "exec_afe95179ac5e",
+    "task_id": "T4",
+    "block_id": "T4-TUE-1",
+    "plan_revision": 1,
+    "status": "completed",
+    "planned_start_at": "2026-08-04T09:00:00+08:00",
+    "planned_end_at": "2026-08-04T09:30:00+08:00"
+  },
+  {
+    "id": "exec_e4a4f3f7b54c",
+    "task_id": "T1",
+    "block_id": "T1-WED-1",
+    "plan_revision": 1,
+    "status": "superseded",
+    "planned_start_at": "2026-08-05T09:00:00+08:00",
+    "planned_end_at": "2026-08-05T09:45:00+08:00"
+  },
+  {
+    "id": "exec_23602969dd07",
+    "task_id": "T2",
+    "block_id": "T2-WED-1",
+    "plan_revision": 1,
+    "status": "superseded",
+    "planned_start_at": "2026-08-05T10:00:00+08:00",
+    "planned_end_at": "2026-08-05T10:45:00+08:00"
+  },
+  {
+    "id": "exec_ea0d65a1479c",
+    "task_id": "T3",
+    "block_id": "T3-WED-1",
+    "plan_revision": 1,
+    "status": "superseded",
+    "planned_start_at": "2026-08-05T14:00:00+08:00",
+    "planned_end_at": "2026-08-05T14:45:00+08:00"
+  },
+  {
+    "id": "exec_21d719273a9f",
+    "task_id": "T2",
+    "block_id": "T2-THU-1",
+    "plan_revision": 1,
+    "status": "superseded",
+    "planned_start_at": "2026-08-06T09:00:00+08:00",
+    "planned_end_at": "2026-08-06T09:45:00+08:00"
+  },
+  {
+    "id": "exec_be4893b8d526",
+    "task_id": "T1",
+    "block_id": "T1-FRI-1",
+    "plan_revision": 1,
+    "status": "superseded",
+    "planned_start_at": "2026-08-07T09:00:00+08:00",
+    "planned_end_at": "2026-08-07T09:45:00+08:00"
+  },
+  {
+    "id": "exec_81357af7349d",
+    "task_id": "T2",
+    "block_id": "T2-SAT-1",
+    "plan_revision": 1,
+    "status": "not_started",
+    "planned_start_at": "2026-08-08T09:00:00+08:00",
+    "planned_end_at": "2026-08-08T09:30:00+08:00"
+  },
+  {
+    "id": "exec_f0633a57af84",
+    "task_id": "T3",
+    "block_id": "T3-V2-1",
+    "plan_revision": 2,
+    "status": "ready",
+    "planned_start_at": "2026-08-06T10:00:00+08:00",
+    "planned_end_at": "2026-08-06T11:30:00+08:00"
+  },
+  {
+    "id": "exec_b6a1ee450fbb",
+    "task_id": "T1",
+    "block_id": "T1-V2-1",
+    "plan_revision": 2,
+    "status": "ready",
+    "planned_start_at": "2026-08-07T08:00:00+08:00",
+    "planned_end_at": "2026-08-07T08:45:00+08:00"
+  },
+  {
+    "id": "exec_0345c04dfabc",
+    "task_id": "T1",
+    "block_id": "T1-V2-2",
+    "plan_revision": 2,
+    "status": "ready",
+    "planned_start_at": "2026-08-07T10:00:00+08:00",
+    "planned_end_at": "2026-08-07T10:45:00+08:00"
+  },
+  {
+    "id": "exec_4a8edae6a083",
+    "task_id": "T1",
+    "block_id": "T1-V2-3",
+    "plan_revision": 2,
+    "status": "ready",
+    "planned_start_at": "2026-08-07T11:00:00+08:00",
+    "planned_end_at": "2026-08-07T11:30:00+08:00"
+  },
+  {
+    "id": "exec_bdcde8ea13d0",
+    "task_id": "T2",
+    "block_id": "T2-V2-1",
+    "plan_revision": 2,
+    "status": "ready",
+    "planned_start_at": "2026-08-07T13:00:00+08:00",
+    "planned_end_at": "2026-08-07T13:45:00+08:00"
+  },
+  {
+    "id": "exec_19305f39babb",
+    "task_id": "T2",
+    "block_id": "T2-V2-2",
+    "plan_revision": 2,
+    "status": "ready",
+    "planned_start_at": "2026-08-08T09:00:00+08:00",
+    "planned_end_at": "2026-08-08T10:15:00+08:00"
+  }
+]
