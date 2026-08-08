@@ -11,6 +11,7 @@ import { useModal } from '@/hooks/use-modal'
 import { toast } from 'sonner'
 import { useEvents } from '@/hooks/use-events'
 import { useTranslation } from '@/i18n/LanguageProvider'
+import { apiRequest } from '@/lib/client/api'
 
 type ExtendedProps = {
   description: string
@@ -43,7 +44,7 @@ export function ExpandableEvent(props: EventContentArg) {
       id: event.id,
     }
 
-    await fetch('/api/tasks', {
+    await apiRequest('/api/tasks', {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
@@ -52,7 +53,6 @@ export function ExpandableEvent(props: EventContentArg) {
     })
 
     await refetchEvents()
-
     toast(t('event.eventDeleted'))
   }
 

@@ -85,6 +85,8 @@ function InspectorContent({ task, onConfirm, onReject, onSave }: TaskInspectorPr
     { value: 'running', label: t('taskDialog.statusRunning') },
     { value: 'paused', label: t('taskDialog.statusPaused') },
     { value: 'completed', label: t('taskDialog.statusCompleted') },
+    { value: 'blocked', label: 'Blocked' },
+    { value: 'terminated', label: 'Terminated' },
   ]
 
   const priorityOptions = [
@@ -107,6 +109,8 @@ function InspectorContent({ task, onConfirm, onReject, onSave }: TaskInspectorPr
     try {
       await onSave(buildTask())
       toast(t('workspace.saved'))
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Failed to save task')
     } finally {
       setSaving(false)
     }
@@ -117,6 +121,8 @@ function InspectorContent({ task, onConfirm, onReject, onSave }: TaskInspectorPr
     setConfirming(true)
     try {
       await onConfirm(buildTask())
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Failed to confirm task')
     } finally {
       setConfirming(false)
     }

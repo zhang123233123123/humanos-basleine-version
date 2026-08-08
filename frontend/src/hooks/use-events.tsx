@@ -54,16 +54,26 @@ export const useEvents = create<State & Actions>((set, get) => ({
       }
 
       set((state) => {
-        const updatedEvents = [...state.events]
-        newEvents.forEach((newEvent) => {
-          const index = updatedEvents.findIndex((e) => e.id === newEvent.id)
-          if (index !== -1) {
-            updatedEvents[index] = newEvent
-          } else {
-            updatedEvents.push(newEvent)
-          }
+        const overlapsFetchedRange = (event: EventInput) => {
+          const eventStart = new Date(event.start as string | Date).getTime()
+          const eventEnd = new Date((event.end || event.start) as string | Date).getTime()
+          if (!Number.isFinite(eventStart) || !Number.isFinite(eventEnd)) return false
+          return rangesToFetch.some((range) => {
+            const rangeStart = Date.parse(range.start)
+            const rangeEnd = Date.parse(range.end)
+            return eventStart < rangeEnd && eventEnd > rangeStart
+          })
+        }
+
+        const retained = state.events.filter(
+          (event) => event.extendedProps?.isPreview || !overlapsFetchedRange(event),
+        )
+        const byId = new Map<string, EventInput>()
+        ;[...retained, ...newEvents].forEach((event) => {
+          const key = String(event.id || `${event.title}-${event.start}`)
+          byId.set(key, event)
         })
-        return { events: updatedEvents }
+        return { events: Array.from(byId.values()) }
       })
 
       if (start && end) {
@@ -81,7 +91,9 @@ export const useEvents = create<State & Actions>((set, get) => ({
         })
       }
     } catch (error) {
-      toast('Failed to fetch events')
+      const message = error instanceof Error ? error.message : 'Failed to fetch events'
+      toast(message)
+      throw error
     }
   },
   isRangeCached: (start: string, end: string) => {

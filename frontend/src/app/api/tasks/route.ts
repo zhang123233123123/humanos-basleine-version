@@ -34,7 +34,9 @@ function normalizeStatus(value: unknown): HumanOSMapEventInput['extendedProps'][
 }
 
 function normalizePriority(value: unknown): string {
-  const raw = String(value || 'medium').toLowerCase().trim()
+  const aliases: Record<string, string> = { 高: 'high', 中: 'medium', 低: 'low' }
+  const input = String(value || 'medium').toLowerCase().trim()
+  const raw = aliases[input] || input
   if (['high', 'medium', 'low'].includes(raw)) return raw
   return 'medium'
 }
@@ -71,7 +73,7 @@ function buildWindowDefault(task: HumanOSTask): Date {
   return now
 }
 
-function mapTaskToEvent(task: HumanOSTask): HumanOSMapEventInput {
+function mapTaskToEvent(task: HumanOSTask): HumanOSMapEventInput | null {
   const contextWindow = readContextWindow(task)
   const candidateStart =
     toISOString(task.start_at) ||
@@ -79,27 +81,16 @@ function mapTaskToEvent(task: HumanOSTask): HumanOSMapEventInput {
     toISOString(contextWindow.start_at) ||
     toISOString(task.start_time) ||
     toISOString(task.start) ||
-    parseDateField(task.due)?.toISOString() ||
     null
-  let start = parseDateField(String(task.due || '') )?.toISOString() || candidateStart
+  const start = candidateStart
   let end =
-    toISOString(task.deadline_at) ||
-    toISOString(contextWindow.deadlineAt) ||
-    toISOString(contextWindow.deadline_at) ||
-    toISOString(task.deadline) ||
     toISOString(task.end_time) ||
     toISOString(task.end) ||
     null
 
-  if (!start) {
-    const byText = parseDateField(task.context || '') || parseDateField(task.title)
-    if (byText) start = byText.toISOString()
-  }
-
-  if (!start) {
-    const fallback = buildWindowDefault(task)
-    start = fallback.toISOString()
-  }
+  // A deadline is not a scheduled calendar start. Queued tasks without an
+  // explicit start belong in the task list, not in an invented 09:00 slot.
+  if (!start) return null
 
   if (!end) {
     const minutes = estimateMinutes(task)
@@ -159,7 +150,14 @@ function normalizePayloadForBackend(body: any): Record<string, unknown> {
   const normalized = { ...body } as Record<string, unknown>
 
   if (body.start !== undefined && body.start_at === undefined) normalized.start_at = toISOString(body.start)
-  if (body.end !== undefined && body.deadline_at === undefined) normalized.deadline_at = toISOString(body.end)
+  if (body.start && body.end) {
+    const start = new Date(body.start).getTime()
+    const end = new Date(body.end).getTime()
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+      normalized.duration = Math.max(Math.round((end - start) / 60000), 1)
+      normalized.estimated_duration = normalized.duration
+    }
+  }
   if (body.summary !== undefined && !normalized.title) normalized.title = body.summary
 
   const contextWindow = {
@@ -176,8 +174,8 @@ function normalizePayloadForBackend(body: any): Record<string, unknown> {
   if (body.duration != null && body.estimated_duration == null) normalized.estimated_duration = asNumber(body.duration)
 
   if (body.due) {
-    const dueStart = toISOString(body.due)
-    if (!normalized.start_at && dueStart) normalized.start_at = dueStart
+    const deadline = toISOString(body.due) || parseDateField(String(body.due))?.toISOString()
+    if (!normalized.deadline_at && deadline) normalized.deadline_at = deadline
   }
 
   return normalized
@@ -214,6 +212,7 @@ export async function GET(req: Request) {
     const tasks = parseTaskArrayFromBackend(taskData).filter((task) => !isPreviewTask(task))
     const events = tasks
       .map((task) => mapTaskToEvent(task))
+      .filter((event): event is HumanOSMapEventInput => event !== null)
       .filter((event) => filterInRange(event, start || undefined, end || undefined))
     return Response.json({ events })
   } catch (error) {

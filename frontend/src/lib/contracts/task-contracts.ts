@@ -8,7 +8,16 @@ export type HumanOSTaskStatus =
   | 'blocked'
   | string
 
-export type CalendarStatus = 'pending' | 'queued' | 'scheduled' | 'running' | 'paused' | 'completed' | 'blocked' | 'terminated' | string
+export type CalendarStatus =
+  | 'pending'
+  | 'queued'
+  | 'scheduled'
+  | 'running'
+  | 'paused'
+  | 'completed'
+  | 'blocked'
+  | 'terminated'
+  | string
 
 export interface HumanOSTaskExecutionSnapshot {
   original_estimate_minutes?: number | null

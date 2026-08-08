@@ -19,6 +19,7 @@ import { TaskInspector } from '@/components/task-inspector'
 import { TaskReminder } from '@/hooks/use-task-reminders'
 import { Button } from '@/components/ui/button'
 import { Plus } from 'lucide-react'
+import { apiRequest } from '@/lib/client/api'
 
 export interface CalendarEvent {
   id: string
@@ -53,13 +54,8 @@ function TaskInspectorWrapper() {
     nextStep?: string
     openQuestions?: string
   }) => {
-    // Remove preview from calendar (use getState for fresh events)
     const previewId = activeEvent?.uniqueId
-    if (previewId) {
-      setEvents(useEvents.getState().events.filter((e) => e.id !== previewId))
-    }
-
-    await fetch('/api/tasks', {
+    await apiRequest('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -74,8 +70,11 @@ function TaskInspectorWrapper() {
         open_questions: task.openQuestions || '',
       }),
     })
+    if (previewId) {
+      setEvents(useEvents.getState().events.filter((event) => event.id !== previewId))
+      removeFromPreviewTasks(previewId)
+    }
     toast(t('event.eventUpdated'))
-    if (previewId) removeFromPreviewTasks(previewId)
     setActiveEvent(null)
     await refetchEvents(currentStart, currentEnd)
   }
@@ -376,13 +375,19 @@ function AppContent({
       summary: event.event.title,
       attendees: event.event.extendedProps.attendees,
       description: event.event.extendedProps.description,
+      status: event.event.extendedProps.status || 'scheduled',
     }
-    await fetch('/api/tasks', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(eventData),
-    })
-    toast(t('event.eventUpdated'))
+    try {
+      await apiRequest('/api/tasks', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(eventData),
+      })
+      toast(t('event.eventUpdated'))
+    } catch (error) {
+      event.revert()
+      toast(error instanceof Error ? error.message : 'Failed to update event')
+    }
   }
 
   const handleSendMessage = async (message: string) => {

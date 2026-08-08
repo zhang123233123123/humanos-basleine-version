@@ -2344,7 +2344,10 @@ class Store:
             patch["due"] = patch["deadline"]
         if "estimated_duration" in patch and "duration" not in patch:
             patch["duration"] = patch["estimated_duration"]
-        scheduling_keys = {"due", "duration", "priority", "expected_difficulty", "cognitive_load", "task_demand", "dependency"}
+        scheduling_keys = {
+            "due", "start_at", "deadline_at", "duration", "priority",
+            "expected_difficulty", "cognitive_load", "task_demand", "dependency",
+        }
         schedule_changed = any(key in patch and patch.get(key) != current.get(key) for key in scheduling_keys)
         allowed = {
             "title",
@@ -2377,21 +2380,41 @@ class Store:
             updates["slot_json"] = as_json(patch["slot"])
         if "checkpoints" in patch:
             updates["checkpoints_json"] = as_json(patch["checkpoints"])
-        if "contextWindow" in patch or "context_window" in patch:
+        if (
+            "contextWindow" in patch
+            or "context_window" in patch
+            or "start_at" in patch
+            or "deadline_at" in patch
+        ):
             current_window = current.get("contextWindow") or {}
             incoming_window = patch.get("contextWindow") or patch.get("context_window") or {}
             if not isinstance(current_window, dict):
                 current_window = {}
             if not isinstance(incoming_window, dict):
                 incoming_window = {}
-            updates["context_window_json"] = as_json({**current_window, **incoming_window})
-        if any(key in patch for key in ("deadline", "estimated_duration", "task_type", "taskType")):
+            context_window = {**current_window, **incoming_window}
+            if "start_at" in patch:
+                context_window["startAt"] = patch.get("start_at")
+            if "deadline_at" in patch:
+                context_window["deadlineAt"] = patch.get("deadline_at")
+            updates["context_window_json"] = as_json(context_window)
+        if any(
+            key in patch
+            for key in (
+                "deadline", "start_at", "deadline_at", "estimated_duration",
+                "task_type", "taskType",
+            )
+        ):
             context_window = {
                 **(current.get("contextWindow") or {}),
                 **(patch.get("contextWindow") or patch.get("context_window") or {}),
             }
             if "deadline" in patch:
                 context_window["deadline"] = patch["deadline"]
+            if "start_at" in patch:
+                context_window["startAt"] = patch.get("start_at")
+            if "deadline_at" in patch:
+                context_window["deadlineAt"] = patch.get("deadline_at")
             if "estimated_duration" in patch:
                 context_window["estimatedDuration"] = patch["estimated_duration"]
             if "task_type" in patch or "taskType" in patch:

@@ -11,6 +11,7 @@ import { Clock, Text, Users, Pencil, Trash2 } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
+import { apiRequest } from '@/lib/client/api'
 
 export function ExpandedEventModal() {
   const { activeEvent, setActiveEvent } = useModal()
@@ -62,7 +63,7 @@ export function ExpandedEventModal() {
 
   const handleDelete = async () => {
     if (!activeEvent.id) return
-    await fetch('/api/tasks', {
+    await apiRequest('/api/tasks', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: activeEvent.id }),
