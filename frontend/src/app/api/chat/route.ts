@@ -1,8 +1,6 @@
-import { getServerSession } from 'next-auth'
-import authOptions from '@/app/api/auth/[...nextauth]/authOptions'
 import * as chrono from 'chrono-node'
-
-const HUMANOS_BACKEND = process.env.HUMANOS_BACKEND_URL || 'http://localhost:8787'
+import { humanosErrorResponse, humanosRequest } from '@/lib/server/humanos-api'
+import { getHumanOSUserId, unauthorizedResponse } from '@/lib/server/humanos-user'
 
 function parseDateField(text: string | null | undefined): string | null {
   if (!text) return null
@@ -48,11 +46,8 @@ function enrichTaskDates(task: any): any {
 
 export async function POST(req: Request) {
   try {
-    const session = await getServerSession(authOptions)
-
-    if (!session || !session.user?.email) {
-      return Response.json({ error: 'Not authenticated' }, { status: 401 })
-    }
+    const userId = await getHumanOSUserId()
+    if (!userId) return unauthorizedResponse()
 
     const body = await req.json()
     const { message, thread_id } = body
@@ -61,26 +56,12 @@ export async function POST(req: Request) {
       return Response.json({ error: 'message is required' }, { status: 400 })
     }
 
-    const res = await fetch(`${HUMANOS_BACKEND}/api/chat/turn`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        user_id: session.user.email,
+    const data: any = await humanosRequest('POST', '/api/chat/turn', {
+        user_id: userId,
         text: message,
         thread_id: thread_id || undefined,
         current_time: new Date().toISOString(),
-      }),
     })
-
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}))
-      return Response.json(
-        { error: errData.message || 'HumanOS backend error' },
-        { status: 500 },
-      )
-    }
-
-    const data = await res.json()
 
     // Enrich task dates using chrono-node before returning to client
     if (data.turn?.tasks && Array.isArray(data.turn.tasks)) {
@@ -88,7 +69,7 @@ export async function POST(req: Request) {
     }
 
     return Response.json(data)
-  } catch (error: any) {
-    return Response.json({ error: error.message }, { status: 500 })
+  } catch (error) {
+    return humanosErrorResponse(error)
   }
 }

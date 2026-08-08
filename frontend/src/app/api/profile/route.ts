@@ -1,41 +1,25 @@
-import { getServerSession } from 'next-auth'
-import authOptions from '@/app/api/auth/[...nextauth]/authOptions'
-
-const HUMANOS_BACKEND = process.env.HUMANOS_BACKEND_URL || 'http://localhost:8787'
+import { humanosErrorResponse, humanosRequest } from '@/lib/server/humanos-api'
+import { getHumanOSUserId, unauthorizedResponse } from '@/lib/server/humanos-user'
 
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions)
-    const userEmail = session?.user?.email || 'demo'
-
-    const url = new URL(`${HUMANOS_BACKEND}/api/profile`)
-    url.searchParams.set('user_id', userEmail)
-
-    const res = await fetch(url)
-    if (!res.ok) throw new Error('HumanOS backend error')
-    const data = await res.json()
+    const userId = await getHumanOSUserId()
+    if (!userId) return unauthorizedResponse()
+    const data = await humanosRequest('GET', `/api/profile?user_id=${encodeURIComponent(userId)}`)
     return Response.json(data)
-  } catch (error: any) {
-    return Response.json({ error: error.message }, { status: 500 })
+  } catch (error) {
+    return humanosErrorResponse(error)
   }
 }
 
 export async function PUT(req: Request) {
   try {
-    const session = await getServerSession(authOptions)
-    const userEmail = session?.user?.email || 'demo'
-
+    const userId = await getHumanOSUserId()
+    if (!userId) return unauthorizedResponse()
     const body = await req.json()
-    const res = await fetch(`${HUMANOS_BACKEND}/api/profile`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...body, user_id: userEmail }),
-    })
-
-    if (!res.ok) throw new Error('HumanOS backend error')
-    const data = await res.json()
+    const data = await humanosRequest('PUT', '/api/profile', { ...body, user_id: userId })
     return Response.json(data)
-  } catch (error: any) {
-    return Response.json({ error: error.message }, { status: 500 })
+  } catch (error) {
+    return humanosErrorResponse(error)
   }
 }

@@ -1,9 +1,7 @@
-import { getServerSession } from 'next-auth'
-import authOptions from '@/app/api/auth/[...nextauth]/authOptions'
 import * as chrono from 'chrono-node'
 import type { HumanOSTask, HumanOSMapEventInput } from '@/lib/contracts/task-contracts'
-
-const HUMANOS_BACKEND = process.env.HUMANOS_BACKEND_URL || 'http://localhost:8787'
+import { humanosErrorResponse, humanosRequest } from '@/lib/server/humanos-api'
+import { getHumanOSUserId, unauthorizedResponse } from '@/lib/server/humanos-user'
 
 function parseDateField(text: string | null | undefined): Date | null {
   if (!text) return null
@@ -185,24 +183,6 @@ function normalizePayloadForBackend(body: any): Record<string, unknown> {
   return normalized
 }
 
-async function proxyRequest(method: string, path: string, body?: Record<string, unknown>) {
-  const response = await fetch(`${HUMANOS_BACKEND}${path}`, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  })
-
-  const data = await response.json().catch(() => ({}))
-  if (!response.ok) {
-    const message =
-      (typeof data?.error === 'string' && data.error) ||
-      (typeof data?.message === 'string' && data.message) ||
-      'HumanOS backend error'
-    throw new Error(message)
-  }
-  return data
-}
-
 function withUserQuery(url: string, userEmail: string | undefined): string {
   const target = new URL(url, `http://localhost`)
   if (userEmail) target.searchParams.set('user_id', userEmail)
@@ -221,57 +201,51 @@ function parseTaskArrayFromBackend(raw: unknown): HumanOSTask[] {
 }
 
 export async function GET(req: Request) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.email) {
-    return Response.json({ events: [] })
-  }
+  const userId = await getHumanOSUserId()
+  if (!userId) return unauthorizedResponse()
 
   const { searchParams } = new URL(req.url)
   const start = searchParams.get('start')
   const end = searchParams.get('end')
 
   try {
-    const query = withUserQuery('/api/tasks', session.user.email)
-    const taskData = await proxyRequest('GET', query)
+    const query = withUserQuery('/api/tasks', userId)
+    const taskData = await humanosRequest('GET', query)
     const tasks = parseTaskArrayFromBackend(taskData).filter((task) => !isPreviewTask(task))
     const events = tasks
       .map((task) => mapTaskToEvent(task))
       .filter((event) => filterInRange(event, start || undefined, end || undefined))
     return Response.json({ events })
-  } catch (error: any) {
-    return Response.json({ error: error.message }, { status: 500 })
+  } catch (error) {
+    return humanosErrorResponse(error)
   }
 }
 
 export async function POST(req: Request) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.email) {
-    return Response.json({ error: 'Not authenticated' }, { status: 401 })
-  }
+  const userId = await getHumanOSUserId()
+  if (!userId) return unauthorizedResponse()
 
   try {
     const body = await req.json().catch(() => ({}))
     const normalized = normalizePayloadForBackend({
       ...body,
-      user_id: session.user.email,
+      user_id: userId,
       status: body?.status || 'queued',
     })
-    const data = await proxyRequest('POST', '/api/tasks', normalized)
+    const data: any = await humanosRequest('POST', '/api/tasks', normalized)
     const payload = data.task || data
     if (data.task) {
       return Response.json({ task: payload })
     }
     return Response.json(data)
-  } catch (error: any) {
-    return Response.json({ error: error.message }, { status: 500 })
+  } catch (error) {
+    return humanosErrorResponse(error)
   }
 }
 
 export async function PUT(req: Request) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.email) {
-    return Response.json({ error: 'Not authenticated' }, { status: 401 })
-  }
+  const userId = await getHumanOSUserId()
+  if (!userId) return unauthorizedResponse()
 
   try {
     const body = await req.json().catch(() => ({}))
@@ -282,14 +256,14 @@ export async function PUT(req: Request) {
 
     const normalized = normalizePayloadForBackend({
       ...body,
-      user_id: session.user.email,
+      user_id: userId,
     })
     delete (normalized as { id?: unknown }).id
-    const data = await proxyRequest('PATCH', `/api/tasks/${taskId}`, normalized)
+    const data: any = await humanosRequest('PATCH', `/api/tasks/${taskId}`, normalized)
     const payload = data.task || data
     return Response.json({ task: payload })
-  } catch (error: any) {
-    return Response.json({ error: error.message }, { status: 500 })
+  } catch (error) {
+    return humanosErrorResponse(error)
   }
 }
 
@@ -298,10 +272,8 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.email) {
-    return Response.json({ error: 'Not authenticated' }, { status: 401 })
-  }
+  const userId = await getHumanOSUserId()
+  if (!userId) return unauthorizedResponse()
 
   try {
     const body = await req.json().catch(() => ({}))
@@ -310,9 +282,9 @@ export async function DELETE(req: Request) {
       return Response.json({ error: 'Task id is required' }, { status: 400 })
     }
 
-    const data = await proxyRequest('DELETE', `/api/tasks/${taskId}?user_id=${encodeURIComponent(session.user.email)}`)
+    const data = await humanosRequest('DELETE', `/api/tasks/${taskId}?user_id=${encodeURIComponent(userId)}`)
     return Response.json(data)
-  } catch (error: any) {
-    return Response.json({ error: error.message }, { status: 500 })
+  } catch (error) {
+    return humanosErrorResponse(error)
   }
 }
