@@ -246,6 +246,18 @@ const zh = {
     startsIn: '{n} 分钟后开始',
     viewTask: '查看',
   },
+  planning: {
+    title: '本周运行计划', subtitle: '把可用时间、任务与约束整理成一份经过验证、由你确认的可执行计划。', workspace: '返回工作台',
+    setup: '设置', review: '审阅', confirmed: '已确认', loadFailed: '加载周计划失败', untitledTask: '未命名任务',
+    newWeek: '新的一周已经开始', newWeekDescription: '选择要带入本周的未完成任务。', startWeek: '开始新一周', weekStarted: '已开始新一周', rolloverFailed: '周切换失败',
+    weekContext: '本周上下文', weekContextDescription: '这些信息决定计划的硬边界与偏好。', weeklyGoal: '本周目标', availableWindows: '可用时间', temporaryConstraints: '临时约束（每行一项）', keepBuffer: '保留可调整的缓冲时间',
+    weekTasks: '本周任务', weekTasksDescription: '确认 Deadline、总时长和优先级。', noTasks: '本周暂无未完成任务。', taskTitle: '任务名称', deadline: '截止时间',
+    saveSetup: '保存设置', setupSaved: '本周设置已保存', saveFailed: '保存设置失败', generate: '生成候选计划', generateFailed: '计划生成失败', aiUnavailable: 'AI 计划生成功能当前不可用',
+    reviewTitle: '审阅候选 Session', reviewDescription: '调整后必须重新验证，确认前不会写入正式日历。', backToSetup: '返回设置', validate: '验证计划', confirm: '确认计划',
+    validation: '约束验证', validPlan: '计划通过全部硬约束', invalidPlan: '计划存在约束冲突', notValidated: '修改后请重新验证', validateFailed: '计划验证失败',
+    unscheduled: '尚未排入的任务', rationaleRequired: '请说明调整计划的原因', whyChanged: '为什么这样调整？', whyChangedDescription: '你的说明用于理解本次修改，不会自动成为长期偏好。', submitRationale: '提交说明并确认', confirmFailed: '确认计划失败',
+    confirmedTitle: '本周计划已确认', confirmedDescription: '正式 Session 已保存，可以回到工作台查看和执行。', revision: '版本', openCalendar: '打开日历', revise: '重新设置',
+  },
 }
 
 export default zh

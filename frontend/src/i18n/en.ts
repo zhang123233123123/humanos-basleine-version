@@ -246,6 +246,18 @@ const en = {
     startsIn: 'starts in {n} min',
     viewTask: 'View',
   },
+  planning: {
+    title: 'Weekly Operating Plan', subtitle: 'Turn availability, tasks, and constraints into a validated plan that you explicitly confirm.', workspace: 'Back to workspace',
+    setup: 'Setup', review: 'Review', confirmed: 'Confirmed', loadFailed: 'Failed to load weekly plan', untitledTask: 'Untitled task',
+    newWeek: 'A new week has started', newWeekDescription: 'Choose which unfinished tasks to carry into this week.', startWeek: 'Start new week', weekStarted: 'New week started', rolloverFailed: 'Failed to roll over week',
+    weekContext: 'Weekly context', weekContextDescription: 'These inputs define the plan boundaries and preferences.', weeklyGoal: 'Weekly goal', availableWindows: 'Available windows', temporaryConstraints: 'Temporary constraints (one per line)', keepBuffer: 'Keep adjustable buffer time',
+    weekTasks: 'Weekly tasks', weekTasksDescription: 'Confirm each deadline, total duration, and priority.', noTasks: 'No unfinished tasks for this week.', taskTitle: 'Task title', deadline: 'Deadline',
+    saveSetup: 'Save setup', setupSaved: 'Weekly setup saved', saveFailed: 'Failed to save setup', generate: 'Generate candidate plan', generateFailed: 'Failed to generate plan', aiUnavailable: 'AI plan generation is currently unavailable',
+    reviewTitle: 'Review candidate sessions', reviewDescription: 'Edits must be revalidated and are not persisted until confirmation.', backToSetup: 'Back to setup', validate: 'Validate plan', confirm: 'Confirm plan',
+    validation: 'Constraint validation', validPlan: 'Plan passes all hard constraints', invalidPlan: 'Plan has constraint conflicts', notValidated: 'Validate again after editing', validateFailed: 'Plan validation failed',
+    unscheduled: 'Unscheduled tasks', rationaleRequired: 'Explain why you adjusted the plan', whyChanged: 'Why did you change it?', whyChangedDescription: 'Your explanation applies to this edit and is not automatically a long-term preference.', submitRationale: 'Submit rationale and confirm', confirmFailed: 'Failed to confirm plan',
+    confirmedTitle: 'Weekly plan confirmed', confirmedDescription: 'Formal sessions are saved and ready in your workspace.', revision: 'Revision', openCalendar: 'Open calendar', revise: 'Revise setup',
+  },
 }
 
 export default en
