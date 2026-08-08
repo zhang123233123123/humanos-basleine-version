@@ -384,6 +384,15 @@ function AppContent({
 
   const { t } = useTranslation()
   const { activeEvent, setActiveEvent, setPreviewTasks } = useModal()
+  const [pendingCalendarEdit, setPendingCalendarEdit] = useState<{
+    taskId: string
+    before: { start: string | null; end: string | null }
+    after: { start: string | null; end: string | null }
+    eventType: 'move_session' | 'resize_session'
+    revert: () => void
+  } | null>(null)
+  const [calendarEditReason, setCalendarEditReason] = useState('')
+  const [savingCalendarEdit, setSavingCalendarEdit] = useState(false)
 
   const handleDatesSet = useCallback(
     async (arg: DatesSetArg) => {
@@ -413,25 +422,121 @@ function AppContent({
       return
     }
 
-    const eventData = {
-      id: event.event.id,
-      start: event.event.start,
-      end: event.event.end,
-      summary: event.event.title,
-      attendees: event.event.extendedProps.attendees,
-      description: event.event.extendedProps.description,
-      status: event.event.extendedProps.status || 'scheduled',
-    }
+    const oldEvent = event.oldEvent
+    setPendingCalendarEdit({
+      taskId: String(event.event.extendedProps.taskId || event.event.id),
+      before: { start: oldEvent.start?.toISOString() || null, end: oldEvent.end?.toISOString() || null },
+      after: { start: event.event.start?.toISOString() || null, end: event.event.end?.toISOString() || null },
+      eventType: 'oldEvent' in event && event.event.start?.getTime() === oldEvent.start?.getTime()
+        ? 'resize_session'
+        : 'move_session',
+      revert: () => event.revert(),
+    })
+  }
+
+  const cancelCalendarEdit = () => {
+    pendingCalendarEdit?.revert()
+    setPendingCalendarEdit(null)
+    setCalendarEditReason('')
+  }
+
+  const saveCalendarEdit = async () => {
+    if (!pendingCalendarEdit || savingCalendarEdit) return
+    setSavingCalendarEdit(true)
+    const reason = calendarEditReason.trim()
     try {
-      await apiRequest('/api/tasks', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(eventData),
-      })
+      const active = await apiRequest<any>('/api/plans/active')
+      const basePlan = active?.plan
+      const basePatch = basePlan?.plan_patch || []
+      const originalBlock = basePatch.find((block: any) => String(block.task_id) === pendingCalendarEdit.taskId)
+
+      if (basePlan?.plan_id && originalBlock) {
+        const revisedResult = await apiRequest<any>('/api/plans/revise', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan_id: basePlan.plan_id, request_id: `drag-${Date.now()}` }),
+        })
+        const revised = revisedResult.plan
+        const nextStart = new Date(pendingCalendarEdit.after.start || '')
+        const nextEnd = new Date(pendingCalendarEdit.after.end || '')
+        const mondayIndex = (nextStart.getDay() + 6) % 7
+        const nextPatch = (revised.plan_patch || []).map((block: any) => {
+          if (String(block.block_id) !== String(originalBlock.block_id)) return block
+          return {
+            ...block,
+            day_index: mondayIndex,
+            start: nextStart.getHours() + nextStart.getMinutes() / 60,
+            end: nextEnd.getHours() + nextEnd.getMinutes() / 60,
+            start_at: nextStart.toISOString(),
+            end_at: nextEnd.toISOString(),
+            session_minutes: Math.max(Math.round((nextEnd.getTime() - nextStart.getTime()) / 60000), 1),
+          }
+        })
+        await apiRequest('/api/plan-edits/events', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            edit_episode_id: revised.edit_episode_id,
+            task_id: pendingCalendarEdit.taskId,
+            block_id: originalBlock.block_id,
+            event_type: pendingCalendarEdit.eventType,
+            before: pendingCalendarEdit.before,
+            after: pendingCalendarEdit.after,
+            interaction_source: 'calendar_drag',
+            request_id: `edit-${Date.now()}`,
+          }),
+        })
+        const validationResult = await apiRequest<any>('/api/schedules/validate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...revised, plan_patch: nextPatch }),
+        })
+        const validation = validationResult.validation || validationResult
+        if (validation.valid === false) throw new Error(validation.violations?.[0]?.message || 'This time conflicts with the plan constraints')
+        await apiRequest('/api/schedules/confirm', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            plan_id: revised.plan_id,
+            week_id: revised.week_id,
+            edit_episode_id: revised.edit_episode_id,
+            decision: revised,
+            plan_patch: nextPatch,
+            rationale: {
+              reason_codes: reason ? ['user_reported_schedule_change'] : [],
+              raw_user_response: reason,
+              parsed_reason: { raw_text: reason, reason_codes: reason ? ['user_reported_schedule_change'] : [] },
+              affected_task_ids: [pendingCalendarEdit.taskId],
+              response_status: reason ? 'answered' : 'skipped',
+              generalizability: 'not_sure',
+              request_id: `rationale-${Date.now()}`,
+            },
+          }),
+        })
+      } else {
+        await apiRequest('/api/tasks', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: pendingCalendarEdit.taskId,
+            start: pendingCalendarEdit.after.start,
+            end: pendingCalendarEdit.after.end,
+            context_window: {
+              last_schedule_change: {
+                before: pendingCalendarEdit.before,
+                after: pendingCalendarEdit.after,
+                reason,
+                response_status: reason ? 'answered' : 'skipped',
+                interaction_source: 'calendar_drag',
+              },
+            },
+          }),
+        })
+      }
+      setPendingCalendarEdit(null)
+      setCalendarEditReason('')
+      await refetchEvents(currentStart, currentEnd)
       toast(t('event.eventUpdated'))
     } catch (error) {
-      event.revert()
-      toast(error instanceof Error ? error.message : 'Failed to update event')
+      pendingCalendarEdit.revert()
+      toast(error instanceof Error ? error.message : 'Failed to save calendar change')
+    } finally {
+      setSavingCalendarEdit(false)
     }
   }
 
@@ -627,6 +732,17 @@ function AppContent({
         <Plus className="w-5 h-5 mr-1" />
         {t('workspace.addTask')}
       </Button>
+      {pendingCalendarEdit && (
+        <div className="fixed inset-0 z-[100] grid place-items-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl border bg-background p-5 shadow-2xl">
+            <h3 className="text-lg font-semibold">Why did you adjust this task?</h3>
+            <p className="mt-1 text-sm text-muted-foreground">The reason is optional and applies only to this schedule change.</p>
+            <div className="mt-4 flex flex-wrap gap-2">{['Time conflict', 'Energy level', 'Priority changed', 'Availability changed', 'Duration changed'].map((reason) => <Button key={reason} type="button" size="sm" variant={calendarEditReason === reason ? 'default' : 'outline'} onClick={() => setCalendarEditReason(reason)}>{reason}</Button>)}</div>
+            <textarea className="mt-4 min-h-24 w-full rounded-md border bg-background p-3 text-sm" placeholder="Optional explanation" value={calendarEditReason} onChange={(event) => setCalendarEditReason(event.target.value)} />
+            <div className="mt-4 flex justify-end gap-2"><Button variant="outline" onClick={cancelCalendarEdit} disabled={savingCalendarEdit}>Cancel and restore</Button><Button onClick={() => void saveCalendarEdit()} disabled={savingCalendarEdit}>{calendarEditReason.trim() ? 'Save change' : 'Skip reason and save'}</Button></div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

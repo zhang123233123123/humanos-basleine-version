@@ -2954,6 +2954,29 @@ class Store:
             conn.execute("UPDATE plans SET plan_json=? WHERE id=?", (as_json(stored), plan_id))
         return stored
 
+    def revise_plan(self, user_id: str, payload: dict) -> dict:
+        base_plan_id = str(payload.get("plan_id") or "").strip()
+        if not base_plan_id:
+            raise ValueError("plan_id is required")
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM plans WHERE id=? AND user_id=? AND plan_status IN ('confirmed','needs_update')",
+                (base_plan_id, user_id),
+            ).fetchone()
+        if not row:
+            raise KeyError(base_plan_id)
+        decision = from_json(row["plan_json"], {})
+        decision.pop("plan_id", None)
+        decision.pop("plan_revision", None)
+        decision.pop("confirmed_at", None)
+        decision["base_plan_id"] = base_plan_id
+        request_id = str(payload.get("request_id") or "").strip() or new_id("revise")
+        return self.save_proposed_plan(
+            user_id,
+            decision,
+            {"week_id": row["week_id"], "request_id": request_id},
+        )
+
     def confirm_plan(self, user_id: str, payload: dict) -> dict:
         plan_id = str(payload.get("plan_id") or "")
         plan_patch = list(payload.get("plan_patch") or [])
@@ -5464,6 +5487,13 @@ class Handler(BaseHTTPRequestHandler):
                     scenario_id = "base" if path.endswith("/reset") else str(payload.get("scenario_id") or "")
                     self.send_json(restore_qa_scenario(scenario_id))
                     return
+
+            if path == "/api/plans/revise" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                store.ensure_profile(user_id)
+                self.send_json({"plan": store.revise_plan(user_id, payload)}, status=201)
+                return
 
             if path == "/api/auth/register" and method == "POST":
                 payload = self.read_json()
