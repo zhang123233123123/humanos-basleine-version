@@ -258,6 +258,16 @@ const en = {
     unscheduled: 'Unscheduled tasks', rationaleRequired: 'Explain why you adjusted the plan', whyChanged: 'Why did you change it?', whyChangedDescription: 'Your explanation applies to this edit and is not automatically a long-term preference.', submitRationale: 'Submit rationale and confirm', confirmFailed: 'Failed to confirm plan',
     confirmedTitle: 'Weekly plan confirmed', confirmedDescription: 'Formal sessions are saved and ready in your workspace.', revision: 'Revision', openCalendar: 'Open calendar', revise: 'Revise setup',
   },
+  execution: {
+    title: 'Focus Execution', subtitle: 'Advance one explicit session at a time while keeping pause, end, and task completion distinct.', workspace: 'Back to workspace', loadFailed: 'Failed to load execution state', untitledTask: 'Untitled task',
+    mode_up_next: 'Up next', mode_running: 'Running', mode_paused: 'Paused', mode_empty: 'No active execution', mode_none: 'No active execution', mode_idle: 'No active execution',
+    started: 'Session started', startFailed: 'Failed to start', paused: 'Session paused', pauseFailed: 'Failed to pause', ended: 'Session ended. Submit feedback next.', endFailed: 'Failed to end session',
+    elapsed: 'Elapsed this session', planned: 'Planned', remaining: 'Session remaining', pause: 'Pause', resume: 'Resume', start: 'Start focus', end: 'End session',
+    context: 'Task context', noContext: 'No task context available.', nextStep: 'First step when returning', schedule: 'Schedule',
+    noSession: 'No executable session', noSessionDescription: 'Confirm a weekly plan before HumanOS creates formal execution sessions.', openPlan: 'Open weekly plan',
+    feedbackTitle: 'What actually happened in this session?', feedbackDescription: 'Ending a session does not complete the task. Record the actual result and state.', completion: 'Completion', partial: 'Partially completed', completed: 'Task completed', actualMinutes: 'Actual minutes', remainingMinutes: 'Task minutes remaining', difficulty: 'Actual difficulty', focusAfter: 'Focus after', energyAfter: 'Energy after', stressAfter: 'Stress after', timingFit: 'Timing fit', lengthFit: 'Session length', good: 'Good', tooEarly: 'Too early', tooLate: 'Too late', appropriate: 'Appropriate', tooShort: 'Too short', tooLong: 'Too long', saveFeedback: 'Save feedback', feedbackSaved: 'Execution feedback saved', feedbackFailed: 'Failed to save feedback',
+    history: 'Execution history', historyDescription: 'Session status and timing persisted by the backend.', noHistory: 'No execution history yet.',
+  },
 }
 
 export default en

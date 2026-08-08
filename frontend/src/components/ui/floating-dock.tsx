@@ -4,7 +4,7 @@ import { Chat } from '@/components/chat'
 import { cn } from '@/lib/utils'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useMemo, useState } from 'react'
-import { CalendarRange, Home, Settings, Sparkles } from 'lucide-react'
+import { CalendarRange, Home, Settings, Sparkles, Timer } from 'lucide-react'
 import { useChat } from '@/hooks/use-chat'
 import { useDevice } from '@/hooks/use-device'
 import { Badge } from '@/components/ui/badge'
@@ -23,6 +23,11 @@ export const FloatingDock = () => {
       title: 'Weekly Plan',
       icon: <CalendarRange size={24} />,
       href: '/app/plan',
+    },
+    {
+      title: 'Focus',
+      icon: <Timer size={24} />,
+      href: '/app/focus',
     },
     {
       title: 'Assistant (Q)',
@@ -45,7 +50,7 @@ export const FloatingDock = () => {
       return isMobile ? '100vw' : '500px'
     }
 
-    return isMobile ? '64px' : '360px'
+    return isMobile ? '64px' : '440px'
   }, [chatOpen, isMobile])
 
   const height = useMemo(() => {

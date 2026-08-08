@@ -258,6 +258,16 @@ const zh = {
     unscheduled: '尚未排入的任务', rationaleRequired: '请说明调整计划的原因', whyChanged: '为什么这样调整？', whyChangedDescription: '你的说明用于理解本次修改，不会自动成为长期偏好。', submitRationale: '提交说明并确认', confirmFailed: '确认计划失败',
     confirmedTitle: '本周计划已确认', confirmedDescription: '正式 Session 已保存，可以回到工作台查看和执行。', revision: '版本', openCalendar: '打开日历', revise: '重新设置',
   },
+  execution: {
+    title: '专注执行', subtitle: '一次只推进一个明确的 Session，暂停、结束和完成保持清晰边界。', workspace: '返回工作台', loadFailed: '加载执行状态失败', untitledTask: '未命名任务',
+    mode_up_next: '下一项', mode_running: '执行中', mode_paused: '已暂停', mode_empty: '当前无执行', mode_none: '当前无执行', mode_idle: '当前无执行',
+    started: 'Session 已开始', startFailed: '开始失败', paused: 'Session 已暂停', pauseFailed: '暂停失败', ended: 'Session 已结束，请提交反馈', endFailed: '结束失败',
+    elapsed: '本次已执行', planned: '计划时长', remaining: 'Session 剩余', pause: '暂停', resume: '继续', start: '开始专注', end: '结束 Session',
+    context: '任务上下文', noContext: '暂无任务上下文。', nextStep: '回来后的第一步', schedule: '计划信息',
+    noSession: '当前没有可执行 Session', noSessionDescription: '先确认一份周计划，系统才会创建正式的执行 Session。', openPlan: '打开周计划',
+    feedbackTitle: '这次 Session 实际发生了什么？', feedbackDescription: '结束 Session 不会自动完成任务，请根据实际结果更新任务和状态。', completion: '完成情况', partial: '部分完成', completed: '任务已完成', actualMinutes: '实际分钟数', remainingMinutes: '任务剩余分钟数', difficulty: '实际难度', focusAfter: '结束后专注', energyAfter: '结束后精力', stressAfter: '结束后压力', timingFit: '时间是否合适', lengthFit: 'Session 长度', good: '合适', tooEarly: '太早', tooLate: '太晚', appropriate: '合适', tooShort: '太短', tooLong: '太长', saveFeedback: '保存反馈', feedbackSaved: '执行反馈已保存', feedbackFailed: '保存反馈失败',
+    history: '执行记录', historyDescription: '后端保存的 Session 状态与时间。', noHistory: '暂无执行记录。',
+  },
 }
 
 export default zh
