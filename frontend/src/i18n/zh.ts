@@ -274,6 +274,11 @@ const zh = {
     leaveBreadcrumbs: '保存中断现场', leaveBreadcrumbsDescription: '这些字段直接写入任务 Context Dump。', missingTask: '缺少需要关联的任务 ID。', progress: '已经完成了什么', progressPercent: '当前进度百分比', remainingMinutes: '任务剩余分钟数', nextAction: '恢复后的第一步', nextActionPlaceholder: '例如：从第 12 条访谈引文继续编码', nextActionRequired: '请填写恢复后的第一步', openQuestions: '未解决问题', stopReason: '中断原因', interrupted: '被打断', fatigue: '疲劳', blocked: '任务阻塞', contextSwitch: '切换到其他任务', externalEvent: '外部事件', saveContext: '保存中断上下文', contextSaved: '中断上下文已保存', contextFailed: '保存中断上下文失败',
     generateReentry: '生成恢复提示', reentryFailed: '生成恢复提示失败', reentryTitle: '恢复提示', reentryDescription: '优先使用你保存的第一步，而不是重新猜测。', firstStep: '第一步', savedProgress: '上次进度', remaining: '预计剩余', returnToFocus: '返回专注执行', reentryEmpty: '保存中断上下文后，可以在这里生成恢复提示。',
   },
+  insights: {
+    title: '行为洞察与记忆', subtitle: '查看系统观察到的重复情景，并由你决定哪些规律可以成为长期偏好。', workspace: '返回工作台', loadFailed: '加载洞察失败', confirmedPatterns: '已确认规律', confirmedDescription: '只有你明确确认的规律才会影响长期 Profile。', noConfirmed: '还没有已确认的长期规律。', evidenceCount: '证据次数', confirmedOn: '确认于',
+    candidatePatterns: '候选观察', candidateDescription: '这些是系统观察，不是关于你的既定事实。', noCandidates: '还没有形成候选观察。', episodes: '次相似情景', readyForReview: '等待确认', gatheringEvidence: '继续收集证据', confirmationNotice: '确认后才会写入长期偏好。', moreDaysRequired: '需要更多跨日证据后才能建议提升。', confirmPattern: '确认规律', confirmed: '已确认', patternConfirmed: '规律已由你确认', promoteFailed: '确认规律失败',
+    memorySearch: '个性化记忆搜索', memoryDescription: '搜索任务、执行、中断和反馈形成的可检索摘要。', searchPlaceholder: '例如：什么方法帮助我在中断后恢复？', search: '搜索记忆', searchFailed: '搜索记忆失败', noMemories: '没有找到相关记忆。', taskLinked: '关联任务',
+  },
 }
 
 export default zh

@@ -4,7 +4,7 @@ import { Chat } from '@/components/chat'
 import { cn } from '@/lib/utils'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useMemo, useState } from 'react'
-import { Activity, CalendarRange, Home, Settings, Sparkles, Timer } from 'lucide-react'
+import { Activity, CalendarRange, Home, Lightbulb, Settings, Sparkles, Timer } from 'lucide-react'
 import { useChat } from '@/hooks/use-chat'
 import { useDevice } from '@/hooks/use-device'
 import { Badge } from '@/components/ui/badge'
@@ -35,6 +35,11 @@ export const FloatingDock = () => {
       href: '/app/check-in',
     },
     {
+      title: 'Insights',
+      icon: <Lightbulb size={24} />,
+      href: '/app/insights',
+    },
+    {
       title: 'Assistant (Q)',
       icon: <Sparkles size={24} />,
       action: () => setChatOpen('Hello!'),
@@ -55,7 +60,7 @@ export const FloatingDock = () => {
       return isMobile ? '100vw' : '500px'
     }
 
-    return isMobile ? '64px' : '520px'
+    return isMobile ? '64px' : '600px'
   }, [chatOpen, isMobile])
 
   const height = useMemo(() => {
