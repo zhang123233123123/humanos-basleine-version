@@ -144,7 +144,9 @@ function TaskInspectorWrapper() {
     const previewIds = new Set(taskList.map((task) => task.uniqueId))
     try {
       if (previewIds.size > 0) {
-        setEvents(useEvents.getState().events.filter((e) => !previewIds.has(e.id)))
+        setEvents(
+          useEvents.getState().events.filter((event) => !event.id || !previewIds.has(event.id)),
+        )
       }
 
       await Promise.all(

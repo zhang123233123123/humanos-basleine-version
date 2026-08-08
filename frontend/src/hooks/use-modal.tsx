@@ -1,4 +1,10 @@
-import React, { createContext, useContext, useState } from 'react'
+import React, {
+  createContext,
+  Dispatch,
+  SetStateAction,
+  useContext,
+  useState,
+} from 'react'
 
 type ActiveEvent = {
   id?: string
@@ -21,9 +27,9 @@ type ActiveEvent = {
 
 type ModalContextType = {
   activeEvent: ActiveEvent | null
-  setActiveEvent: (event: ActiveEvent | null) => void
+  setActiveEvent: Dispatch<SetStateAction<ActiveEvent | null>>
   previewTasks: ActiveEvent[]
-  setPreviewTasks: (tasks: ActiveEvent[]) => void
+  setPreviewTasks: Dispatch<SetStateAction<ActiveEvent[]>>
 }
 
 const ModalContext = createContext<ModalContextType | undefined>(undefined)
@@ -31,7 +37,7 @@ const ModalContext = createContext<ModalContextType | undefined>(undefined)
 export const ModalProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const [activeEvent, setActiveEvent] = useState<any | null>(null)
+  const [activeEvent, setActiveEvent] = useState<ActiveEvent | null>(null)
   const [previewTasks, setPreviewTasks] = useState<ActiveEvent[]>([])
 
   return (
