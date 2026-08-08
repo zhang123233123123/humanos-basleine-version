@@ -23,6 +23,8 @@ type ActiveEvent = {
   progress?: string
   nextStep?: string
   openQuestions?: string
+  previewAdjusted?: boolean
+  adjustmentReason?: string
 }
 
 type ModalContextType = {

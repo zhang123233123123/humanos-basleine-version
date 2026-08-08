@@ -37,6 +37,8 @@ function TaskInspectorWrapper() {
   const { setEvents, refetchEvents, currentStart, currentEnd } = useEvents()
   const { t } = useTranslation()
   const [isConfirmingAll, setIsConfirmingAll] = useState(false)
+  const [showBatchReason, setShowBatchReason] = useState(false)
+  const [batchReason, setBatchReason] = useState('')
 
   const removeFromPreviewTasks = (uniqueId: string) => {
     setPreviewTasks((prev) => prev.filter((t) => t.uniqueId !== uniqueId))
@@ -135,25 +137,19 @@ function TaskInspectorWrapper() {
     if (previewId) removeFromPreviewTasks(previewId)
   }
 
-  const handleConfirmAllPreview = async () => {
+  const confirmAllPreview = async () => {
     if (previewTasks.length === 0 || isConfirmingAll) return
     setIsConfirmingAll(true)
 
     const taskList = [...previewTasks]
-    const previewIds = new Set(taskList.map((task) => task.uniqueId))
     try {
-      if (previewIds.size > 0) {
-        setEvents(
-          useEvents.getState().events.filter((event) => !event.id || !previewIds.has(event.id)),
-        )
-      }
-
-      await Promise.all(
+      const results = await Promise.allSettled(
         taskList.map((task) =>
-          fetch('/api/tasks', {
+          apiRequest('/api/tasks', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              request_id: `preview-confirm-${task.uniqueId}`,
               title: task.title,
               start_at: task.start?.toISOString() || new Date().toISOString(),
               deadline_at: task.end?.toISOString(),
@@ -163,17 +159,43 @@ function TaskInspectorWrapper() {
               progress: task.progress || '',
               next_step: task.nextStep || '',
               open_questions: task.openQuestions || '',
+              context_window: task.previewAdjusted
+                ? {
+                    last_schedule_change: {
+                      reason: batchReason.trim(),
+                      response_status: batchReason.trim() ? 'answered' : 'skipped',
+                      interaction_source: 'preview_bulk_confirmation',
+                    },
+                  }
+                : undefined,
             }),
           }),
         ),
       )
 
-      setPreviewTasks([])
-      toast(t('workspace.confirmCalendar'))
+      const succeeded = new Set(
+        results.flatMap((result, index) => result.status === 'fulfilled' ? [taskList[index].uniqueId] : []),
+      )
+      setEvents(useEvents.getState().events.filter((event) => !event.id || !succeeded.has(String(event.id))))
+      setPreviewTasks((current) => current.filter((task) => !succeeded.has(task.uniqueId)))
+      if (activeEvent && succeeded.has(activeEvent.uniqueId)) setActiveEvent(null)
+      const failedCount = results.length - succeeded.size
+      if (failedCount > 0) toast(`${succeeded.size} confirmed, ${failedCount} failed and remain for retry`)
+      else toast(t('workspace.confirmCalendar'))
+      setShowBatchReason(false)
+      setBatchReason('')
       await refetchEvents(currentStart, currentEnd)
     } finally {
       setIsConfirmingAll(false)
     }
+  }
+
+  const handleConfirmAllPreview = () => {
+    if (previewTasks.some((task) => task.previewAdjusted)) {
+      setShowBatchReason(true)
+      return
+    }
+    void confirmAllPreview()
   }
 
   const handleSave = async (task: {
@@ -251,18 +273,17 @@ function TaskInspectorWrapper() {
   if (previewTasks.length > 0) {
     return (
       <aside className="w-72 border-l border-border bg-background overflow-y-auto shrink-0">
-        <div className="p-4 border-b border-border">
-          <div className="flex items-center justify-between gap-2">
+        <div className="sticky top-0 z-10 border-b border-border bg-background p-4">
+          <div className="space-y-3">
             <h2 className="text-sm font-semibold text-foreground">
               {t('workspace.aiGeneratedTasks')}
             </h2>
             <Button
-              size="sm"
-              className="h-7 text-[11px]"
-              onClick={() => void handleConfirmAllPreview()}
+              className="w-full"
+              onClick={handleConfirmAllPreview}
               disabled={isConfirmingAll || previewTasks.length === 0}
             >
-              {t('workspace.confirmAll')}
+              {isConfirmingAll ? 'Confirming...' : `${t('workspace.confirmAll')} (${previewTasks.length})`}
             </Button>
           </div>
         </div>
@@ -310,6 +331,21 @@ function TaskInspectorWrapper() {
             </li>
           ))}
         </ul>
+        {showBatchReason && (
+          <div className="fixed inset-0 z-[100] grid place-items-center bg-black/40 p-4" onMouseDown={() => setShowBatchReason(false)}>
+            <div className="w-full max-w-md rounded-2xl border bg-background p-5 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
+              <h3 className="text-lg font-semibold">Why did you adjust these tasks?</h3>
+              <p className="mt-1 text-sm text-muted-foreground">This explanation applies only to this batch and will not become a long-term preference automatically.</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {['Time conflict', 'Energy level', 'Priority changed', 'Availability changed', 'Duration changed'].map((reason) => (
+                  <Button key={reason} type="button" size="sm" variant={batchReason === reason ? 'default' : 'outline'} onClick={() => setBatchReason(reason)}>{reason}</Button>
+                ))}
+              </div>
+              <textarea className="mt-4 min-h-24 w-full rounded-md border bg-background p-3 text-sm" placeholder="Optional explanation" value={batchReason} onChange={(event) => setBatchReason(event.target.value)} />
+              <div className="mt-4 flex justify-end gap-2"><Button variant="outline" onClick={() => setShowBatchReason(false)}>Cancel</Button><Button onClick={() => void confirmAllPreview()} disabled={isConfirmingAll}>{batchReason.trim() ? 'Save reason and confirm all' : 'Skip reason and confirm all'}</Button></div>
+            </div>
+          </div>
+        )}
       </aside>
     )
   }
@@ -347,7 +383,7 @@ function AppContent({
   } = useEvents()
 
   const { t } = useTranslation()
-  const { setActiveEvent, setPreviewTasks } = useModal()
+  const { activeEvent, setActiveEvent, setPreviewTasks } = useModal()
 
   const handleDatesSet = useCallback(
     async (arg: DatesSetArg) => {
@@ -365,8 +401,17 @@ function AppContent({
   )
 
   const handleUpdateEvent = async (event: EventDropArg | EventResizeDoneArg) => {
-    // Preview events: just update locally, no API call
-    if (event.event.extendedProps.isPreview) return
+    if (event.event.extendedProps.isPreview) {
+      const nextStart = event.event.start
+      const nextEnd = event.event.end
+      setPreviewTasks((tasks) => tasks.map((task) => task.uniqueId === event.event.id
+        ? { ...task, start: nextStart, end: nextEnd, previewAdjusted: true }
+        : task))
+      if (activeEvent?.uniqueId === event.event.id) {
+        setActiveEvent({ ...activeEvent, start: nextStart, end: nextEnd, previewAdjusted: true })
+      }
+      return
+    }
 
     const eventData = {
       id: event.event.id,
