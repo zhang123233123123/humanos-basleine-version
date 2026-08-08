@@ -3,8 +3,8 @@
 import { Chat } from '@/components/chat'
 import { cn } from '@/lib/utils'
 import { AnimatePresence, motion } from 'framer-motion'
-import { useMemo, useState } from 'react'
-import { Activity, CalendarRange, Home, Lightbulb, Settings, Sparkles, Timer } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Activity, Bug, CalendarRange, Home, Lightbulb, Settings, Sparkles, Timer } from 'lucide-react'
 import { useChat } from '@/hooks/use-chat'
 import { useDevice } from '@/hooks/use-device'
 import { Badge } from '@/components/ui/badge'
@@ -12,6 +12,14 @@ import { Badge } from '@/components/ui/badge'
 export const FloatingDock = () => {
   const { chatOpen, setChatOpen } = useChat()
   const { isMobile } = useDevice()
+  const [qaEnabled, setQaEnabled] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/health', { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((health) => setQaEnabled(Boolean(health?.test_mode)))
+      .catch(() => setQaEnabled(false))
+  }, [])
 
   const items = [
     {
@@ -39,6 +47,9 @@ export const FloatingDock = () => {
       icon: <Lightbulb size={24} />,
       href: '/app/insights',
     },
+    ...(qaEnabled
+      ? [{ title: 'QA', icon: <Bug size={24} />, href: '/app/qa' }]
+      : []),
     {
       title: 'Assistant (Q)',
       icon: <Sparkles size={24} />,
@@ -60,8 +71,8 @@ export const FloatingDock = () => {
       return isMobile ? '100vw' : '500px'
     }
 
-    return isMobile ? '64px' : '600px'
-  }, [chatOpen, isMobile])
+    return isMobile ? '64px' : qaEnabled ? '680px' : '600px'
+  }, [chatOpen, isMobile, qaEnabled])
 
   const height = useMemo(() => {
     if (chatOpen) {
