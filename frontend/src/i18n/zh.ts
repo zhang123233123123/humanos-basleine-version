@@ -262,11 +262,17 @@ const zh = {
     title: '专注执行', subtitle: '一次只推进一个明确的 Session，暂停、结束和完成保持清晰边界。', workspace: '返回工作台', loadFailed: '加载执行状态失败', untitledTask: '未命名任务',
     mode_up_next: '下一项', mode_running: '执行中', mode_paused: '已暂停', mode_empty: '当前无执行', mode_none: '当前无执行', mode_idle: '当前无执行',
     started: 'Session 已开始', startFailed: '开始失败', paused: 'Session 已暂停', pauseFailed: '暂停失败', ended: 'Session 已结束，请提交反馈', endFailed: '结束失败',
-    elapsed: '本次已执行', planned: '计划时长', remaining: 'Session 剩余', pause: '暂停', resume: '继续', start: '开始专注', end: '结束 Session',
+    elapsed: '本次已执行', planned: '计划时长', remaining: 'Session 剩余', pause: '暂停', resume: '继续', start: '开始专注', end: '结束 Session', captureContext: '记录中断上下文',
     context: '任务上下文', noContext: '暂无任务上下文。', nextStep: '回来后的第一步', schedule: '计划信息',
     noSession: '当前没有可执行 Session', noSessionDescription: '先确认一份周计划，系统才会创建正式的执行 Session。', openPlan: '打开周计划',
     feedbackTitle: '这次 Session 实际发生了什么？', feedbackDescription: '结束 Session 不会自动完成任务，请根据实际结果更新任务和状态。', completion: '完成情况', partial: '部分完成', completed: '任务已完成', actualMinutes: '实际分钟数', remainingMinutes: '任务剩余分钟数', difficulty: '实际难度', focusAfter: '结束后专注', energyAfter: '结束后精力', stressAfter: '结束后压力', timingFit: '时间是否合适', lengthFit: 'Session 长度', good: '合适', tooEarly: '太早', tooLate: '太晚', appropriate: '合适', tooShort: '太短', tooLong: '太长', saveFeedback: '保存反馈', feedbackSaved: '执行反馈已保存', feedbackFailed: '保存反馈失败',
     history: '执行记录', historyDescription: '后端保存的 Session 状态与时间。', noHistory: '暂无执行记录。',
+  },
+  checkin: {
+    dailyTitle: '今天的状态如何？', dailySubtitle: '这次自报只用于调整今天接下来的第一个 Session，不会预测整周。', interruptionTitle: '在离开前留下线索', interruptionSubtitle: '保存当前进度和第一步，让恢复不需要重新建立全部上下文。', back: '返回', currentState: '当前状态', currentStateDescription: '请按此刻的真实感受填写。',
+    focus: '专注', energy: '精力', stress: '压力', mood: '情绪', positive: '积极', neutral: '平稳', low: '低落', anxious: '焦虑', readiness: '准备程度', ready: '可以开始', unsure: '不确定', needRest: '需要休息', attentionResidue: '注意力残留', attentionResiduePlaceholder: '上一件事还有什么停留在脑中？', dailyNote: '今天的补充说明', dailyNotePlaceholder: '今天发生了哪些会影响安排的情况？', saveState: '保存今日状态', saved: '今日状态已记录', saveFailed: '保存状态失败', openWorkspace: '返回工作台',
+    leaveBreadcrumbs: '保存中断现场', leaveBreadcrumbsDescription: '这些字段直接写入任务 Context Dump。', missingTask: '缺少需要关联的任务 ID。', progress: '已经完成了什么', progressPercent: '当前进度百分比', remainingMinutes: '任务剩余分钟数', nextAction: '恢复后的第一步', nextActionPlaceholder: '例如：从第 12 条访谈引文继续编码', nextActionRequired: '请填写恢复后的第一步', openQuestions: '未解决问题', stopReason: '中断原因', interrupted: '被打断', fatigue: '疲劳', blocked: '任务阻塞', contextSwitch: '切换到其他任务', externalEvent: '外部事件', saveContext: '保存中断上下文', contextSaved: '中断上下文已保存', contextFailed: '保存中断上下文失败',
+    generateReentry: '生成恢复提示', reentryFailed: '生成恢复提示失败', reentryTitle: '恢复提示', reentryDescription: '优先使用你保存的第一步，而不是重新猜测。', firstStep: '第一步', savedProgress: '上次进度', remaining: '预计剩余', returnToFocus: '返回专注执行', reentryEmpty: '保存中断上下文后，可以在这里生成恢复提示。',
   },
 }
 
