@@ -94,6 +94,10 @@ class TaskInputLayerTests(unittest.TestCase):
         self.assertEqual(8, len(tasks))
         self.assertEqual([150, 120, 45, 75, 120, 45, 45, 30], [task["duration"] for task in tasks])
         self.assertEqual(["高", "高", "高", "中", "高", "低", "低", "低"], [task["priority"] for task in tasks])
+        deadlines = [datetime.fromisoformat(task["deadline_at"]) for task in tasks]
+        self.assertEqual([2, 3, 3, 4, 5, 5, 5, 5], [deadline.weekday() for deadline in deadlines])
+        self.assertEqual([(18, 0), (17, 0), (18, 0), (15, 0), (13, 0), (14, 0), (18, 0), (18, 0)], [(deadline.hour, deadline.minute) for deadline in deadlines])
+        self.assertTrue(all(task["timezone"] == "Asia/Shanghai" for task in tasks))
 
     def test_expanded_action_keywords_are_not_dropped(self) -> None:
         tasks = self.store.local_parse_tasks_from_text(

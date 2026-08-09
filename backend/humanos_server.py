@@ -1896,6 +1896,13 @@ class Store:
             segments = [clean]
 
         tasks = []
+        profile = self.ensure_profile(user_id)
+        timezone_name = str(profile.get("timezone") or "Asia/Shanghai")
+        current = self.user_clock_now(user_id, timezone_name)
+        english_weekdays = {
+            "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+            "friday": 4, "saturday": 5, "sunday": 6,
+        }
         last_day = ""
         last_period = ""
         for segment in segments[:8]:
@@ -1914,7 +1921,7 @@ class Store:
             due = normalize_chinese_clock(due)
             separate_time_match = re.search(time_word, segment)
             if due != "未设置" and day_match and separate_time_match and not re.search(time_word, due):
-                due = f"{day_match.group(0)}{separate_time_match.group(0)}"
+                due = f"{day_match.group(0)} {separate_time_match.group(0)}"
             if due != "未设置" and last_day and not re.search(relative_day, due, re.I):
                 due = f"{last_day}{due}"
             if due != "未设置" and last_period and re.search(r"\d{1,2}\s*(点|时)", due) and not re.search(r"(早上|上午|中午|下午|晚上)", due):
@@ -1922,6 +1929,25 @@ class Store:
             if due == "未设置" and last_day and period_match:
                 due = f"{last_day}{period_match.group(0)}"
             duration = infer_duration_minutes(segment) or shared_duration
+            deadline_at = None
+            if day_match and separate_time_match:
+                weekday = english_weekdays.get(day_match.group(0).lower())
+                clock_match = re.search(r"(\d{1,2})[:：](\d{2})\s*(am|pm)?", separate_time_match.group(0), re.I)
+                if weekday is not None and clock_match:
+                    hour = int(clock_match.group(1))
+                    minute = int(clock_match.group(2))
+                    meridiem = str(clock_match.group(3) or "").lower()
+                    if meridiem == "pm" and hour < 12:
+                        hour += 12
+                    elif meridiem == "am" and hour == 12:
+                        hour = 0
+                    day_offset = (weekday - current.weekday()) % 7
+                    target = (current + timedelta(days=day_offset)).replace(
+                        hour=hour, minute=minute, second=0, microsecond=0
+                    )
+                    if target < current:
+                        target += timedelta(days=7)
+                    deadline_at = target.isoformat()
             priority = "高" if (
                 any(word in segment for word in ["紧急", "重要", "ddl", "deadline", "优先级高", "高优先级"])
                 or re.search(r"优先级\s*[:：]?\s*高", segment)
@@ -1963,6 +1989,9 @@ class Store:
                     ),
                     "deadline": due,
                     "due": due,
+                    "timezone": timezone_name,
+                    "deadline_at": deadline_at,
+                    "deadline_assumption": "next_occurrence_in_user_timezone" if deadline_at else None,
                     "estimated_duration": duration,
                     "duration": duration,
                     "priority": priority,
