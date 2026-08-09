@@ -1760,7 +1760,7 @@ class Store:
         if len(parts) < 2:
             return False
         action_count = sum(1 for part in parts if self.contains_task_action(part))
-        followup_markers = re.search(r"第[一二三四五六七八九\d]+|这个|那个|都是|每个", text)
+        followup_markers = re.search(r"第[一二三四五六七八九\d]+|这个|那个", text)
         return action_count >= 2 and not followup_markers
 
     def english_task_segments(self, text: str) -> list[str]:
@@ -1845,6 +1845,7 @@ class Store:
 
     def local_parse_tasks_from_text(self, user_id: str, text: str, create_tasks: bool = True) -> list[dict]:
         clean = text.strip()
+        shared_duration = infer_duration_minutes(clean) if re.search(r"(?:都是|每个|各自|全部).*?(?:小时|分钟)", clean) else None
         time_word = (
             r"(((早上|上午|中午|下午|晚上)\s*)?(?:\d{1,2}|十二|十一|十|[一二两三四五六七八九])\s*(点|时)(?!间)|"
             r"\d{1,2}[:：]\d{2}\s*(?:am|pm)?|\d{1,2}\s*(?:am|pm)|"
@@ -1911,7 +1912,7 @@ class Store:
                 due = re.sub(r"(\d{1,2}\s*(点|时))", rf"{last_period}\1", due, count=1)
             if due == "未设置" and last_day and period_match:
                 due = f"{last_day}{period_match.group(0)}"
-            duration = infer_duration_minutes(segment)
+            duration = infer_duration_minutes(segment) or shared_duration
             priority = "高" if (
                 any(word in segment for word in ["紧急", "重要", "ddl", "deadline", "优先级高", "高优先级"])
                 or re.search(r"优先级\s*[:：]?\s*高", segment)
@@ -1937,6 +1938,8 @@ class Store:
                 title_text,
                 flags=re.I,
             )
+            title_text = re.sub(r"(?:都是|每个|各自|全部)?\s*(?:半|一个|一|两|二|三|四|五)\s*(?:小时|分钟)", "", title_text)
+            title_text = re.sub(r"(?:都是|每个|各自|全部)$", "", title_text)
             title_text = re.sub(r"(大概|大约|预计|持续|左右)", "", title_text)
             if re.search(r"[A-Za-z]", title_text):
                 title_text = re.sub(r"\s+", " ", title_text).strip(" .,!;:，。；") or segment

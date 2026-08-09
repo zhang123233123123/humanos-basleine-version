@@ -94,8 +94,9 @@ class TaskInputLayerTests(unittest.TestCase):
 
         self.assertEqual([], updated)
         self.assertEqual(2, len(previews))
-        self.assertIn("开会", previews[0]["title"])
-        self.assertIn("写作业", previews[1]["title"])
+        self.assertEqual("开会", previews[0]["title"])
+        self.assertEqual("写作业", previews[1]["title"])
+        self.assertEqual([60, 60], [item["duration"] for item in previews])
 
     def test_explicit_single_task_reschedule_still_updates_recent_task(self) -> None:
         meeting = self.store.create_task("user-a", {
