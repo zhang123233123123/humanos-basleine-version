@@ -240,10 +240,10 @@ function TaskInspectorWrapper() {
 
   const openFocus = async (task: { id: string; status?: string }) => {
     const result = await apiRequest<{ execution_sessions: ExecutionSession[] }>('/api/execution-sessions?status=running,paused,ready')
-    const session = (result.execution_sessions || []).find((item) => String(item.task_id) === String(task.id))
+    let session = (result.execution_sessions || []).find((item) => String(item.task_id) === String(task.id))
     if (!session) {
-      toast(t('execution.noSession'))
-      return
+      const ensured = await apiRequest<{ execution_session: ExecutionSession }>('/api/execution-sessions/ensure', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_id: task.id }) })
+      session = ensured.execution_session
     }
     if (session.status === 'ready') {
       await apiRequest('/api/execution-sessions/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ execution_session_id: session.execution_session_id, request_id: `calendar-start-${crypto.randomUUID()}` }) })

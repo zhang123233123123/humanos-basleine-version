@@ -1645,6 +1645,19 @@ class Store:
         explicit_schedule_tasks = self.parse_explicit_schedule_lines(user_id, clean, create_tasks=create_tasks)
         if explicit_schedule_tasks:
             return explicit_schedule_tasks
+        shared_time = re.search(
+            r"(?:然后)?(?:它们|这些|都是|每个|全部).*?((?:早上|上午|中午|下午|晚上)\s*\d{1,2}\s*(?:[:：]\s*\d{2}|点|时))",
+            clean,
+        )
+        if shared_time:
+            prefix = clean[:shared_time.start()].strip(" ，,。；;")
+            clauses = [part.strip() for part in re.split(r"(?:然后|，|,|。|；|;)", prefix) if part.strip()]
+            dated_clauses = [part for part in clauses if re.search(r"今天|今晚|明天|后天|周[一二三四五六日天]|星期[一二三四五六日天]", part)]
+            if len(dated_clauses) >= 2:
+                shared_hour = parse_clock_hour(shared_time.group(1))
+                shared_clock = format_clock_hour(shared_hour) if shared_hour is not None else shared_time.group(1)
+                expanded = "，".join(f"{part} {shared_clock}" for part in dated_clauses)
+                return self.local_parse_tasks_from_text(user_id, expanded, create_tasks=create_tasks)
         if self.looks_like_compact_multi_task_list(clean) or self.english_task_segments(clean):
             return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
         llm_result = chat_completion(task_parsing_messages(clean, chat_context))
@@ -1730,7 +1743,7 @@ class Store:
     def contains_task_action(self, text: str) -> bool:
         return bool(
             re.search(
-                r"(复习|学习|写|读|阅读|总结|整理|完善|完成|处理|准备|提交|看|做|备战|"
+                r"(复习|学习|写|读|阅读|总结|整理|完善|完成|处理|准备|提交|看|做|睡觉|睡|吃饭|吃|备战|"
                 r"开会|会议|组会|讨论|取|拿|办|买|发|"
                 r"\b(?:finish|complete|write|read|review|study|prepare|design|eat|meet|meeting|submit|send|collect|buy)\b)",
                 text,
@@ -1849,7 +1862,7 @@ class Store:
         ]
         action_pattern = (
             r"(会议|开会|开.*会|组会|学习|复习|写|读|阅读|总结|整理|完善|完成|处理|准备|提交|"
-            r"看|做|备战|取|拿|办|买|发|"
+            r"看|做|睡觉|睡|吃饭|吃|备战|取|拿|办|买|发|"
             r"\b(?:finish|complete|write|read|review|study|prepare|design|eat|meet|meeting|submit|send|collect|buy)\b)"
         )
         merged_segments: list[str] = []
@@ -1909,7 +1922,8 @@ class Store:
                 segment,
                 flags=re.I,
             )
-            title_text = re.sub(r"(这周|本周|我需要|我要|我在|我|在|并且|而且|以及)", "", title_text)
+            title_text = re.sub(r"(这周|本周|我需要|我要|我在|我|在|并且|而且|以及|要)", "", title_text)
+            title_text = re.sub(r"睡觉(?:觉)+", "睡觉", title_text)
             title_text = re.sub(
                 r"\b(i|we|the|a|an|to|at|on|by|before|after|and|also|need|needs|have|has|plan|planned|want|"
                 r"finish|complete|do|work|eat)\b",
@@ -3173,6 +3187,10 @@ class Store:
         target = next((block for block in active_blocks if str(block.get("task_id")) == task_id), None)
         if not active or not target or not start_at or not end_at:
             allowed = {key: value for key, value in task_patch.items() if key not in {"slot", "start", "end", "start_at", "end_at", "deadline_at"}}
+            if start_at and end_at:
+                context_window = dict(task.get("contextWindow") or {})
+                context_window.update({"startAt": start_at, "endAt": end_at})
+                allowed["contextWindow"] = {**context_window, **dict(allowed.get("contextWindow") or {})}
             return {"task": self.patch_task(task_id, allowed, user_id), "plan": active, "revision_created": False}
         start = datetime.fromisoformat(start_at)
         end = datetime.fromisoformat(end_at)
@@ -3790,6 +3808,46 @@ class Store:
             self._record_execution_request(conn, user_id, request_id, row["id"], "start", timestamp)
             updated = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (row["id"],)).fetchone()
         return self.execution_session_row(updated)
+
+    def ensure_execution_session(self, user_id: str, payload: dict) -> dict:
+        task_id = str(payload.get("task_id") or "").strip()
+        if not task_id:
+            raise ValueError("task_id is required")
+        task = self.get_task(task_id, user_id)
+        if not task:
+            raise KeyError(task_id)
+        with self.connect() as conn:
+            existing = conn.execute(
+                "SELECT * FROM execution_sessions WHERE user_id=? AND task_id=? AND status IN ('ready','running','paused') ORDER BY updated_at DESC LIMIT 1",
+                (user_id, task_id),
+            ).fetchone()
+            if existing:
+                return self.execution_session_row(existing)
+        context = dict(task.get("contextWindow") or {})
+        profile = self.ensure_profile(user_id)
+        current = self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai")
+        start_value = task.get("start_at") or context.get("startAt") or context.get("start_at")
+        start = datetime.fromisoformat(str(start_value).replace("Z", "+00:00")) if start_value else current
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=current.tzinfo)
+        duration = max(int(task.get("duration") or 60), 1)
+        end_value = task.get("end_at") or task.get("end_time") or context.get("endAt") or context.get("end_at")
+        end = datetime.fromisoformat(str(end_value).replace("Z", "+00:00")) if end_value else start + timedelta(minutes=duration)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=start.tzinfo)
+        planned_minutes = max(round((end - start).total_seconds() / 60), 1)
+        session_id = new_id("exec")
+        timestamp = now_ms()
+        week_id = str(task.get("week_id") or profile.get("active_week_id") or iso_week_id(start))
+        revision = int(profile.get("active_plan_revision") or 0)
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO execution_sessions (id,user_id,task_id,block_id,week_id,plan_revision,planned_start_at,planned_end_at,planned_work_minutes,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (session_id, user_id, task_id, f"adhoc-{task_id}-{timestamp}", week_id, revision, start.isoformat(), end.isoformat(), planned_minutes, "ready", timestamp, timestamp),
+            )
+            conn.execute("UPDATE tasks SET status='scheduled',updated_at=? WHERE id=? AND user_id=?", (timestamp, task_id, user_id))
+            row = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (session_id,)).fetchone()
+        return self.execution_session_row(row)
 
     def pause_execution_session(self, user_id: str, payload: dict) -> dict:
         session_id = str(payload.get("execution_session_id") or "")
@@ -6038,6 +6096,12 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 user_id = payload.get("user_id", "demo")
                 self.send_json({"execution_session": store.start_execution_session(user_id, payload)})
+                return
+
+            if path == "/api/execution-sessions/ensure" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                self.send_json({"execution_session": store.ensure_execution_session(user_id, payload)}, status=201)
                 return
 
             if path == "/api/execution-sessions/pause" and method == "POST":
