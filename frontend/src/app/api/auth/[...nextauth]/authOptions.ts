@@ -15,27 +15,31 @@ const authOptions: AuthOptions = {
         if (!credentials?.email) return null
         const email = credentials.email.trim().toLowerCase()
 
+        let res: Response
         try {
-          const res = await fetch(`${HUMANOS_BACKEND}/api/auth/login`, {
+          res = await fetch(`${HUMANOS_BACKEND}/api/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            signal: AbortSignal.timeout(8_000),
             body: JSON.stringify({
               email,
               password: credentials.password || '',
             }),
           })
-
-          if (!res.ok) return null
-
-          const data = await res.json()
-          return {
-            id: data.user?.id || email,
-            email,
-            name: data.user?.name || email,
-            image: data.user?.avatar || null,
-          }
         } catch {
-          return null
+          throw new Error('AUTH_SERVICE_UNAVAILABLE')
+        }
+
+        if (res.status === 401) return null
+        if (!res.ok) throw new Error('AUTH_SERVICE_UNAVAILABLE')
+
+        const data = await res.json().catch(() => null)
+        if (!data?.user?.id) throw new Error('AUTH_SERVICE_UNAVAILABLE')
+        return {
+          id: data.user.id,
+          email,
+          name: data.user.name || email,
+          image: data.user.avatar || null,
         }
       },
     }),

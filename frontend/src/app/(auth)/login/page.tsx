@@ -31,7 +31,9 @@ export default function LoginPage() {
         redirect: false,
       })
       if (!result?.ok || result.error) {
-        toast(t('login.loginFailed'))
+        toast(result?.error === 'AUTH_SERVICE_UNAVAILABLE'
+          ? t('login.serviceUnavailable')
+          : t('login.invalidCredentials'))
         return
       }
       window.location.assign(result.url || '/app')
@@ -57,7 +59,7 @@ export default function LoginPage() {
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        toast(err.detail || t('login.registerFailed'))
+        toast(err.message || err.error || t('login.registerFailed'))
         setLoading(false)
         return
       }
@@ -69,7 +71,9 @@ export default function LoginPage() {
         redirect: false,
       })
       if (!result?.ok || result.error) {
-        toast(t('login.loginFailed'))
+        toast(result?.error === 'AUTH_SERVICE_UNAVAILABLE'
+          ? t('login.serviceUnavailable')
+          : t('login.invalidCredentials'))
         return
       }
       window.location.assign('/app/onboarding')

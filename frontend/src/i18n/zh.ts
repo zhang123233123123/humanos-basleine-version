@@ -52,6 +52,8 @@ const zh = {
     hasAccount: '已有账户？去登录',
     fillAllFields: '请填写所有字段',
     loginFailed: '登录失败，请检查您的凭据。',
+    invalidCredentials: '邮箱或密码不正确。',
+    serviceUnavailable: '认证服务暂时不可用，请稍后重试。',
     registerFailed: '注册失败，请重试。',
     termsPrefix: '继续即表示您同意我们的',
     termsOfService: '服务条款',

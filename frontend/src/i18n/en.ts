@@ -52,6 +52,8 @@ const en = {
     hasAccount: 'Already have an account? Sign in',
     fillAllFields: 'Please fill in all fields',
     loginFailed: 'Login failed. Please check your credentials.',
+    invalidCredentials: 'Incorrect email or password.',
+    serviceUnavailable: 'Authentication service is temporarily unavailable. Please try again.',
     registerFailed: 'Registration failed. Please try again.',
     termsPrefix: 'By continuing, you agree to our',
     termsOfService: 'Terms of Service',
