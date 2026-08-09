@@ -66,6 +66,24 @@ class TaskInputLayerTests(unittest.TestCase):
             "I need to finish the paper, and I also need to prepare the presentation."
         ))
 
+    def test_numbered_english_task_list_is_parsed(self) -> None:
+        text = """Please add these tasks for this week:
+
+1. Analyze interview transcripts, 150 minutes, high priority, due Wednesday at 18:00.
+2. Revise the literature review, 120 minutes, high priority, due Thursday at 17:00.
+3. Prepare a supervisor update, 45 minutes, high priority, due Thursday at 18:00.
+4. Create a findings diagram, 75 minutes, medium priority, due Friday at 15:00.
+5. Write the findings section, 120 minutes, high priority, due Saturday at 13:00.
+6. Format references and figures, 45 minutes, low priority, due Saturday at 14:00.
+7. Do the laundry, 45 minutes, low priority, due Saturday at 18:00.
+8. Listen to an English research podcast, 30 minutes, low priority, due Saturday at 18:00."""
+
+        tasks = self.store.local_parse_tasks_from_text("user-a", text, create_tasks=False)
+
+        self.assertEqual(8, len(tasks))
+        self.assertEqual([150, 120, 45, 75, 120, 45, 45, 30], [task["duration"] for task in tasks])
+        self.assertEqual(["高", "高", "高", "中", "高", "低", "低", "低"], [task["priority"] for task in tasks])
+
     def test_expanded_action_keywords_are_not_dropped(self) -> None:
         tasks = self.store.local_parse_tasks_from_text(
             "user-a",

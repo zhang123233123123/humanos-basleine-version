@@ -1745,7 +1745,7 @@ class Store:
             re.search(
                 r"(复习|学习|写|读|阅读|总结|整理|完善|完成|处理|准备|提交|看|做|睡觉|睡|吃饭|吃|备战|"
                 r"开会|会议|组会|讨论|取|拿|办|买|发|"
-                r"\b(?:finish|complete|write|read|review|study|prepare|design|eat|meet|meeting|submit|send|collect|buy)\b)",
+                r"\b(?:add|analyze|analyse|revise|create|format|listen|finish|complete|write|read|review|study|prepare|design|eat|meet|meeting|submit|send|collect|buy|do)\b)",
                 text,
                 re.I,
             )
@@ -1766,6 +1766,13 @@ class Store:
     def english_task_segments(self, text: str) -> list[str]:
         if not re.search(r"[A-Za-z]", text):
             return []
+        numbered = [
+            re.sub(r"^\s*\d+[.)、]\s*", "", line).strip()
+            for line in text.splitlines()
+            if re.match(r"^\s*\d+[.)、]\s*", line)
+        ]
+        if len(numbered) >= 2:
+            return numbered
         normalized = re.sub(r"\s+", " ", text).strip()
         normalized = re.sub(r"^\s*this week\s+", "", normalized, flags=re.I)
         for marker in (
@@ -1864,7 +1871,7 @@ class Store:
         action_pattern = (
             r"(会议|开会|开.*会|组会|学习|复习|写|读|阅读|总结|整理|完善|完成|处理|准备|提交|"
             r"看|做|睡觉|睡|吃饭|吃|备战|取|拿|办|买|发|"
-            r"\b(?:finish|complete|write|read|review|study|prepare|design|eat|meet|meeting|submit|send|collect|buy)\b)"
+            r"\b(?:add|analyze|analyse|revise|create|format|listen|finish|complete|write|read|review|study|prepare|design|eat|meet|meeting|submit|send|collect|buy|do)\b)"
         )
         merged_segments: list[str] = []
         for part in connector_segments:
@@ -1916,7 +1923,8 @@ class Store:
             priority = "高" if (
                 any(word in segment for word in ["紧急", "重要", "ddl", "deadline", "优先级高", "高优先级"])
                 or re.search(r"优先级\s*[:：]?\s*高", segment)
-            ) else None
+                or re.search(r"\bhigh\s+priority\b", segment, re.I)
+            ) else "中" if re.search(r"\bmedium\s+priority\b", segment, re.I) else "低" if re.search(r"\blow\s+priority\b", segment, re.I) else None
             title_text = re.sub(
                 rf"({relative_day}|{time_word}|然后|最后|先|需要|进行|我们的|我们|这个|的|吧|之前|以前|前)",
                 "",
@@ -1924,6 +1932,7 @@ class Store:
                 flags=re.I,
             )
             title_text = re.sub(r"(这周|本周|我需要|我要|我在|我|在|并且|而且|以及|要)", "", title_text)
+            title_text = re.sub(r"\b(?:high|medium|low)\s+priority\b|\bdue\b", " ", title_text, flags=re.I)
             title_text = re.sub(r"睡觉(?:觉)+", "睡觉", title_text)
             title_text = re.sub(
                 r"\b(i|we|the|a|an|to|at|on|by|before|after|and|also|need|needs|have|has|plan|planned|want|"
@@ -2267,9 +2276,10 @@ class Store:
             response["reply"] = f"I understood this as an update to an existing item: {updates}. No duplicate task was created."
             intent = "reschedule"
             response["intent"] = intent
-        should_parse_tasks = any(
-            word in text
-            for word in [
+        should_parse_tasks = (
+            any(
+                word in text
+                for word in [
                 "任务",
                 "写",
                 "读",
@@ -2294,7 +2304,10 @@ class Store:
                 "明天",
                 "今天",
                 "周",
-            ]
+                ]
+            )
+            or bool(self.english_task_segments(text))
+            or bool(re.search(r"\b(?:add|create|schedule)\s+(?:these\s+)?tasks?\b", text, re.I))
         ) and (intent in {"add_task", "reschedule", "other"} or self.looks_like_compact_multi_task_list(text))
         if should_parse_tasks and not response["tasks"] and not context_update:
             intent = "add_task" if intent == "progress_update" else intent
