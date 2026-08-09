@@ -113,3 +113,78 @@ methods without changing system time. It covers Daily Check-in, start,
 pause/context-save/resume, end, feedback, idempotent retries, partial and
 not-started outcomes, and week rollover. Five Tasks completed and the two
 unfinished Tasks were carried forward with correct remaining work.
+
+## Unified data flow and behavioral learning (2026-08-09)
+
+### Authoritative records
+
+- `tasks` remains the source of truth for task identity, demand, deadline,
+  status, progress, and remaining work.
+- `plans` and their immutable `plan_patch` revisions are the source of truth
+  for proposed and confirmed placement. A confirmed calendar edit now creates
+  a proposed revision; it no longer writes a new slot directly onto a Task.
+- `execution_sessions` and execution action records are the source of truth
+  for Start, Pause, Resume, End, tracked active minutes, and feedback.
+- structured Weekly Context remains the source of truth for availability and
+  protected or flexible activities.
+- runtime state affects only today's next unstarted Session.
+- episodic memories contain effective behavioral observations. Confirmed
+  learned patterns are the only behavioral preferences promoted into the
+  planning Profile and prompt.
+
+No destructive database migration was required. The existing JSON metadata
+columns in plans, memories, edit episodes, tasks, and execution sessions were
+sufficient, so existing user data and Task IDs are preserved.
+
+### Edit memory and pattern promotion
+
+Every effective confirmed plan edit can store a structured episodic record
+with the observed diff, user explanation, affected Task/time, source,
+generalizability, and flags for undo, failed validation, and one-time context.
+Failed, undone, ineffective, or one-time edits are excluded from retrieval and
+pattern counting. One observation never changes the Profile. Three eligible
+similar observations create a candidate only; explicit user confirmation is
+still required before the pattern is promoted and used by the planner.
+
+### Confirmed-plan revision lifecycle
+
+Dragging or editing a confirmed block now follows:
+
+`confirmed -> needs_update + proposed revision -> Python validation -> user Apply changes -> new confirmed revision`
+
+Canceling supersedes the proposal and restores the base confirmed plan.
+Applying a valid revision synchronizes Plan, Task, and future Execution Session
+records while preserving completed execution history. Invalid drag attempts
+are rejected without mutating the confirmed plan.
+
+### Pause, Resume, Check-in, and early finish
+
+Pause first stores real execution context. The local adjustment endpoint then
+asks DeepSeek for a minimal today-only proposal when AI use is requested;
+Python scope-checks the response and runs the complete hard-constraint
+validator. Invalid or unavailable model output falls back to deterministic
+safe logic. Resume uses the shared true clock: it resumes directly when later
+Sessions are unaffected, otherwise it produces a proposed local revision.
+Daily Check-in evaluates only today's next unstarted Session. Early finish
+either keeps released time free or reviews later unstarted Sessions, according
+to the user's choice. Feedback, Pause, and Resume return to the Calendar view.
+
+### Tests and browser evidence
+
+- 20 focused unified-data-flow tests cover memory eligibility, three-event
+  candidate formation, explicit promotion, proposed/canceled/applied plan
+  revisions, Task/Execution synchronization, resume impact, Daily Check-in,
+  early finish, stable Task identity, and frontend API routing.
+- Complete automated result: **162 tests passed, 1 skipped**.
+- Python compilation and frontend JavaScript syntax checks pass.
+- Browser evidence at 1366x768 confirms onboarding, the single recommended
+  Draft, optional parallel review, calendar confirmation, solid confirmed
+  blocks, and chat-driven meeting updates. See `qa-artifacts/backend-simulation-timeline.png`,
+  `qa-artifacts/backend-simulation-parallel-suggestion-accepted-pending.png`,
+  and `qa-artifacts/backend-chat-meeting-confirmed-solid.png`.
+
+The legacy all-in-one browser script still contains older assumptions about
+how an active Session is created and can wait indefinitely after the newer
+Pause/Resume lifecycle. This does not affect the focused backend acceptance
+suite or the captured planning/chat browser evidence; it should be split into
+short scenario-specific browser tests in a later maintenance pass.

@@ -373,6 +373,17 @@ try {
   let meetingUpdateAudit = null;
   if (apiBase) {
     await evaluate("render(); document.getElementById('confirmScheduleBtn').click(); true");
+    await waitFor("pendingSchedulePlan === null || Boolean(document.getElementById('planRationaleDialog')?.open)", appWaitAttempts);
+    if (await evaluate("Boolean(document.getElementById('planRationaleDialog')?.open)")) {
+      await evaluate(`(() => {
+        const rationale = document.getElementById('planRationaleText');
+        const scope = document.getElementById('planRationaleScope');
+        if (rationale) rationale.value = 'QA confirmation after reviewing the proposed plan.';
+        if (scope) scope.value = 'only_this_week';
+        submitPlanRationale('answered');
+        return true;
+      })()`);
+    }
     await waitFor("pendingSchedulePlan === null", appWaitAttempts);
     await evaluate(`handleChatTurn('My research meeting tomorrow has moved to 14:00–15:00.').then(() => true)`);
     await waitFor("!document.getElementById('chatSendBtn').disabled", appWaitAttempts);
@@ -405,17 +416,24 @@ try {
     if (meetingUpdateAudit.remainingDraftBlockCount !== 0) throw new Error(`Confirmed calendar still contains Draft blocks: ${JSON.stringify(meetingUpdateAudit)}`);
     const confirmedMeetingScreenshot = await command("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, fromSurface: true });
     writeFileSync(join(artifactDir, "backend-chat-meeting-confirmed-solid.png"), Buffer.from(confirmedMeetingScreenshot.data, "base64"));
-    const interruptedTaskId = await evaluate(`(() => {
-      const task = tasks.find((item) => item.task_type !== 'fixed_event' && !['completed', 'terminated'].includes(item.status));
-      if (!task) throw new Error('No flexible task available for interruption QA');
-      selectTask(task.id, 'manual');
-      render();
-      preparePauseDialog(task);
+    const interruptedTaskId = await evaluate(`(async () => {
+      const candidate = visibleCalendarBlocks()
+        .filter((block) => block.kind === 'task_session' && block.task && block.task.task_type !== 'fixed_event' && !['completed', 'terminated'].includes(block.task.status))
+        .sort((left, right) => Number(left.day_index) - Number(right.day_index) || Number(left.start) - Number(right.start))[0];
+      if (!candidate) throw new Error('No flexible task session available for interruption QA');
+      const sessionDate = weekDateForDay(Number(candidate.day_index));
+      sessionDate.setHours(Math.floor(Number(candidate.start)), Math.round((Number(candidate.start) % 1) * 60), 0, 0);
+      await controlTestClock({ simulated_now: sessionDate.toISOString(), time_scale: 0 });
+      await loadBackendState();
+      if (!currentExecutionState?.session) throw new Error('Execution session was not available at the planned start');
+      await startCurrentExecution();
+      await controlTestClock({ advance_minutes: 20, time_scale: 0 });
+      await pauseCurrentExecution();
+      const task = tasks.find((item) => String(item.id) === String(currentExecutionState?.session?.task_id));
+      if (!task) throw new Error('Running task was not found after advancing the QA clock');
       document.querySelector('input[name="stopReason"][value="interrupted"]').checked = true;
-      document.getElementById('pauseProgress').value = 'Completed the API interface skeleton';
-      document.getElementById('pauseNextStep').value = 'Continue connecting the scheduling endpoint';
-      document.getElementById('pauseActualMinutes').value = '20';
-      document.getElementById('pauseCalendarAction').value = 'replan';
+      document.getElementById('pauseContextNote').value = 'Completed the API interface skeleton. Next: Continue connecting the scheduling endpoint';
+      document.getElementById('pauseResumeChoice').value = 'reschedule';
       document.getElementById('pauseForm').requestSubmit();
       return task.id;
     })()`);

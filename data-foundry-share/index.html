@@ -5004,17 +5004,46 @@ async function moveCalendarSession(taskId, blockId, dayIndex, startHour, request
     showProductToast(failedDragToastMessage(conflictDetails[0]));
     return;
   }
-  task.slot = { sessions, start: sessions[0].start, end: sessions[0].end, day_index: sessions[0].day_index, color: sessions[0].color || colorForTask(task) };
-  refreshTaskScheduleStatus(task);
-  task.contextWindow = { ...(task.contextWindow || {}), decisionTrace: { ...(task.contextWindow?.decisionTrace || {}), last_manual_adjustment: { block_id: blockId, day_index: dayIndex, start: target.start, end: target.end, validation: "passed" } } };
-  selectTask(task.id, "manual");
-  await patchBackendTask(task);
-  const advisories = calendarBlockAdvisories({ ...target, task, source: "scheduled" }, blockId);
-  addChatMessage(
-    "ai",
-    "Edit validated",
-    `${task.title} was moved to ${formatHour(target.start)}-${formatHour(target.end)}. Hard constraints passed.${advisories.length ? ` Preference note: ${advisories.join("; ")}.` : ""}`
-  );
+  if (!backendOnline || !confirmedSchedulePlan?.plan_patch?.length) {
+    showProductToast("Could not create a calendar revision while the backend is unavailable.");
+    render();
+    return;
+  }
+  const revisedPatch = confirmedSchedulePlan.plan_patch.map((block) => (
+    String(block.block_id) === String(blockId)
+      ? { ...block, day_index: Number(dayIndex), start: target.start, end: target.end, session_minutes: target.session_minutes, draft_changed: true }
+      : { ...block }
+  ));
+  try {
+    const response = await api("/api/plans/revisions/propose", {
+      method: "POST",
+      body: JSON.stringify({
+        user_id: currentUserId(),
+        base_plan_id: confirmedSchedulePlan.plan_id,
+        week_id: confirmedSchedulePlan.week_id,
+        plan_patch: revisedPatch,
+        source: requestedEnd === null ? "confirmed_calendar_drag" : "confirmed_calendar_resize",
+        local_adjustment: {
+          scope: "confirmed_calendar_edit",
+          changed_block_ids: [String(blockId)],
+          affected_task_ids: [String(taskId)]
+        },
+        request_id: crypto.randomUUID?.() || `calendar-revision-${Date.now()}`
+      })
+    });
+    pendingSchedulePlan = response.plan;
+    pendingSchedulePlan.base_plan_id = confirmedSchedulePlan.plan_id;
+    await recordPlanEditEvent({
+      eventType: requestedEnd === null ? "move_session" : "resize_session",
+      taskId, blockId, before: snapshot, after: target,
+      validation: { valid: true, advisories: calendarBlockAdvisories({ ...target, task, source: "scheduled" }, blockId) }
+    });
+    activeSelectionMode = "auto";
+    rightRailMode = "plan";
+    showProductToast("Change ready — review and apply it to the calendar.");
+  } catch (error) {
+    showProductToast(error.message || "The calendar change could not be validated.");
+  }
   render();
 }
 
@@ -7244,7 +7273,7 @@ confirmScheduleBtn.addEventListener("click", async () => {
   }
 });
 
-rejectScheduleBtn.addEventListener("click", () => {
+rejectScheduleBtn.addEventListener("click", async () => {
   if (rejectScheduleBtn.dataset.mode === "confirmed") {
     activeSelectionMode = "none";
     activeId = null;
@@ -7253,8 +7282,24 @@ rejectScheduleBtn.addEventListener("click", () => {
     render();
     return;
   }
+  if (backendOnline && pendingSchedulePlan?.base_plan_id && pendingSchedulePlan?.plan_id) {
+    try {
+      const response = await api("/api/plans/revisions/cancel", {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: currentUserId(),
+          plan_id: pendingSchedulePlan.plan_id,
+          base_plan_id: pendingSchedulePlan.base_plan_id
+        })
+      });
+      if (response.plan) confirmedSchedulePlan = response.plan;
+    } catch (error) {
+      showProductToast(error.message || "The draft revision could not be cancelled.");
+      return;
+    }
+  }
   pendingSchedulePlan = null;
-  addChatMessage("ai", "Schedule cancelled", "This proposal was not added to the calendar. Add or revise constraints to generate another plan.");
+  showProductToast("Draft changes cancelled. The confirmed calendar was restored.");
   render();
 });
 
@@ -7605,6 +7650,45 @@ async function resumeInterruptedTask(task) {
       ? currentExecutionState.session
       : executionSessionForTask(task);
     if (backendOnline && session?.execution_session_id) {
+      const impactResponse = await api("/api/schedules/local-adjustment", {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: currentUserId(), action: "resume", task_id: task.id, use_ai: true,
+          execution_session_id: session.execution_session_id,
+          remaining_minutes: remainingMinutes,
+          request_id: crypto.randomUUID?.() || `resume-impact-${Date.now()}`
+        })
+      });
+      const impact = impactResponse.evaluation || {};
+      if (!impact.can_resume_directly && impact.requires_adjustment) {
+        const adjust = window.confirm(`You have ${remainingMinutes} minutes remaining. Continuing now may affect ${impact.affected_task_ids?.length || 1} later session(s). Continue and review an adjustment draft?`);
+        if (!adjust) {
+          showProductToast("The current calendar was kept. Choose another resume time when ready.");
+          rightRailMode = "plan";
+          activeSelectionMode = "auto";
+          render();
+          return;
+        }
+        const revisionResponse = await api("/api/schedules/local-adjustment", {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: currentUserId(), action: "resume", choice: "continue_and_adjust", use_ai: true,
+            task_id: task.id, execution_session_id: session.execution_session_id,
+            remaining_minutes: remainingMinutes,
+            request_id: crypto.randomUUID?.() || `resume-revision-${Date.now()}`
+          })
+        });
+        if (revisionResponse.evaluation?.proposed_plan) {
+          pendingSchedulePlan = revisionResponse.evaluation.proposed_plan;
+          rightRailMode = "plan";
+          activeSelectionMode = "auto";
+          showProductToast("Resume adjustment ready — review the changed times first.");
+          render();
+          return;
+        }
+      }
+    }
+    if (backendOnline && session?.execution_session_id) {
       const started = await api("/api/execution-sessions/start", {
         method: "POST",
         body: JSON.stringify({
@@ -7791,6 +7875,27 @@ function hourFromDate(value) {
   return value.getHours() + value.getMinutes() / 60;
 }
 
+async function requestPauseBackendPlan(task, resumeAt = null, mode = "resume") {
+  if (!backendOnline) return { plan: null, error: "The backend is unavailable." };
+  try {
+    const response = await api("/api/schedules/local-adjustment", {
+      method: "POST",
+      body: JSON.stringify({
+        user_id: currentUserId(), action: "pause", task_id: task.id, use_ai: true,
+        execution_session_id: currentExecutionState?.session?.execution_session_id || null,
+        remaining_minutes: taskWorkRemainingMinutes(task),
+        desired_resume_at: resumeAt?.toISOString() || null,
+        replan: mode === "reschedule",
+        request_id: crypto.randomUUID?.() || `pause-adjustment-${Date.now()}`
+      })
+    });
+    const plan = response.evaluation?.proposed_plan || null;
+    return plan ? { ...plan, plan, error: null } : { plan: null, error: response.evaluation?.reason || null };
+  } catch (error) {
+    return { plan: null, error: error.message || "No valid adjustment could be generated." };
+  }
+}
+
 function pauseContinuationDraft(task, resumeAt, executionSession) {
   if (!confirmedSchedulePlan?.plan_patch?.length || !resumeAt || !executionSession) return { plan: null, error: null };
   const today = (appNow().getDay() + 6) % 7;
@@ -7929,19 +8034,14 @@ pauseForm.addEventListener("submit", async (event) => {
   activeSelectionMode = "auto";
   rightRailMode = "plan";
   if (resumeChoice === "reschedule" && stopReason !== "blocked") {
-    const localDraft = await requestTentativeSchedule(
-      "Reschedule only this interrupted task's remaining work. Keep every unaffected session and date unchanged; preserve active time, fixed events and unavailable time.",
-      [task]
-    );
+    const localDraft = await requestPauseBackendPlan(task, null, "reschedule");
     if (localDraft?.plan_patch?.length && confirmedSchedulePlan?.plan_patch?.length) {
-      const unchanged = confirmedSchedulePlan.plan_patch.filter((block) => String(block.task_id) !== String(task.id));
-      pendingSchedulePlan.plan_patch = [...unchanged, ...localDraft.plan_patch];
-      pendingSchedulePlan.local_adjustment = { task_id: task.id, scope: "affected_task_only", untouched_block_count: unchanged.length };
+      pendingSchedulePlan = localDraft;
       recalculateAllPendingTaskSessions();
     }
     showProductToast("Pause saved · review the proposed continuation time.");
   } else if (resumeAt && stopReason !== "blocked") {
-    const local = pauseContinuationDraft(task, resumeAt, currentExecutionState?.session);
+    const local = await requestPauseBackendPlan(task, resumeAt, "resume");
     if (local.error) {
       showProductToast(local.error);
     } else if (local.plan) {
@@ -8069,14 +8169,23 @@ document.getElementById("updateTodayAfterEarlyBtn")?.addEventListener("click", a
     showProductToast("No later work needs to move. The time stays free.");
     return;
   }
-  const draft = await requestTentativeSchedule("Update only today's not-yet-started sessions after an early finish. Preserve every other date and all fixed or unavailable time.", affected);
-  if (draft?.plan_patch?.length && confirmedSchedulePlan?.plan_patch?.length) {
-    const affectedIds = new Set(affected.map((task) => String(task.id)));
-    const unchanged = confirmedSchedulePlan.plan_patch.filter((block) => Number(block.day_index) !== today || !affectedIds.has(String(block.task_id)));
-    pendingSchedulePlan.plan_patch = [...unchanged, ...draft.plan_patch.filter((block) => Number(block.day_index) === today)];
-    pendingSchedulePlan.local_adjustment = { scope: "today_after_early_finish", day_index: today };
-    recalculateAllPendingTaskSessions();
+  try {
+    const response = await api("/api/schedules/local-adjustment", {
+      method: "POST",
+      body: JSON.stringify({
+        user_id: currentUserId(), action: "early_finish", choice: "review_today", use_ai: true,
+        request_id: crypto.randomUUID?.() || `early-finish-review-${Date.now()}`
+      })
+    });
+    if (response.evaluation?.proposed_plan) {
+      pendingSchedulePlan = response.evaluation.proposed_plan;
+      recalculateAllPendingTaskSessions();
+    } else {
+      showProductToast(response.evaluation?.reason || "No later session needs to move.");
+    }
     render();
+  } catch (error) {
+    showProductToast(error.message || "Today's plan could not be reviewed.");
   }
 });
 
@@ -8242,7 +8351,22 @@ dailyCheckInForm?.addEventListener("submit", async (event) => {
   markDailyCheckInSeen();
   const changeNote = dailyChangeNote.value.trim();
   dailyCheckInDialog.close("updated");
-  await saveRuntimeStateToBackend({ daily_checkin: true, daily_note: changeNote }).catch((error) => console.error(error));
+  const runtimeState = await saveRuntimeStateToBackend({ daily_checkin: true, daily_note: changeNote }).catch((error) => { console.error(error); return null; });
+  if (backendOnline && runtimeState) {
+    try {
+      const response = await api("/api/schedules/local-adjustment", {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: currentUserId(), action: "daily_checkin", runtime_state: runtimeState, use_ai: true,
+          request_id: crypto.randomUUID?.() || `daily-checkin-evaluation-${Date.now()}`
+        })
+      });
+      if (response.evaluation?.proposed_plan) pendingSchedulePlan = response.evaluation.proposed_plan;
+      showProductToast(response.evaluation?.reason || "Today's next session was evaluated.");
+    } catch (error) {
+      console.error(error);
+    }
+  }
   setBackendStatus("Today’s state will only affect the next unstarted session", true);
   render();
   if (changeNote) await handleChatTurn(changeNote);
