@@ -3634,6 +3634,66 @@ class Store:
             updated = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (session_id,)).fetchone()
         return self.execution_session_row(updated)
 
+    def analyze_execution_impact(self, user_id: str, payload: dict) -> dict:
+        """Deterministically identify future Sessions affected by an execution change."""
+        session_id = str(payload.get("execution_session_id") or "").strip()
+        if not session_id:
+            raise ValueError("execution_session_id is required")
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM execution_sessions WHERE id=? AND user_id=?",
+                (session_id, user_id),
+            ).fetchone()
+        if not row:
+            raise KeyError(session_id)
+        session = self.execution_session_row(row)
+        profile = self.ensure_profile(user_id)
+        current = self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai")
+        remaining_minutes = max(
+            int(payload.get("remaining_minutes") if payload.get("remaining_minutes") is not None else session.get("session_remaining_minutes") or 0),
+            0,
+        )
+        estimated_end = current + timedelta(minutes=remaining_minutes)
+        future = [
+            item for item in self.list_execution_sessions(user_id, ["ready"])
+            if item.get("execution_session_id") != session_id
+            and item.get("week_id") == session.get("week_id")
+            and item.get("plan_revision") == session.get("plan_revision")
+            and item.get("planned_start_at")
+        ]
+        conflicts = []
+        for item in future:
+            try:
+                planned_start = datetime.fromisoformat(str(item["planned_start_at"]))
+                if planned_start.tzinfo is None:
+                    planned_start = planned_start.replace(tzinfo=current.tzinfo)
+                if planned_start < estimated_end and planned_start >= current:
+                    conflicts.append({
+                        "execution_session_id": item["execution_session_id"],
+                        "task_id": item["task_id"],
+                        "task_title": item.get("task_title") or item.get("title"),
+                        "planned_start_at": item.get("planned_start_at"),
+                        "planned_end_at": item.get("planned_end_at"),
+                        "overlap_minutes": max(int((estimated_end - planned_start).total_seconds() // 60), 1),
+                    })
+            except (TypeError, ValueError):
+                continue
+        return {
+            "action": str(payload.get("action") or "resume"),
+            "execution_session_id": session_id,
+            "evaluated_at": current.isoformat(),
+            "remaining_minutes": remaining_minutes,
+            "estimated_end_at": estimated_end.isoformat(),
+            "requires_plan_adjustment": bool(conflicts),
+            "affected_sessions": conflicts,
+            "options": ["continue_without_changes"] if not conflicts else [
+                "shorten_current_task",
+                "reschedule_future_tasks",
+                "regenerate_today_plan",
+                "edit_plan_manually",
+            ],
+        }
+
     def end_execution_session(self, user_id: str, payload: dict) -> dict:
         session_id = str(payload.get("execution_session_id") or "")
         timestamp = now_ms()
@@ -5783,6 +5843,12 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 user_id = payload.get("user_id", "demo")
                 self.send_json({"execution_session": store.pause_execution_session(user_id, payload)})
+                return
+
+            if path == "/api/execution-sessions/impact" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                self.send_json({"impact": store.analyze_execution_impact(user_id, payload)})
                 return
 
             if path == "/api/execution-sessions/end" and method == "POST":
