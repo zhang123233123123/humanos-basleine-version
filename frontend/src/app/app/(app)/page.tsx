@@ -22,6 +22,7 @@ import { Plus } from 'lucide-react'
 import { apiRequest } from '@/lib/client/api'
 import { useRouter } from 'next/navigation'
 import type { ExecutionSession } from '@/lib/contracts/execution-contracts'
+import { requestId } from '@/lib/client/request-id'
 
 export interface CalendarEvent {
   id: string
@@ -221,7 +222,7 @@ function TaskInspectorWrapper() {
         task_id: activeEvent.id,
         start_at: task.start?.toISOString(),
         end_at: task.end?.toISOString(),
-        request_id: `task-adjust-${crypto.randomUUID()}`,
+        request_id: requestId('task-adjust'),
         task_patch: {
           title: task.title,
           priority: task.priority,
@@ -250,7 +251,7 @@ function TaskInspectorWrapper() {
         session = ensured.execution_session
       }
       if (session && !['running', 'paused'].includes(String(session.status))) {
-        await apiRequest('/api/execution-sessions/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ execution_session_id: session.execution_session_id, request_id: `calendar-start-${crypto.randomUUID()}` }) })
+        await apiRequest('/api/execution-sessions/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ execution_session_id: session.execution_session_id, request_id: requestId('calendar-start') }) })
         await refetchEvents(currentStart, currentEnd)
       }
     } catch (error) {

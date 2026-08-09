@@ -6,6 +6,7 @@ import { ArrowLeft, CheckCircle2, Clock3, Loader2, Pause, Play, Square, TimerRes
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { apiRequest } from '@/lib/client/api'
+import { requestId } from '@/lib/client/request-id'
 import type { CurrentExecution, ExecutionImpact, ExecutionSession } from '@/lib/contracts/execution-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
@@ -23,10 +24,6 @@ function durationLabel(totalSeconds: number) {
   const minutes = Math.floor((safe % 3600) / 60)
   const seconds = safe % 60
   return [hours, minutes, seconds].map((part) => String(part).padStart(2, '0')).join(':')
-}
-
-function requestId(prefix: string) {
-  return `${prefix}-${crypto.randomUUID()}`
 }
 
 export default function FocusPage() {
