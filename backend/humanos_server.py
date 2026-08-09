@@ -1004,6 +1004,62 @@ class Store:
         is_test = bool(row and row["account_type"] == "test")
         return {"account_type": "test" if is_test else "normal", "test_clock": is_test, "qa_tools": is_test}
 
+    def developer_snapshot(self, identity: str) -> dict:
+        if not self.account_capabilities(identity).get("qa_tools"):
+            raise PermissionError("developer snapshot is available to test accounts only")
+        profile = self.ensure_profile(identity)
+        user = self.user_row(identity)
+        user_id = str(user["email"] if user else identity)
+        active_plan = self.active_plan(user_id)
+        tasks = self.list_tasks(user_id)
+        sessions = self.list_execution_sessions(user_id)
+        task_ids = {str(task.get("id")) for task in tasks}
+        active_revision = profile.get("active_plan_revision")
+        issues = []
+        active_statuses = {"ready", "running", "paused"}
+        for session in sessions:
+            session_id = session.get("execution_session_id")
+            if session.get("status") in active_statuses and active_revision is not None and session.get("plan_revision") != active_revision:
+                issues.append({"severity": "error", "code": "session_revision_mismatch", "entity_type": "execution_session", "entity_id": session_id, "message": f"Active Session revision {session.get('plan_revision')} differs from profile revision {active_revision}."})
+            if str(session.get("task_id")) not in task_ids:
+                issues.append({"severity": "error", "code": "orphan_execution_session", "entity_type": "execution_session", "entity_id": session_id, "message": "Execution Session references a missing Task."})
+        active_by_task: dict[str, list[dict]] = {}
+        for session in sessions:
+            if session.get("status") in active_statuses:
+                active_by_task.setdefault(str(session.get("task_id")), []).append(session)
+        for task_id, rows in active_by_task.items():
+            if len(rows) > 1:
+                issues.append({"severity": "warning", "code": "duplicate_active_task_sessions", "entity_type": "task", "entity_id": task_id, "message": f"Task has {len(rows)} active Sessions across revisions."})
+        for task in tasks:
+            slot = task.get("slot") or {}
+            slot_revision = slot.get("plan_revision") if isinstance(slot, dict) else None
+            if slot_revision is not None and active_revision is not None and slot_revision != active_revision and task.get("status") not in {"completed", "terminated"}:
+                issues.append({"severity": "warning", "code": "task_slot_revision_mismatch", "entity_type": "task", "entity_id": task.get("id"), "message": f"Task slot revision {slot_revision} differs from profile revision {active_revision}."})
+        with self.connect() as conn:
+            plan_rows = conn.execute("SELECT * FROM plans WHERE user_id=? ORDER BY created_at DESC LIMIT 20", (user_id,)).fetchall()
+            event_rows = conn.execute("SELECT * FROM events WHERE user_id=? ORDER BY created_at DESC LIMIT 50", (user_id,)).fetchall()
+            edit_rows = conn.execute("SELECT * FROM plan_edit_events WHERE user_id=? ORDER BY server_time DESC LIMIT 50", (user_id,)).fetchall()
+        plans = []
+        for row in plan_rows:
+            plan = from_json(row["plan_json"], {})
+            plan.update({"plan_id": row["id"], "week_id": row["week_id"], "plan_revision": row["plan_revision"], "plan_status": row["plan_status"], "created_at": row["created_at"], "updated_at": row["updated_at"], "confirmed_at": row["confirmed_at"]})
+            plans.append(plan)
+        events = [{"id": row["id"], "type": row["type"], "payload": from_json(row["payload_json"], {}), "created_at": row["created_at"]} for row in event_rows]
+        plan_edits = [{key: from_json(row[key], {}) if key in {"before_json", "after_json", "validation_result_json"} else row[key] for key in row.keys()} for row in edit_rows]
+        return {
+            "generated_at": self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai").isoformat(),
+            "account": {"email": user_id, "account_type": "test"},
+            "profile": profile,
+            "active_plan": active_plan,
+            "plans": plans,
+            "tasks": tasks,
+            "execution_sessions": sessions,
+            "latest_runtime_state": self.latest_runtime_state(user_id),
+            "events": events,
+            "plan_edit_events": plan_edits,
+            "diagnostics": {"healthy": not issues, "issue_count": len(issues), "issues": issues},
+        }
+
     def user_clock_now(self, identity: str, timezone_name: str | None = None) -> datetime:
         row = self.user_row(identity)
         target_zone = safe_timezone(timezone_name) if timezone_name else None
@@ -5683,6 +5739,11 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/account/capabilities" and method == "GET":
                 user_id = query.get("user_id", [""])[0]
                 self.send_json(store.account_capabilities(user_id))
+                return
+
+            if path == "/api/developer/snapshot" and method == "GET":
+                user_id = query.get("user_id", [""])[0]
+                self.send_json(store.developer_snapshot(user_id))
                 return
 
             if path == "/api/test-clock":

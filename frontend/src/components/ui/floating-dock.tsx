@@ -4,7 +4,7 @@ import { Chat } from '@/components/chat'
 import { cn } from '@/lib/utils'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useEffect, useMemo, useState } from 'react'
-import { Activity, Bug, CalendarRange, Home, Lightbulb, Settings, Sparkles, Timer } from 'lucide-react'
+import { Activity, Bug, CalendarRange, Code2, Home, Lightbulb, Settings, Sparkles, Timer } from 'lucide-react'
 import { useChat } from '@/hooks/use-chat'
 import { useDevice } from '@/hooks/use-device'
 import { Badge } from '@/components/ui/badge'
@@ -48,7 +48,7 @@ export const FloatingDock = () => {
       href: '/app/insights',
     },
     ...(qaEnabled
-      ? [{ title: 'QA', icon: <Bug size={24} />, href: '/app/qa' }]
+      ? [{ title: 'QA', icon: <Bug size={24} />, href: '/app/qa' }, { title: 'Data Inspector', icon: <Code2 size={24} />, href: '/app/developer' }]
       : []),
     {
       title: 'Assistant (Q)',
@@ -71,7 +71,7 @@ export const FloatingDock = () => {
       return isMobile ? '100vw' : '500px'
     }
 
-    return isMobile ? '64px' : qaEnabled ? '680px' : '600px'
+    return isMobile ? '64px' : qaEnabled ? '760px' : '600px'
   }, [chatOpen, isMobile, qaEnabled])
 
   const height = useMemo(() => {
