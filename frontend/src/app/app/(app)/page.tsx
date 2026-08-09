@@ -279,7 +279,7 @@ function TaskInspectorWrapper() {
               {t('workspace.aiGeneratedTasks')}
             </h2>
             <Button
-              className="w-full"
+              className="fixed right-4 top-20 z-[70] w-64 shadow-xl"
               onClick={handleConfirmAllPreview}
               disabled={isConfirmingAll || previewTasks.length === 0}
             >
