@@ -273,17 +273,22 @@ function TaskInspectorWrapper() {
   if (previewTasks.length > 0) {
     return (
       <aside className="w-72 border-l border-border bg-background overflow-y-auto shrink-0">
-        <div className="sticky top-0 z-10 border-b border-border bg-background p-4">
+        <div className="sticky top-0 z-20 border-b border-border bg-background/95 p-4 backdrop-blur">
           <div className="space-y-3">
-            <h2 className="text-sm font-semibold text-foreground">
-              {t('workspace.aiGeneratedTasks')}
-            </h2>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold text-foreground">
+                {t('workspace.aiGeneratedTasks')}
+              </h2>
+              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                {previewTasks.length}
+              </span>
+            </div>
             <Button
-              className="fixed right-4 top-20 z-[70] w-64 shadow-xl"
+              className="h-9 w-full rounded-xl shadow-sm"
               onClick={handleConfirmAllPreview}
               disabled={isConfirmingAll || previewTasks.length === 0}
             >
-              {isConfirmingAll ? 'Confirming...' : `${t('workspace.confirmAll')} (${previewTasks.length})`}
+              {isConfirmingAll ? 'Confirming...' : t('workspace.confirmAll')}
             </Button>
           </div>
         </div>
