@@ -1290,6 +1290,17 @@ def explanation_node(store: Any):
         ]
         if memories:
             reasons.append(f"retrieved {len(memories)} personalized memories")
+            best = memories[0]
+            metadata = best.get("metadata") or {}
+            user_explanation = str(metadata.get("user_explanation") or "").strip()
+            behavior = str(metadata.get("observed_behavior") or metadata.get("pattern_label") or "a previous adjustment")
+            historical_sentence = (
+                f"HumanOS also considered your earlier preference: {user_explanation}."
+                if user_explanation
+                else f"HumanOS also considered relevant evidence from {behavior}."
+            )
+            explanation = f"{explanation} {historical_sentence}"
+            reasons.append(historical_sentence)
         return {"explanation": explanation, "reasons": reasons}
 
     return node

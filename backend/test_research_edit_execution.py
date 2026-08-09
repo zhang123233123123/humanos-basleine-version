@@ -75,7 +75,7 @@ class ResearchEditExecutionTests(unittest.TestCase):
     def test_17_changed_plan_requires_rationale(self): self.assertTrue(self.confirm([self.moved()])["requires_rationale"])
     def test_18_rationale_confirms_changed_plan(self): self.assertEqual("confirmed", self.confirm([self.moved()], True)["plan"]["plan_status"])
     def test_19_confirmation_creates_ready_execution(self):
-        self.confirm([self.initial]); self.assertEqual("up_next", self.store.current_execution("u")["mode"])
+        self.confirm([self.initial]); self.assertEqual("ready", self.store.current_execution("u")["session"]["status"])
     def test_20_start_is_explicit(self):
         self.confirm([self.initial]); current = self.store.current_execution("u"); started = self.store.start_execution_session("u", {"execution_session_id": current["session"]["execution_session_id"], "request_id": "start-1"}); self.assertEqual("running", started["status"])
     def test_21_start_request_is_idempotent(self):

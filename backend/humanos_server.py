@@ -2921,11 +2921,31 @@ class Store:
         request_id = str(payload.get("request_id") or "").strip() or None
         timestamp = now_ms()
         event_type = str(payload.get("event_type") or "move_session")
-        valid_types = {"move_session", "resize_session", "add_session", "remove_session", "change_deadline", "change_duration", "change_priority", "change_difficulty", "select_alternative_plan", "accept_parallel_pair", "reject_parallel_pair", "undo_edit", "edit_attempt_failed"}
+        valid_types = {"move_session", "resize_session", "add_session", "remove_session", "change_deadline", "change_duration", "change_priority", "change_difficulty", "select_alternative_plan", "accept_parallel_pair", "reject_parallel_pair", "undo_edit", "edit_attempt_failed", "failed_edit_attempt"}
         if event_type not in valid_types:
             raise ValueError("Unsupported plan edit event")
         validation_result = dict(payload.get("validation_result") or {})
-        effective = bool(validation_result.get("valid", event_type != "edit_attempt_failed")) and event_type != "edit_attempt_failed"
+        failed_event = event_type in {"edit_attempt_failed", "failed_edit_attempt"}
+        effective = bool(validation_result.get("valid", not failed_event)) and not failed_event
+        memory_metadata = {
+            "kind": "plan_edit_episode",
+            "observed_behavior": event_type,
+            "user_explanation": str(payload.get("user_explanation") or ""),
+            "affected_task_id": payload.get("task_id"),
+            "affected_time": {
+                "before": payload.get("before") or {},
+                "after": payload.get("after") or {},
+            },
+            "change_type": event_type,
+            "effective": effective,
+            "undone": False,
+            "validation_failed": failed_event or not bool(validation_result.get("valid", effective)),
+            "one_time": bool(payload.get("one_time")),
+            "generalizability": str(payload.get("generalizability") or "unknown"),
+            "evidence_source": "plan_edit_event",
+            "eligible_for_pattern": effective and not bool(payload.get("one_time")),
+            "pattern_label": str(payload.get("pattern_label") or event_type),
+        }
         with self.connect() as conn:
             if request_id:
                 existing = conn.execute("SELECT * FROM plan_edit_events WHERE user_id=? AND request_id=?", (user_id, request_id)).fetchone()
@@ -2939,7 +2959,30 @@ class Store:
             )
             if event_type == "undo_edit" and payload.get("reverts_event_id"):
                 conn.execute("UPDATE plan_edit_events SET effective=0 WHERE id=? AND edit_episode_id=?", (payload.get("reverts_event_id"), episode_id))
+                rows = conn.execute(
+                    "SELECT id,metadata_json FROM memories WHERE user_id=? AND source_type='episodic_memory' AND source_id=?",
+                    (user_id, str(payload.get("reverts_event_id"))),
+                ).fetchall()
+                for memory_row in rows:
+                    metadata = from_json(memory_row["metadata_json"], {})
+                    metadata.update({"effective": False, "undone": True, "eligible_for_pattern": False})
+                    conn.execute("UPDATE memories SET metadata_json=? WHERE id=?", (as_json(metadata), memory_row["id"]))
             conn.execute("UPDATE plan_edit_episodes SET status='open',updated_at=? WHERE id=? AND user_id=?", (timestamp, episode_id, user_id))
+        if event_type != "undo_edit":
+            before = payload.get("before") or {}
+            after = payload.get("after") or {}
+            self.add_memory(
+                user_id=user_id,
+                source_type="episodic_memory",
+                source_id=event_id,
+                task_id=payload.get("task_id"),
+                text=(
+                    f"Plan edit {event_type} for task {payload.get('task_id') or 'unknown'}; "
+                    f"before {as_json(before)}; after {as_json(after)}; "
+                    f"explanation {memory_metadata['user_explanation'] or 'not provided'}."
+                ),
+                metadata=memory_metadata,
+            )
         return {"event_id": event_id, "replayed": False, "sequence_number": sequence, "effective": effective}
 
     def save_proposed_plan(self, user_id: str, decision: dict, payload: dict) -> dict:
@@ -2982,7 +3025,7 @@ class Store:
                 (timestamp, user_id, week_id),
             )
             episode_id = new_id("episode")
-            initial_snapshot = self.canonical_plan_snapshot(stored["plan_patch"])
+            initial_snapshot = self.canonical_plan_snapshot(list(payload.get("initial_plan_patch") or stored["plan_patch"]))
             research_revision = int(profile.get("research_context_revision") or (profile.get("research_context") or {}).get("revision") or 0)
             conn.execute(
                 "INSERT INTO plan_edit_episodes (id,user_id,week_id,plan_id,plan_revision,initial_plan_json,initial_plan_hash,status,research_context_revision,started_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -3023,6 +3066,7 @@ class Store:
         timezone_name = profile.get("timezone") or "Asia/Shanghai"
         week_id = str(payload.get("week_id") or profile.get("active_week_id") or iso_week_id(timezone_name=timezone_name))
         timestamp = now_ms()
+        rationale_memory: dict | None = None
         with self.connect() as conn:
             row = conn.execute(
                 "SELECT * FROM plans WHERE id=? AND user_id=?",
@@ -3112,6 +3156,34 @@ class Store:
                             "INSERT INTO plan_change_rationales (id,edit_episode_id,user_id,plan_id,plan_revision,final_plan_hash,reason_codes_json,raw_user_response,parsed_reason_json,generalizability,affected_task_ids_json,response_status,source_json,request_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                             (new_id("rationale"), episode_id, user_id, plan_id, revision, final_hash, as_json(reason_codes), raw_response, as_json(parsed_reason), rationale_payload.get("generalizability") or "not_sure", as_json(rationale_payload.get("affected_task_ids") or []), rationale_payload.get("response_status") or "answered", as_json({"observed": "system_observed", "reported": "user_self_report", "parsed": "ai_inference" if raw_response else None}), rationale_request_id, timestamp),
                         )
+                        affected_ids = list(rationale_payload.get("affected_task_ids") or [])
+                        rationale_memory = {
+                            "source_id": f"{episode_id}:{final_hash}",
+                            "task_id": str(affected_ids[0]) if affected_ids else None,
+                            "text": (
+                                f"The user changed a proposed plan. Canonical diff: {as_json(canonical_diff)}. "
+                                f"User explanation: {raw_response or 'not provided'}."
+                            ),
+                            "metadata": {
+                                "kind": "plan_change_rationale",
+                                "observed_behavior": canonical_diff,
+                                "user_explanation": raw_response,
+                                "affected_task_ids": affected_ids,
+                                "affected_time": [
+                                    item for key in ("moved", "resized", "added", "removed")
+                                    for item in canonical_diff.get(key, [])
+                                ],
+                                "change_type": "confirmed_plan_revision",
+                                "effective": True,
+                                "undone": False,
+                                "validation_failed": False,
+                                "one_time": rationale_payload.get("generalizability") == "one_time",
+                                "generalizability": rationale_payload.get("generalizability") or "not_sure",
+                                "evidence_source": "canonical_diff_and_plan_change_rationale",
+                                "eligible_for_pattern": rationale_payload.get("generalizability") != "one_time",
+                                "pattern_label": str((parsed_reason or {}).get("pattern_label") or (reason_codes[0] if reason_codes else "confirmed_plan_edit")),
+                            },
+                        }
                 conn.execute(
                     "UPDATE plan_edit_episodes SET final_plan_json=?,final_plan_hash=?,canonical_diff_json=?,status='confirmed',confirmed_at=?,updated_at=? WHERE id=? AND user_id=?",
                     (as_json(final_snapshot), final_hash, as_json(canonical_diff), timestamp, timestamp, episode_id, user_id),
@@ -3139,6 +3211,15 @@ class Store:
                 "INSERT INTO events (id,user_id,type,payload_json,created_at) VALUES (?,?,?,?,?)",
                 (new_id("evt"),user_id,"plan_confirmed",as_json({"plan_id":plan_id,"week_id":week_id,"plan_revision":revision}),timestamp),
             )
+        if rationale_memory:
+            self.add_memory(
+                user_id=user_id,
+                source_type="episodic_memory",
+                source_id=rationale_memory["source_id"],
+                task_id=rationale_memory["task_id"],
+                text=rationale_memory["text"],
+                metadata=rationale_memory["metadata"],
+            )
         return {"plan": stored,"tasks": self.list_tasks(user_id),"validation": validation,"replayed": False,"requires_rationale": False,"edit_episode_id": episode_id or None,"canonical_diff": canonical_diff}
 
     def active_plan(self, user_id: str, week_id: str | None = None) -> dict | None:
@@ -3154,6 +3235,266 @@ class Store:
         plan = from_json(row["plan_json"], {})
         plan.update({"plan_id":row["id"],"plan_revision":row["plan_revision"],"plan_status":row["plan_status"],"week_id":row["week_id"]})
         return plan
+
+    def propose_plan_revision(self, user_id: str, payload: dict) -> dict:
+        """Create a draft revision without mutating Task slots or Execution Sessions."""
+        base = self.active_plan(user_id, payload.get("week_id"))
+        if not base:
+            raise ValueError("A confirmed plan is required before creating a revision")
+        base_plan_id = str(payload.get("base_plan_id") or base.get("plan_id") or "")
+        if base_plan_id != str(base.get("plan_id") or ""):
+            raise ValueError("The calendar changed; reload the current confirmed plan")
+        plan_patch = list(payload.get("plan_patch") or [])
+        validation = self.validate_confirmed_schedule(user_id, {**payload, "plan_patch": plan_patch})
+        if not validation.get("valid"):
+            self.log_event(user_id, "failed_edit_attempt", {
+                "base_plan_id": base_plan_id,
+                "violations": validation.get("violations") or [],
+                "source": payload.get("source") or "calendar",
+            })
+            raise ValueError(f"Calendar edit violates hard constraints: {as_json(validation.get('violations') or [])}")
+        decision = dict(base)
+        decision.update({
+            "plan_patch": plan_patch,
+            "validation": validation,
+            "base_plan_id": base_plan_id,
+            "base_plan_revision": base.get("plan_revision"),
+            "local_adjustment": dict(payload.get("local_adjustment") or {}),
+            "revision_source": payload.get("source") or "calendar_edit",
+            "request_id": payload.get("request_id") or new_id("revision_request"),
+        })
+        proposed = self.save_proposed_plan(user_id, decision, {
+            "week_id": base.get("week_id"),
+            "request_id": decision["request_id"],
+            "initial_plan_patch": list(base.get("plan_patch") or []),
+        })
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE plans SET plan_status='needs_update',updated_at=? WHERE id=? AND user_id=? AND plan_status='confirmed'",
+                (now_ms(), base_plan_id, user_id),
+            )
+        proposed["base_plan_id"] = base_plan_id
+        proposed["base_plan_revision"] = base.get("plan_revision")
+        return proposed
+
+    def cancel_plan_revision(self, user_id: str, payload: dict) -> dict:
+        plan_id = str(payload.get("plan_id") or "")
+        base_plan_id = str(payload.get("base_plan_id") or "")
+        with self.connect() as conn:
+            proposed = conn.execute(
+                "SELECT id,plan_status FROM plans WHERE id=? AND user_id=?", (plan_id, user_id)
+            ).fetchone()
+            if not proposed or proposed["plan_status"] != "proposed":
+                raise ValueError("The proposed revision is no longer active")
+            conn.execute("UPDATE plans SET plan_status='superseded',updated_at=? WHERE id=? AND user_id=?", (now_ms(), plan_id, user_id))
+            conn.execute("UPDATE plan_edit_episodes SET status='canceled',updated_at=? WHERE plan_id=? AND user_id=?", (now_ms(), plan_id, user_id))
+            conn.execute("UPDATE plans SET plan_status='confirmed',updated_at=? WHERE id=? AND user_id=? AND plan_status='needs_update'", (now_ms(), base_plan_id, user_id))
+        return {"canceled_plan_id": plan_id, "plan": self.active_plan(user_id)}
+
+    @staticmethod
+    def _snap_quarter_hour(value: float) -> float:
+        return round(math.ceil(float(value) * 4 - 1e-9) / 4, 2)
+
+    def evaluate_local_adjustment(self, user_id: str, payload: dict) -> dict:
+        """Evaluate a small execution-time change against the whole confirmed plan.
+
+        DeepSeek may propose the local ordering, but only the validated backend
+        revision can reach the UI. The deterministic path keeps QA/offline mode
+        functional and uses the same revision lifecycle.
+        """
+        base = self.active_plan(user_id, payload.get("week_id"))
+        if not base:
+            raise ValueError("No confirmed plan is available")
+        profile = self.ensure_profile(user_id)
+        now = clock_now(profile.get("timezone") or "Asia/Shanghai")
+        today = now.weekday()
+        now_hour = self._snap_quarter_hour(now.hour + now.minute / 60)
+        action = str(payload.get("action") or "evaluate")
+        task_id = str(payload.get("task_id") or "")
+        patch = [dict(block) for block in (base.get("plan_patch") or [])]
+        future_today = sorted([
+            block for block in patch
+            if int(block.get("day_index", -1)) == today and float(block.get("end", 0)) > now_hour
+        ], key=lambda block: float(block.get("start", 0)))
+        result = {
+            "action": action,
+            "current_time": now.isoformat(),
+            "scope": "today_unstarted_only",
+            "affected_task_ids": [],
+            "requires_adjustment": False,
+            "can_resume_directly": False,
+            "choices": [],
+            "reason": "The current plan remains suitable.",
+        }
+        # Interactive execution adjustments are first proposed by DeepSeek.  The
+        # model never writes state directly: its complete patch is scope-checked
+        # here and then passed through the same full-plan validator/revision
+        # lifecycle as a manual calendar edit.  Tests and offline mode keep the
+        # deterministic path below by omitting use_ai or lacking an API key.
+        if payload.get("use_ai") and os.environ.get("DEEPSEEK_API_KEY", "").strip():
+            task_summaries = []
+            for candidate_id in sorted({str(block.get("task_id") or "") for block in future_today if block.get("task_id")}):
+                candidate_task = self.get_task(candidate_id, user_id)
+                if candidate_task:
+                    task_summaries.append({
+                        "task_id": candidate_id,
+                        "title": candidate_task.get("title"),
+                        "deadline": candidate_task.get("due"),
+                        "priority": candidate_task.get("priority"),
+                        "difficulty": candidate_task.get("expected_difficulty"),
+                        "remaining_minutes": (candidate_task.get("execution") or {}).get("remaining_duration_minutes", candidate_task.get("duration")),
+                    })
+            ai_proposal = chat_completion([
+                {
+                    "role": "system",
+                    "content": (
+                        "You are the HumanOS local execution planner. Return JSON only. "
+                        "You may change only today's not-yet-started task_session blocks at or after current_time. "
+                        "Never change protected time, another day, an ended/running session, task identity, total work, or a deadline. "
+                        "Use 15-minute start/end boundaries. Preserve the complete plan_patch, including unchanged blocks. "
+                        "For daily_checkin, evaluate only the next unstarted session. For pause/resume, minimize changes and state whether direct resume is safe. "
+                        "Output keys: requires_adjustment, can_resume_directly, reason, choices, affected_task_ids, plan_patch."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": as_json({
+                        "action": action,
+                        "current_time": now.isoformat(),
+                        "today_day_index": today,
+                        "task_id": task_id or None,
+                        "desired_resume_at": payload.get("desired_resume_at"),
+                        "choice": payload.get("choice"),
+                        "remaining_minutes": payload.get("remaining_minutes"),
+                        "runtime_state": payload.get("runtime_state") or self.latest_runtime_state(user_id),
+                        "tasks": task_summaries,
+                        "plan_patch": patch,
+                    }),
+                },
+            ], temperature=0.1)
+            if isinstance(ai_proposal, dict):
+                result.update({
+                    "requires_adjustment": bool(ai_proposal.get("requires_adjustment")),
+                    "can_resume_directly": bool(ai_proposal.get("can_resume_directly")),
+                    "reason": str(ai_proposal.get("reason") or result["reason"]),
+                    "choices": list(ai_proposal.get("choices") or []),
+                    "affected_task_ids": [str(item) for item in (ai_proposal.get("affected_task_ids") or [])],
+                    "proposal_source": "deepseek",
+                })
+                candidate_patch = ai_proposal.get("plan_patch")
+                if not result["requires_adjustment"] or not isinstance(candidate_patch, list):
+                    return result
+                original_by_id = {str(block.get("block_id")): block for block in patch if block.get("block_id")}
+                candidate_by_id = {str(block.get("block_id")): block for block in candidate_patch if isinstance(block, dict) and block.get("block_id")}
+                scope_valid = set(candidate_by_id) == set(original_by_id)
+                if scope_valid:
+                    for block_id, original in original_by_id.items():
+                        candidate = candidate_by_id[block_id]
+                        protected = int(original.get("day_index", -1)) != today or float(original.get("end", 0)) <= now_hour or original.get("kind") != "task_session"
+                        if protected and candidate != original:
+                            scope_valid = False
+                            break
+                if scope_valid:
+                    try:
+                        proposed = self.propose_plan_revision(user_id, {
+                            "base_plan_id": base.get("plan_id"),
+                            "week_id": base.get("week_id"),
+                            "plan_patch": candidate_patch,
+                            "source": f"local_{action}_deepseek",
+                            "local_adjustment": {
+                                "scope": "today_unstarted_only",
+                                "action": action,
+                                "task_id": task_id or None,
+                                "affected_task_ids": result["affected_task_ids"],
+                                "desired_resume_at": payload.get("desired_resume_at"),
+                                "generated_by": "deepseek",
+                                "evidence": result["reason"],
+                            },
+                            "request_id": payload.get("request_id") or new_id("local_adjustment"),
+                        })
+                        result["proposed_plan"] = proposed
+                        return result
+                    except (ValueError, KeyError):
+                        # A model proposal that fails deterministic validation is
+                        # discarded; the safe local fallback below gets a chance.
+                        result["proposal_source"] = "deterministic_fallback_after_invalid_deepseek"
+                else:
+                    result["proposal_source"] = "deterministic_fallback_after_out_of_scope_deepseek"
+            else:
+                result["proposal_source"] = "deterministic_fallback_after_unavailable_deepseek"
+        desired_resume = payload.get("desired_resume_at")
+        if action in {"pause", "resume"} and task_id:
+            task = self.get_task(task_id, user_id)
+            if not task:
+                raise KeyError(task_id)
+            target = next((block for block in future_today if str(block.get("task_id")) == task_id), None)
+            remaining = int(payload.get("remaining_minutes") or (task.get("execution") or {}).get("remaining_duration_minutes") or task.get("duration") or 15)
+            start_hour = now_hour
+            if desired_resume:
+                start_dt = datetime.fromisoformat(str(desired_resume).replace("Z", "+00:00")).astimezone(safe_timezone(profile.get("timezone") or "Asia/Shanghai"))
+                start_hour = self._snap_quarter_hour(start_dt.hour + start_dt.minute / 60)
+            end_hour = self._snap_quarter_hour(start_hour + remaining / 60)
+            later = [block for block in future_today if str(block.get("task_id")) != task_id and float(block.get("start", 0)) < end_hour and float(block.get("end", 0)) > start_hour]
+            if action == "resume" and not later:
+                result.update({"can_resume_directly": True, "reason": "Continuing now does not affect a later session."})
+                return result
+            result["choices"] = ["continue_and_adjust", "shorter_block", "choose_another_time", "keep_current_plan"]
+            if payload.get("choice") in {None, "", "keep_current_plan"} and action == "resume":
+                result.update({"requires_adjustment": bool(later), "affected_task_ids": [str(item.get("task_id")) for item in later], "reason": f"Continuing now may affect {len(later)} later session(s)."})
+                return result
+            if target:
+                duration_hours = max(0.25, remaining / 60)
+                target.update({"start": start_hour, "end": start_hour + duration_hours, "session_minutes": remaining, "planned_work_minutes": remaining, "draft_changed": True})
+                cursor = target["end"]
+                affected = [task_id]
+                for block in sorted([item for item in future_today if item is not target and float(item.get("start", 0)) < cursor], key=lambda item: float(item.get("start", 0))):
+                    duration = float(block.get("end", 0)) - float(block.get("start", 0))
+                    block["start"] = self._snap_quarter_hour(cursor + 0.25)
+                    block["end"] = round(block["start"] + duration, 2)
+                    block["draft_changed"] = True
+                    cursor = block["end"]
+                    affected.append(str(block.get("task_id")))
+                result["affected_task_ids"] = affected
+        elif action == "daily_checkin":
+            state = dict(payload.get("runtime_state") or self.latest_runtime_state(user_id))
+            next_block = next((block for block in future_today if float(block.get("start", 0)) >= now_hour), None)
+            if not next_block:
+                return result
+            next_task = self.get_task(str(next_block.get("task_id")), user_id)
+            high_capacity = int(state.get("focus", 4)) >= 6 and int(state.get("energy", 4)) >= 5 and int(state.get("stress", 4)) <= 5
+            demanding = int((next_task or {}).get("expected_difficulty") or 4) >= 5
+            if high_capacity and demanding:
+                result["reason"] = "The next demanding, ready task already fits your current high-capacity state."
+                return result
+            result["reason"] = "The next session was evaluated using today's state; no safe automatic change was necessary."
+            return result
+        elif action == "early_finish":
+            if str(payload.get("choice") or "keep_free") == "keep_free":
+                result["reason"] = "The released time remains free."
+                return result
+            result.update({"affected_task_ids": [str(item.get("task_id")) for item in future_today], "reason": "Only today's later unstarted sessions were reviewed."})
+
+        if patch == list(base.get("plan_patch") or []):
+            return result
+        local_adjustment = {
+            "scope": "today_unstarted_only",
+            "action": action,
+            "task_id": task_id or None,
+            "changed_block_ids": [str(block.get("block_id")) for block in patch if block.get("draft_changed")],
+            "affected_task_ids": result.get("affected_task_ids") or [],
+            "desired_resume_at": desired_resume,
+            "generated_by": result.get("proposal_source") or "deterministic_fallback",
+        }
+        proposed = self.propose_plan_revision(user_id, {
+            "base_plan_id": base.get("plan_id"),
+            "week_id": base.get("week_id"),
+            "plan_patch": patch,
+            "source": f"local_{action}",
+            "local_adjustment": local_adjustment,
+            "request_id": payload.get("request_id") or new_id("local_adjustment"),
+        })
+        result.update({"requires_adjustment": True, "proposed_plan": proposed})
+        return result
 
     def week_status(self, user_id: str, requested_week_id: str | None = None) -> dict:
         profile = self.ensure_profile(user_id)
@@ -3827,6 +4168,10 @@ class Store:
         groups: dict[str, list[int]] = {}
         for row in rows:
             metadata = from_json(row["metadata_json"], {})
+            if not metadata.get("eligible_for_pattern", False):
+                continue
+            if metadata.get("undone") or metadata.get("validation_failed") or metadata.get("one_time") or metadata.get("effective") is False:
+                continue
             label = metadata.get("pattern_label") or metadata.get("stop_reason")
             if label:
                 groups.setdefault(str(label), []).append(row["created_at"])
@@ -3835,7 +4180,7 @@ class Store:
                 "pattern_label": label,
                 "episode_count": len(dates),
                 "status": "candidate" if len(dates) >= 3 else "insufficient_evidence",
-                "can_suggest_update": len(set(time.strftime("%Y-%m-%d", time.localtime(date / 1000)) for date in dates)) >= 5,
+                "can_suggest_update": len(dates) >= 3,
                 "requires_user_confirmation": True,
             }
             for label, dates in groups.items()
@@ -3847,6 +4192,9 @@ class Store:
         label = str(payload.get("pattern_label") or "").strip()
         if not label:
             raise ValueError("pattern_label is required")
+        candidate = next((item for item in self.pattern_candidates(user_id) if item.get("pattern_label") == label), None)
+        if not candidate or candidate.get("status") != "candidate":
+            raise ValueError("at least three eligible similar episodes are required")
         profile = self.ensure_profile(user_id)
         patterns = list(profile.get("learned_patterns") or [])
         if not any(item.get("pattern_label") == label for item in patterns):
@@ -3913,6 +4261,14 @@ class Store:
             ).fetchall()
         scored = []
         for row in rows:
+            metadata = from_json(row["metadata_json"], {})
+            if (
+                metadata.get("effective") is False
+                or metadata.get("undone")
+                or metadata.get("validation_failed")
+                or metadata.get("one_time")
+            ):
+                continue
             vec = from_json(row["embedding_json"], [])
             score = cosine(query_vec, vec) if isinstance(vec, list) else 0.0
             scored.append(
@@ -3922,7 +4278,7 @@ class Store:
                     "source_id": row["source_id"],
                     "task_id": row["task_id"],
                     "text": row["text"],
-                    "metadata": from_json(row["metadata_json"], {}),
+                    "metadata": metadata,
                     "score": round(score, 4),
                     "created_at": row["created_at"],
                 }
@@ -5873,6 +6229,27 @@ class Handler(BaseHTTPRequestHandler):
                 user_id = query.get("user_id", ["demo"])[0]
                 week_id = query.get("week_id", [None])[0]
                 self.send_json({"plan": store.active_plan(user_id, week_id)})
+                return
+
+            if path == "/api/plans/revisions/propose" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                store.ensure_profile(user_id)
+                self.send_json({"plan": store.propose_plan_revision(user_id, payload)}, status=201)
+                return
+
+            if path == "/api/plans/revisions/cancel" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                store.ensure_profile(user_id)
+                self.send_json(store.cancel_plan_revision(user_id, payload))
+                return
+
+            if path == "/api/schedules/local-adjustment" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                store.ensure_profile(user_id)
+                self.send_json({"evaluation": store.evaluate_local_adjustment(user_id, payload)})
                 return
 
             if path == "/api/schedules/confirm" and method == "POST":
