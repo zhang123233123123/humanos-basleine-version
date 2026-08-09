@@ -122,8 +122,8 @@ export default function CheckInPage() {
   )
 
   return (
-    <main className="min-h-screen overflow-y-auto bg-[radial-gradient(circle_at_top_right,hsl(var(--primary)/0.14),transparent_36%),linear-gradient(to_bottom,hsl(var(--background)),hsl(var(--muted)/0.4))] px-4 pb-28 pt-6 md:px-8">
-      <div className="mx-auto max-w-4xl space-y-6">
+    <main className="humanos-operating-page min-h-screen overflow-y-auto px-4 pb-28 pt-6 md:px-8">
+      <div className="humanos-operating-container mx-auto max-w-6xl space-y-6">
         <header>
           <Link href={mode === 'interruption' ? '/app/focus' : '/app'} className="mb-3 inline-flex items-center text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="mr-1 h-4 w-4" />{t('checkin.back')}</Link>
           <p className="text-xs font-semibold uppercase tracking-[0.25em] text-primary">HumanOS / {mode === 'daily' ? 'Check-in' : 'Context Dump'}</p>
@@ -166,4 +166,3 @@ export default function CheckInPage() {
     </main>
   )
 }
-

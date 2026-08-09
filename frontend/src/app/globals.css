@@ -223,3 +223,86 @@
 .animate-blink {
   animation: blink 1s infinite;
 }
+.humanos-operating-page {
+  color: #1c1917;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(29, 78, 216, 0.1), transparent 32rem),
+    linear-gradient(180deg, #f7f5ef 0%, #efede7 100%);
+}
+
+.dark .humanos-operating-page {
+  color: #f5f5f4;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(37, 99, 235, 0.18), transparent 34rem),
+    linear-gradient(180deg, #090d13 0%, #0d131b 100%);
+}
+
+.humanos-operating-container > header {
+  position: relative;
+  padding: 1.5rem 0 1.75rem;
+  border-bottom: 1px solid rgba(120, 113, 108, 0.25);
+}
+
+.humanos-operating-container > header::before {
+  display: block;
+  width: 2.75rem;
+  height: 0.25rem;
+  margin-bottom: 1.25rem;
+  border-radius: 999px;
+  background: #1d4ed8;
+  content: '';
+}
+
+.humanos-operating-container > header h1 {
+  font-family: Georgia, 'Times New Roman', serif;
+  letter-spacing: -0.035em;
+}
+
+.humanos-operating-container > header p {
+  max-width: 42rem;
+  line-height: 1.65;
+}
+
+.humanos-operating-container [data-slot='card'],
+.humanos-operating-container .rounded-xl.border,
+.humanos-operating-container .rounded-2xl.border {
+  border-color: rgba(120, 113, 108, 0.22);
+  box-shadow: 0 1px 2px rgba(28, 25, 23, 0.03);
+}
+
+.humanos-operating-container [data-slot='card'] {
+  border-radius: 1.25rem;
+  background: rgba(255, 255, 255, 0.84);
+  backdrop-filter: blur(12px);
+}
+
+.dark .humanos-operating-container [data-slot='card'] {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(16, 23, 32, 0.88);
+}
+
+.humanos-operating-container input:not([type='range']),
+.humanos-operating-container select,
+.humanos-operating-container textarea {
+  border-color: rgba(120, 113, 108, 0.3);
+  border-radius: 0.75rem;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.humanos-operating-container input:not([type='range']):focus,
+.humanos-operating-container select:focus,
+.humanos-operating-container textarea:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  outline: none;
+}
+
+@media (max-width: 767px) {
+  .humanos-operating-container > header {
+    padding-top: 0.75rem;
+  }
+
+  .humanos-operating-container [data-slot='card'] {
+    border-radius: 1rem;
+  }
+}

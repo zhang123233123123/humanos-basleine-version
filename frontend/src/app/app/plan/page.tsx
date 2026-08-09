@@ -249,8 +249,8 @@ export default function WeeklyPlanPage() {
   }
 
   return (
-    <main className="min-h-screen overflow-y-auto bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.12),transparent_38%),linear-gradient(to_bottom,hsl(var(--background)),hsl(var(--muted)/0.35))] px-4 pb-28 pt-6 md:px-8">
-      <div className="mx-auto max-w-6xl space-y-6">
+    <main className="humanos-operating-page min-h-screen overflow-y-auto px-4 pb-28 pt-6 md:px-8">
+      <div className="humanos-operating-container mx-auto max-w-6xl space-y-6">
         <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <Link href="/app" className="mb-3 inline-flex items-center text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="mr-1 h-4 w-4" />{t('planning.workspace')}</Link>
@@ -344,4 +344,3 @@ export default function WeeklyPlanPage() {
     </main>
   )
 }
-

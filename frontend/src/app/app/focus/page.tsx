@@ -183,8 +183,8 @@ export default function FocusPage() {
   if (loading) return <div className="grid h-full place-items-center"><Loader2 className="h-7 w-7 animate-spin" /></div>
 
   return (
-    <main className="min-h-screen overflow-y-auto bg-[radial-gradient(circle_at_50%_0%,hsl(var(--primary)/0.16),transparent_42%),linear-gradient(to_bottom,hsl(var(--background)),hsl(var(--muted)/0.45))] px-4 pb-28 pt-6 md:px-8">
-      <div className="mx-auto max-w-5xl space-y-6">
+    <main className="humanos-operating-page min-h-screen overflow-y-auto px-4 pb-28 pt-6 md:px-8">
+      <div className="humanos-operating-container mx-auto max-w-6xl space-y-6">
         <header>
           <Link href="/app" className="mb-3 inline-flex items-center text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="mr-1 h-4 w-4" />{t('execution.workspace')}</Link>
           <p className="text-xs font-semibold uppercase tracking-[0.25em] text-primary">HumanOS / Focus</p>
