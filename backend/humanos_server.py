@@ -2354,6 +2354,21 @@ class Store:
         has_time = re.search(r"\d{1,2}\s*(点|时)|\d{1,2}[:：]\d{2}", normalize_chinese_clock(text))
         if not has_time:
             return []
+        explicit_reschedule = re.search(
+            r"(第\s*[一二两三四五六七八九\d]+\s*个?|这个|那个|改成|变成|调整到|移到|挪到|提前到|推迟到)",
+            text,
+        )
+        timed_action_parts = [
+            part
+            for part in re.split(r"(?:，|,|。|；|;|然后|再|接着|最后)", text)
+            if re.search(r"\d{1,2}\s*(?:点|时)|\d{1,2}[:：]\d{2}", normalize_chinese_clock(part))
+            and re.search(r"开会|会议|写|读|整理|完成|复习|学习|睡觉|取|拿|办|买|发|看|做|submit|finish|prepare|meeting", part, re.I)
+        ]
+        # A compact list such as "10:00开会，11:00写作业，都是一小时"
+        # describes new independent items.  Do not let the shared-duration
+        # phrase or a single recent task steal the turn as a reschedule.
+        if len(timed_action_parts) >= 2 and not explicit_reschedule:
+            return []
         has_reference_marker = re.search(r"(第[一二三四五六七八九\d]+|这个|那个|开始|在|都是|每个|改成|变成|调整到|移到|挪到|提前到|推迟到)", text)
         has_time_range = parse_clock_range(text) is not None
         references_known_task = any(

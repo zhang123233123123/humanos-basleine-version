@@ -73,6 +73,46 @@ class TaskInputLayerTests(unittest.TestCase):
         )
         self.assertEqual(4, len(tasks))
 
+    def test_compact_timed_task_list_does_not_reschedule_recent_task(self) -> None:
+        existing = self.store.create_task("user-a", {
+            "title": "睡觉打豆",
+            "due": "今天 24:00",
+            "duration": 60,
+        })
+        text = "我明天10:00开会，11:00写作业都是一个小时"
+
+        updated = self.store.parse_time_followup_for_recent_tasks(
+            "user-a",
+            text,
+            {"recent_tasks": [existing]},
+        )
+        previews = self.store.local_parse_tasks_from_text(
+            "user-a",
+            text,
+            create_tasks=False,
+        )
+
+        self.assertEqual([], updated)
+        self.assertEqual(2, len(previews))
+        self.assertIn("开会", previews[0]["title"])
+        self.assertIn("写作业", previews[1]["title"])
+
+    def test_explicit_single_task_reschedule_still_updates_recent_task(self) -> None:
+        meeting = self.store.create_task("user-a", {
+            "title": "组会",
+            "due": "明天 10:00",
+            "duration": 60,
+        })
+
+        updated = self.store.parse_time_followup_for_recent_tasks(
+            "user-a",
+            "把组会改成明天14:00",
+            {"recent_tasks": [meeting]},
+        )
+
+        self.assertEqual(1, len(updated))
+        self.assertEqual("明天 14:00", updated[0]["due"])
+
     def test_exact_dedup_is_user_scoped(self) -> None:
         payload = {"title": "完成  论文", "due": "周三", "duration": 90}
         first = self.store.create_task("user-a", payload)
