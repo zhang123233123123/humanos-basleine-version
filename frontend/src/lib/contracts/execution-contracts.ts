@@ -31,3 +31,21 @@ export interface CurrentExecution {
   task?: ExecutionSession['task'] | null
   [key: string]: unknown
 }
+
+export interface ExecutionImpact {
+  action: string
+  execution_session_id: string
+  evaluated_at: string
+  remaining_minutes: number
+  estimated_end_at: string
+  requires_plan_adjustment: boolean
+  affected_sessions: Array<{
+    execution_session_id: string
+    task_id: string
+    task_title?: string
+    planned_start_at?: string
+    planned_end_at?: string
+    overlap_minutes: number
+  }>
+  options: string[]
+}

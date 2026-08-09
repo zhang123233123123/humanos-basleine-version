@@ -6,7 +6,7 @@ import { ArrowLeft, CheckCircle2, Clock3, Loader2, Pause, Play, Square, TimerRes
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { apiRequest } from '@/lib/client/api'
-import type { CurrentExecution, ExecutionSession } from '@/lib/contracts/execution-contracts'
+import type { CurrentExecution, ExecutionImpact, ExecutionSession } from '@/lib/contracts/execution-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 
@@ -30,12 +30,13 @@ function requestId(prefix: string) {
 }
 
 export default function FocusPage() {
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [current, setCurrent] = useState<CurrentExecution | null>(null)
   const [history, setHistory] = useState<ExecutionSession[]>([])
   const [endedSession, setEndedSession] = useState<ExecutionSession | null>(null)
+  const [resumeImpact, setResumeImpact] = useState<ExecutionImpact | null>(null)
   const [now, setNow] = useState(Date.now())
   const [actualMinutes, setActualMinutes] = useState(0)
   const [completion, setCompletion] = useState<'partial' | 'completed'>('partial')
@@ -90,15 +91,26 @@ export default function FocusPage() {
   const contextWindow = (task?.contextWindow || {}) as Record<string, unknown>
   const nextStep = String(contextWindow.nextStep || contextWindow.next_step || '')
 
-  const startSession = async () => {
+  const startSession = async (skipImpactCheck = false) => {
     if (!session) return
     setSubmitting(true)
     try {
+      if (current?.mode === 'paused' && !skipImpactCheck) {
+        const analysis = await apiRequest<{ impact: ExecutionImpact }>('/api/execution-sessions/impact', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ execution_session_id: session.execution_session_id, remaining_minutes: displayRemaining, action: 'resume' }),
+        })
+        if (analysis.impact.requires_plan_adjustment) {
+          setResumeImpact(analysis.impact)
+          return
+        }
+      }
       const result = await apiRequest<{ execution_session: ExecutionSession }>('/api/execution-sessions/start', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ execution_session_id: session.execution_session_id, request_id: requestId('start') }),
       })
       setCurrent({ mode: 'running', session: result.execution_session, task })
+      setResumeImpact(null)
       setNow(Date.now())
       toast(t('execution.started'))
     } catch (error) {
@@ -212,7 +224,8 @@ export default function FocusPage() {
               <CardContent className="space-y-6 pt-6">
                 <div className="rounded-2xl border bg-background p-6 text-center"><p className="font-mono text-5xl font-semibold tracking-tight md:text-7xl">{durationLabel(elapsedSeconds)}</p><p className="mt-2 text-sm text-muted-foreground">{t('execution.elapsed')}</p></div>
                 <div className="grid grid-cols-2 gap-3"><div className="rounded-xl bg-muted p-4"><p className="text-xs text-muted-foreground">{t('execution.planned')}</p><p className="mt-1 text-xl font-semibold">{plannedMinutes} min</p></div><div className="rounded-xl bg-muted p-4"><p className="text-xs text-muted-foreground">{t('execution.remaining')}</p><p className="mt-1 text-xl font-semibold">{displayRemaining} min</p></div></div>
-                <div className="flex flex-wrap justify-center gap-3">{current?.mode === 'running' ? <><Button variant="outline" onClick={pauseSession} disabled={submitting}><Pause className="mr-2 h-4 w-4" />{t('execution.pause')}</Button><Button onClick={endSession} disabled={submitting}><Square className="mr-2 h-4 w-4" />{t('execution.end')}</Button></> : <><Button onClick={startSession} disabled={submitting}><Play className="mr-2 h-4 w-4" />{current?.mode === 'paused' ? t('execution.resume') : t('execution.start')}</Button>{current?.mode === 'paused' && <><Button variant="outline" onClick={endSession} disabled={submitting}><Square className="mr-2 h-4 w-4" />{t('execution.end')}</Button><Button variant="outline" asChild><Link href={`/app/check-in?mode=interruption&task_id=${encodeURIComponent(session.task_id)}`}><Pause className="mr-2 h-4 w-4" />{t('execution.captureContext')}</Link></Button></>}</>}</div>
+                <div className="flex flex-wrap justify-center gap-3">{current?.mode === 'running' ? <><Button variant="outline" onClick={pauseSession} disabled={submitting}><Pause className="mr-2 h-4 w-4" />{t('execution.pause')}</Button><Button onClick={endSession} disabled={submitting}><Square className="mr-2 h-4 w-4" />{t('execution.end')}</Button></> : <><Button onClick={() => void startSession()} disabled={submitting}><Play className="mr-2 h-4 w-4" />{current?.mode === 'paused' ? t('execution.resume') : t('execution.start')}</Button>{current?.mode === 'paused' && <><Button variant="outline" onClick={endSession} disabled={submitting}><Square className="mr-2 h-4 w-4" />{t('execution.end')}</Button><Button variant="outline" asChild><Link href={`/app/check-in?mode=interruption&task_id=${encodeURIComponent(session.task_id)}`}><Pause className="mr-2 h-4 w-4" />{t('execution.captureContext')}</Link></Button></>}</>}</div>
+                {resumeImpact && <div className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-amber-950"><h3 className="font-semibold">{locale === 'zh' ? '恢复任务将影响后续安排' : 'Resuming will affect your schedule'}</h3><p className="mt-2 text-sm">{locale === 'zh' ? `按当前剩余时间，预计在 ${new Date(resumeImpact.estimated_end_at).toLocaleTimeString()} 完成。` : `With the remaining work, this task is expected to finish at ${new Date(resumeImpact.estimated_end_at).toLocaleTimeString()}.`}</p><div className="mt-3 space-y-2">{resumeImpact.affected_sessions.map((affected) => <div key={affected.execution_session_id} className="rounded-xl bg-white/70 px-3 py-2 text-sm"><strong>{affected.task_title || affected.task_id}</strong><span className="ml-2">{locale === 'zh' ? `重叠 ${affected.overlap_minutes} 分钟` : `${affected.overlap_minutes} min overlap`}</span></div>)}</div><div className="mt-4 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => void startSession(true)} disabled={submitting}>{locale === 'zh' ? '仍然恢复，保持原计划' : 'Resume without changes'}</Button><Button size="sm" asChild><Link href="/app/plan?adjust=execution-delay">{locale === 'zh' ? '重新生成今日计划' : 'Regenerate today'}</Link></Button><Button size="sm" variant="secondary" asChild><Link href="/app/plan?adjust=manual">{locale === 'zh' ? '我自己修改' : 'Edit manually'}</Link></Button><Button size="sm" variant="ghost" onClick={() => setResumeImpact(null)}>{locale === 'zh' ? '暂不恢复' : 'Not now'}</Button></div></div>}
               </CardContent>
             </Card>
             <div className="space-y-4"><Card><CardHeader><CardTitle className="text-lg">{t('execution.context')}</CardTitle></CardHeader><CardContent className="space-y-3 text-sm"><p>{task?.context || t('execution.noContext')}</p>{nextStep && <div className="rounded-xl border border-primary/20 bg-primary/5 p-3"><p className="text-xs font-semibold text-primary">{t('execution.nextStep')}</p><p className="mt-1">{nextStep}</p></div>}</CardContent></Card><Card><CardHeader><CardTitle className="text-lg">{t('execution.schedule')}</CardTitle></CardHeader><CardContent className="space-y-2 text-sm"><p className="flex items-center gap-2"><Clock3 className="h-4 w-4" />{session.planned_start_at ? new Date(session.planned_start_at).toLocaleString() : '—'}</p><p className="flex items-center gap-2"><TimerReset className="h-4 w-4" />{plannedMinutes} min</p></CardContent></Card></div>
