@@ -19,8 +19,17 @@ This backend supports the current HumanOS prototype with:
 It uses Python, SQLite, LangGraph when available, and the cross-platform
 `tzdata` package for IANA time zones. The local
 embedding model is a deterministic hash embedding (`humanos-local-hash-embedding-v1`)
-so the MVP can run without API keys. It can later be replaced with FastAPI and
-pgvector/Chroma.
+so the MVP can run without API keys. When DashScope is configured, HumanOS uses
+`text-embedding-v2`, refreshes legacy vectors during retrieval, and keeps the
+local model as a network-failure fallback.
+
+Optional DashScope embedding configuration in `backend/.env`:
+
+```bash
+DASHSCOPE_API_KEY=your-key
+AI_EMBEDDING_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+AI_EMBEDDING_MODEL=text-embedding-v2
+```
 
 `backend/humanos_graph.py` uses LangGraph's `StateGraph` when `langgraph` is
 installed. If the package is not installed, it runs the same Profile -> State ->

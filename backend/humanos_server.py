@@ -52,6 +52,16 @@ def load_local_env() -> None:
 load_local_env()
 
 
+DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "").strip()
+AI_EMBEDDING_BASE_URL = os.environ.get(
+    "AI_EMBEDDING_BASE_URL",
+    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+).rstrip("/")
+AI_EMBEDDING_URL = f"{AI_EMBEDDING_BASE_URL}/embeddings" if DASHSCOPE_API_KEY else ""
+AI_EMBEDDING_MODEL = os.environ.get("AI_EMBEDDING_MODEL", "text-embedding-v2").strip()
+LOCAL_EMBEDDING_MODEL = "humanos-local-hash-embedding-v1"
+
+
 TEST_MODE = os.environ.get("HUMANOS_TEST_MODE", "").strip() == "1"
 QA_MODE = TEST_MODE and os.environ.get("HUMANOS_QA_DB", "").strip() == "1"
 QA_SCENARIO_DIR = Path(
@@ -168,7 +178,7 @@ def tokenize(text: str) -> list[str]:
     return words or ["empty"]
 
 
-def embed_text(text: str) -> list[float]:
+def local_embed_text(text: str) -> list[float]:
     vec = [0.0] * VECTOR_DIMS
     for token in tokenize(text):
         digest = hashlib.sha256(token.encode("utf-8")).digest()
@@ -177,6 +187,29 @@ def embed_text(text: str) -> list[float]:
         vec[idx] += sign
     norm = math.sqrt(sum(v * v for v in vec)) or 1.0
     return [v / norm for v in vec]
+
+
+def embedding_for_text(text: str) -> tuple[list[float], str]:
+    if AI_EMBEDDING_URL:
+        try:
+            request = Request(
+                AI_EMBEDDING_URL,
+                data=as_json({"model": AI_EMBEDDING_MODEL, "input": text}).encode("utf-8"),
+                headers={"Authorization": f"Bearer {DASHSCOPE_API_KEY}", "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(request, timeout=15) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            vector = [float(value) for value in payload["data"][0]["embedding"]]
+            norm = math.sqrt(sum(value * value for value in vector)) or 1.0
+            return [value / norm for value in vector], AI_EMBEDDING_MODEL
+        except Exception as exc:
+            print(f"DashScope embedding unavailable; using local fallback ({type(exc).__name__})")
+    return local_embed_text(text), LOCAL_EMBEDDING_MODEL
+
+
+def embed_text(text: str) -> list[float]:
+    return embedding_for_text(text)[0]
 
 
 def cosine(a: list[float], b: list[float]) -> float:
@@ -3763,6 +3796,7 @@ class Store:
         metadata: dict,
     ) -> dict:
         memory_id = new_id("mem")
+        embedding, embedding_model = embedding_for_text(text)
         memory = {
             "id": memory_id,
             "user_id": user_id,
@@ -3771,7 +3805,7 @@ class Store:
             "task_id": task_id,
             "text": text,
             "metadata": metadata,
-            "embedding_model": "humanos-local-hash-embedding-v1",
+            "embedding_model": embedding_model,
             "created_at": now_ms(),
         }
         with self.connect() as conn:
@@ -3791,22 +3825,31 @@ class Store:
                     task_id,
                     text,
                     as_json(metadata | {"embedding_model": memory["embedding_model"]}),
-                    as_json(embed_text(text)),
+                    as_json(embedding),
                     memory["created_at"],
                 ),
             )
         return memory
 
     def search_memories(self, user_id: str, query: str, top_k: int = 5) -> list[dict]:
-        query_vec = embed_text(query)
+        query_vec, query_model = embedding_for_text(query)
         with self.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM memories WHERE user_id=? ORDER BY created_at DESC LIMIT 200",
                 (user_id,),
             ).fetchall()
         scored = []
+        refreshed = []
         for row in rows:
             vec = from_json(row["embedding_json"], [])
+            metadata = from_json(row["metadata_json"], {})
+            stored_model = metadata.get("embedding_model") if isinstance(metadata, dict) else None
+            if stored_model != query_model or not isinstance(vec, list) or len(vec) != len(query_vec):
+                vec, stored_model = embedding_for_text(row["text"])
+                if stored_model == query_model:
+                    metadata = dict(metadata) if isinstance(metadata, dict) else {}
+                    metadata["embedding_model"] = stored_model
+                    refreshed.append((as_json(metadata), as_json(vec), row["id"]))
             score = cosine(query_vec, vec) if isinstance(vec, list) else 0.0
             scored.append(
                 {
@@ -3815,11 +3858,14 @@ class Store:
                     "source_id": row["source_id"],
                     "task_id": row["task_id"],
                     "text": row["text"],
-                    "metadata": from_json(row["metadata_json"], {}),
+                    "metadata": metadata,
                     "score": round(score, 4),
                     "created_at": row["created_at"],
                 }
             )
+        if refreshed:
+            with self.connect() as conn:
+                conn.executemany("UPDATE memories SET metadata_json=?,embedding_json=? WHERE id=?", refreshed)
         scored.sort(key=lambda item: item["score"], reverse=True)
         return scored[:top_k]
 
@@ -5437,7 +5483,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({
                     "ok": True,
                     "db": str(DB_PATH),
-                    "embedding_model": "humanos-local-hash-embedding-v1",
+                    "embedding_model": AI_EMBEDDING_MODEL if AI_EMBEDDING_URL else LOCAL_EMBEDDING_MODEL,
                     "ai_enabled": ai_enabled,
                     "ai_provider": "deepseek" if ai_enabled else None,
                     "ai_model": os.environ.get("DEEPSEEK_MODEL", "deepseek-chat") if ai_enabled else None,
