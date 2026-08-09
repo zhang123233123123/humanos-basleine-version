@@ -5,7 +5,7 @@ export async function GET() {
   const userId = await getHumanOSUserId()
   if (!userId) return unauthorizedResponse()
   try {
-    return Response.json(await humanosRequest('GET', '/api/test-clock'))
+    return Response.json(await humanosRequest('GET', `/api/test-clock?user_id=${encodeURIComponent(userId)}`))
   } catch (error) {
     return humanosErrorResponse(error)
   }

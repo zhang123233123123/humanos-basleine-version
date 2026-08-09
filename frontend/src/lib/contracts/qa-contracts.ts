@@ -16,6 +16,13 @@ export interface TestClock {
   simulated_now: string
   time_scale: number
   week_id: string
+  using_real_time?: boolean
+}
+
+export interface AccountCapabilities {
+  account_type: 'normal' | 'test'
+  test_clock: boolean
+  qa_tools: boolean
 }
 
 export interface QAScenario {

@@ -15,9 +15,9 @@ export const FloatingDock = () => {
   const [qaEnabled, setQaEnabled] = useState(false)
 
   useEffect(() => {
-    fetch('/api/health', { cache: 'no-store' })
+    fetch('/api/account/capabilities', { cache: 'no-store' })
       .then((response) => response.ok ? response.json() : null)
-      .then((health) => setQaEnabled(Boolean(health?.test_mode)))
+      .then((capabilities) => setQaEnabled(Boolean(capabilities?.qa_tools)))
       .catch(() => setQaEnabled(false))
   }, [])
 
