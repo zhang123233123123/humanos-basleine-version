@@ -59,6 +59,9 @@ function TaskInspectorWrapper() {
     progress?: string
     nextStep?: string
     openQuestions?: string
+    duration?: number
+    deadlineAt?: string
+    due?: string
   }) => {
     const previewId = activeEvent?.uniqueId
     await apiRequest('/api/tasks', {
@@ -66,10 +69,12 @@ function TaskInspectorWrapper() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: task.title,
-        start_at: task.start?.toISOString() || new Date().toISOString(),
-        deadline_at: task.end?.toISOString(),
+        deadline_at: task.deadlineAt || task.end?.toISOString(),
+        due: task.due,
+        duration: task.duration,
+        estimated_duration: task.duration,
         priority: task.priority || 'medium',
-        status: 'scheduled',
+        status: 'queued',
         context: task.context || task.description || '',
         progress: task.progress || '',
         next_step: task.nextStep || '',
@@ -107,6 +112,9 @@ function TaskInspectorWrapper() {
     nextStep?: string
     openQuestions?: string
     uniqueId: string
+    duration?: number
+    deadlineAt?: string
+    due?: string
   }) => {
     const previewId = task.uniqueId
     if (previewId) {
@@ -118,10 +126,12 @@ function TaskInspectorWrapper() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: task.title,
-        start_at: task.start?.toISOString() || new Date().toISOString(),
-        deadline_at: task.end?.toISOString(),
+        deadline_at: task.deadlineAt || task.end?.toISOString(),
+        due: task.due,
+        duration: task.duration,
+        estimated_duration: task.duration,
         priority: task.priority || 'medium',
-        status: 'scheduled',
+        status: 'queued',
         context: task.context || task.description || '',
         progress: task.progress || '',
         next_step: task.nextStep || '',
@@ -139,6 +149,14 @@ function TaskInspectorWrapper() {
       setEvents(useEvents.getState().events.filter((e) => e.id !== previewId))
     }
     if (previewId) removeFromPreviewTasks(previewId)
+  }
+
+  const handleDelete = async (task: { id: string }) => {
+    await apiRequest('/api/tasks', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_id: task.id }) })
+    setEvents(useEvents.getState().events.filter((event) => String(event.id) !== task.id))
+    setActiveEvent(null)
+    await refetchEvents(currentStart, currentEnd)
+    toast('Task deleted. The weekly plan needs regeneration.')
   }
 
   const confirmAllPreview = async () => {
@@ -293,7 +311,9 @@ function TaskInspectorWrapper() {
           progress: activeEvent.progress,
           nextStep: activeEvent.nextStep,
           openQuestions: activeEvent.openQuestions,
-          duration: undefined,
+          duration: activeEvent.duration,
+          deadlineAt: activeEvent.deadlineAt,
+          due: activeEvent.due,
           isPreview: activeEvent.isPreview,
           start: activeEvent.start,
           end: activeEvent.end,
@@ -302,6 +322,7 @@ function TaskInspectorWrapper() {
         onReject={activeEvent.isPreview ? handleReject : undefined}
         onSave={!activeEvent.isPreview && activeEvent.id ? handleSave : undefined}
         onOpenFocus={!activeEvent.isPreview && activeEvent.id ? openFocus : undefined}
+        onDelete={!activeEvent.isPreview && activeEvent.id ? handleDelete : undefined}
       />
     )
   }

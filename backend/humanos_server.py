@@ -3659,6 +3659,10 @@ class Store:
                 "UPDATE plans SET plan_status='needs_update',updated_at=? WHERE user_id=? AND week_id=? AND plan_status='confirmed'",
                 (timestamp,user_id,current.get("week_id") or iso_week_id()),
             )
+            conn.execute(
+                "UPDATE execution_sessions SET status='superseded',updated_at=? WHERE user_id=? AND task_id=? AND status IN ('ready','paused')",
+                (timestamp,user_id,task_id),
+            )
         self.log_event(current["user_id"], "task_archived", {"task_id": task_id, "title": current["title"]})
         return {"id": task_id, "deleted": False, "archived": True}
 

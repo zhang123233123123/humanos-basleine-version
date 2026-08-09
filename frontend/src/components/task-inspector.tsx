@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { Button } from '@/components/ui/button'
-import { Check, Play, Save, X } from 'lucide-react'
+import { Check, Play, Save, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface TaskDetail {
@@ -20,6 +20,8 @@ interface TaskDetail {
   isPreview?: boolean
   start?: Date | null
   end?: Date | null
+  deadlineAt?: string
+  due?: string
 }
 
 interface TaskInspectorProps {
@@ -28,13 +30,15 @@ interface TaskInspectorProps {
   onReject?: () => void
   onSave?: (task: TaskDetail) => Promise<void>
   onOpenFocus?: (task: TaskDetail) => Promise<void>
+  onDelete?: (task: TaskDetail) => Promise<void>
 }
 
-function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus }: TaskInspectorProps) {
+function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDelete }: TaskInspectorProps) {
   const { t } = useTranslation()
   const [confirming, setConfirming] = useState(false)
   const [saving, setSaving] = useState(false)
   const [openingFocus, setOpeningFocus] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   // Editable state — initialized from task
   const [title, setTitle] = useState('')
@@ -214,6 +218,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus }: Ta
             <Save className="w-3.5 h-3.5 mr-1" />
             {t('workspace.saveChanges')}
           </Button>
+          {onDelete && <Button variant="outline" size="sm" className="mt-2 h-8 w-full border-destructive/40 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={deleting} onClick={async () => { if (!window.confirm(`Delete “${title}”?`)) return; setDeleting(true); try { await onDelete(buildTask()) } finally { setDeleting(false) } }}><Trash2 className="mr-1 h-3.5 w-3.5" />{deleting ? 'Deleting...' : 'Delete task'}</Button>}
         </div>
       )}
 
@@ -292,12 +297,12 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus }: Ta
   )
 }
 
-export function TaskInspector({ task, onConfirm, onReject, onSave, onOpenFocus }: TaskInspectorProps) {
+export function TaskInspector({ task, onConfirm, onReject, onSave, onOpenFocus, onDelete }: TaskInspectorProps) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => { setMounted(true) }, [])
   return (
     <aside className="w-72 shrink-0 border-l border-border h-full flex flex-col bg-background overflow-y-auto" suppressHydrationWarning>
-      {mounted ? <InspectorContent task={task} onConfirm={onConfirm} onReject={onReject} onSave={onSave} onOpenFocus={onOpenFocus} /> : null}
+      {mounted ? <InspectorContent task={task} onConfirm={onConfirm} onReject={onReject} onSave={onSave} onOpenFocus={onOpenFocus} onDelete={onDelete} /> : null}
     </aside>
   )
 }

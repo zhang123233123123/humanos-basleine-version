@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, CalendarCheck, Loader2, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react'
+import { ArrowLeft, CalendarCheck, Loader2, RefreshCw, ShieldCheck, Sparkles, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -91,6 +91,18 @@ export default function WeeklyPlanPage() {
     )))
   }
 
+  const deleteTask = async (task: HumanOSTask) => {
+    if (!task.id || !window.confirm(locale === 'zh' ? `删除任务“${task.title}”？` : `Delete “${task.title}”?`)) return
+    try {
+      await apiRequest('/api/tasks', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_id: task.id }) })
+      setTasks((current) => current.filter((item) => item.id !== task.id))
+      setDecision(null); setValidation(null); setBlocks([]); setStage('setup')
+      toast(locale === 'zh' ? '任务已删除，计划需要重新生成' : 'Task deleted. Regenerate the plan.')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : (locale === 'zh' ? '删除失败' : 'Delete failed'))
+    }
+  }
+
   const saveSetup = async () => {
     if (!profile || !weekId) return
     setSubmitting(true)
@@ -113,7 +125,7 @@ export default function WeeklyPlanPage() {
           tasks: tasks.map((task) => ({
             id: task.id,
             title: task.title,
-            due: task.due || task.deadline,
+            due: task.due || task.deadline || task.deadline_at,
             duration: Number(task.duration || task.estimated_duration || 60),
             priority: task.priority || 'medium',
             context: task.context || '',
@@ -299,11 +311,12 @@ export default function WeeklyPlanPage() {
               <CardContent className="space-y-3">
                 {tasks.length === 0 && <p className="text-sm text-muted-foreground">{t('planning.noTasks')}</p>}
                 {tasks.map((task, index) => (
-                  <div key={task.id || index} className="grid gap-2 rounded-xl border bg-background/70 p-3 md:grid-cols-[1fr_1fr_110px_100px]">
+                  <div key={task.id || index} className="grid gap-2 rounded-xl border bg-background/70 p-3 md:grid-cols-[1fr_1fr_110px_100px_40px]">
                     <Input value={task.title || ''} onChange={(event) => updateTask(index, 'title', event.target.value)} placeholder={t('planning.taskTitle')} />
-                    <Input value={String(task.due || task.deadline || '')} onChange={(event) => updateTask(index, 'due', event.target.value)} placeholder={t('planning.deadline')} />
+                    <Input value={String(task.due || task.deadline || task.deadline_at || '')} onChange={(event) => updateTask(index, 'due', event.target.value)} placeholder={t('planning.deadline')} />
                     <Input type="number" min={15} step={15} value={Number(task.duration || task.estimated_duration || 60)} onChange={(event) => updateTask(index, 'duration', Number(event.target.value))} />
                     <select className="rounded-md border bg-background px-2 text-sm" value={String(task.priority || 'medium')} onChange={(event) => updateTask(index, 'priority', event.target.value)}><option value="high">{t('taskDialog.priorityHigh')}</option><option value="medium">{t('taskDialog.priorityMedium')}</option><option value="low">{t('taskDialog.priorityLow')}</option></select>
+                    <Button type="button" size="icon" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => void deleteTask(task)} aria-label={locale === 'zh' ? '删除任务' : 'Delete task'}><Trash2 className="h-4 w-4" /></Button>
                   </div>
                 ))}
                 <div className="flex justify-end gap-2 pt-2"><Button variant="outline" onClick={saveSetup} disabled={submitting}>{t('planning.saveSetup')}</Button><Button onClick={generatePlan} disabled={submitting || weekStatus?.new_week}><Sparkles className="mr-2 h-4 w-4" />{t('planning.generate')}</Button></div>
