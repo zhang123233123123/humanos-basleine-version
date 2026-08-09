@@ -15,6 +15,12 @@ export interface ExecutionSession {
   session_remaining_minutes?: number
   started_at?: string | number | null
   paused_at?: string | number | null
+  resumed_at?: string | number | null
+  pause_reason?: string | null
+  resume_preference?: string | null
+  preferred_resume_at?: string | null
+  remaining_at_pause?: number | null
+  resumed_from_session_id?: string | null
   ended_at?: string | number | null
   task?: {
     title?: string

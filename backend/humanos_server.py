@@ -884,6 +884,11 @@ class Store:
                   accumulated_active_minutes INTEGER NOT NULL DEFAULT 0,
                   paused_at TEXT,
                   resumed_at TEXT,
+                  pause_reason TEXT,
+                  resume_preference TEXT,
+                  preferred_resume_at TEXT,
+                  remaining_at_pause INTEGER,
+                  resumed_from_session_id TEXT,
                   status TEXT NOT NULL,
                   completion_outcome TEXT,
                   request_id TEXT,
@@ -966,8 +971,17 @@ class Store:
                 "ON execution_feedback(user_id, request_id) WHERE request_id IS NOT NULL"
             )
             execution_columns = {row["name"] for row in conn.execute("PRAGMA table_info(execution_sessions)").fetchall()}
-            if "resumed_at" not in execution_columns:
-                conn.execute("ALTER TABLE execution_sessions ADD COLUMN resumed_at TEXT")
+            execution_migrations = {
+                "resumed_at": "TEXT",
+                "pause_reason": "TEXT",
+                "resume_preference": "TEXT",
+                "preferred_resume_at": "TEXT",
+                "remaining_at_pause": "INTEGER",
+                "resumed_from_session_id": "TEXT",
+            }
+            for name, definition in execution_migrations.items():
+                if name not in execution_columns:
+                    conn.execute(f"ALTER TABLE execution_sessions ADD COLUMN {name} {definition}")
             user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
             user_migrations = {
                 "account_type": "TEXT NOT NULL DEFAULT 'normal'",
@@ -3204,10 +3218,16 @@ class Store:
                 blocks_by_task.setdefault(str(block.get("task_id")), []).append(block)
                 execution_id = new_id("exec")
                 planned_minutes = int(block.get("planned_work_minutes") or block.get("session_minutes") or round((float(block["end"]) - float(block["start"])) * 60))
+                paused_source = conn.execute(
+                    "SELECT id FROM execution_sessions WHERE user_id=? AND task_id=? AND status='paused' ORDER BY updated_at DESC LIMIT 1",
+                    (user_id, str(block.get("task_id") or "")),
+                ).fetchone()
                 conn.execute(
-                    "INSERT INTO execution_sessions (id,user_id,task_id,block_id,week_id,plan_revision,planned_start_at,planned_end_at,planned_work_minutes,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,block_id,plan_revision) DO UPDATE SET planned_start_at=excluded.planned_start_at,planned_end_at=excluded.planned_end_at,planned_work_minutes=excluded.planned_work_minutes,updated_at=excluded.updated_at",
-                    (execution_id, user_id, str(block.get("task_id") or ""), str(block.get("block_id") or execution_id), week_id, revision, str(block.get("start_at") or ""), str(block.get("end_at") or ""), planned_minutes, "ready", timestamp, timestamp),
+                    "INSERT INTO execution_sessions (id,user_id,task_id,block_id,week_id,plan_revision,planned_start_at,planned_end_at,planned_work_minutes,resumed_from_session_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,block_id,plan_revision) DO UPDATE SET planned_start_at=excluded.planned_start_at,planned_end_at=excluded.planned_end_at,planned_work_minutes=excluded.planned_work_minutes,resumed_from_session_id=excluded.resumed_from_session_id,updated_at=excluded.updated_at",
+                    (execution_id, user_id, str(block.get("task_id") or ""), str(block.get("block_id") or execution_id), week_id, revision, str(block.get("start_at") or ""), str(block.get("end_at") or ""), planned_minutes, paused_source["id"] if paused_source else None, "ready", timestamp, timestamp),
                 )
+                if paused_source:
+                    conn.execute("UPDATE execution_sessions SET status='superseded',completion_outcome='continued_in_revision',updated_at=? WHERE id=?", (timestamp, paused_source["id"]))
             active_rows = conn.execute(
                 "SELECT * FROM tasks WHERE user_id=? AND week_id=? AND removed_from_week=0 AND status NOT IN ('completed','terminated')",
                 (user_id,week_id),
@@ -3719,6 +3739,10 @@ class Store:
         profile = self.ensure_profile(user_id)
         paused_at = str(payload.get("paused_at") or self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai").isoformat())
         confirmed_minutes = max(int(payload.get("actual_minutes") or 0), 0)
+        remaining_minutes = max(int(payload.get("remaining_minutes") or 0), 0)
+        pause_reason = str(payload.get("pause_reason") or "").strip()
+        resume_preference = str(payload.get("resume_preference") or "unknown").strip()
+        preferred_resume_at = str(payload.get("preferred_resume_at") or "").strip() or None
         request_id = str(payload.get("request_id") or "").strip() or None
         with self.connect() as conn:
             replay = self._execution_request_seen(conn, user_id, request_id)
@@ -3731,7 +3755,9 @@ class Store:
             if row["status"] == "running":
                 calculated += self._iso_elapsed_minutes(row["resumed_at"] or row["actual_start_at"], paused_at)
             active = max(calculated, confirmed_minutes)
-            conn.execute("UPDATE execution_sessions SET status='paused',paused_at=?,resumed_at=NULL,accumulated_active_minutes=?,updated_at=? WHERE id=? AND user_id=?", (paused_at, active, timestamp, session_id, user_id))
+            if not remaining_minutes:
+                remaining_minutes = max(int(row["planned_work_minutes"] or 0) - active, 0)
+            conn.execute("UPDATE execution_sessions SET status='paused',paused_at=?,resumed_at=NULL,accumulated_active_minutes=?,pause_reason=?,resume_preference=?,preferred_resume_at=?,remaining_at_pause=?,updated_at=? WHERE id=? AND user_id=?", (paused_at, active, pause_reason, resume_preference, preferred_resume_at, remaining_minutes, timestamp, session_id, user_id))
             conn.execute("UPDATE tasks SET status='paused',updated_at=? WHERE id=? AND user_id=?", (timestamp, row["task_id"], user_id))
             self._record_execution_request(conn, user_id, request_id, session_id, "pause", timestamp)
             updated = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (session_id,)).fetchone()
@@ -5952,7 +5978,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/execution-sessions/pause" and method == "POST":
                 payload = self.read_json()
                 user_id = payload.get("user_id", "demo")
-                self.send_json({"execution_session": store.pause_execution_session(user_id, payload)})
+                execution_session = store.pause_execution_session(user_id, payload)
+                pause_review = store.analyze_execution_impact(user_id, {**payload, "action": "pause"})
+                self.send_json({"execution_session": execution_session, "pause_review": pause_review})
                 return
 
             if path == "/api/execution-sessions/impact" and method == "POST":
