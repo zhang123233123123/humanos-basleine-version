@@ -8,20 +8,21 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { apiRequest } from '@/lib/client/api'
-import type { ContextDump, ReentryResult, RuntimeState } from '@/lib/contracts/checkin-contracts'
+import type { ContextDump, DailyPlanReview, ReentryResult, RuntimeState } from '@/lib/contracts/checkin-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 
 type Mode = 'daily' | 'interruption'
 
 export default function CheckInPage() {
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const params = useSearchParams()
   const mode: Mode = params.get('mode') === 'interruption' ? 'interruption' : 'daily'
   const taskId = params.get('task_id') || ''
   const [submitting, setSubmitting] = useState(false)
   const [saved, setSaved] = useState(false)
   const [reentry, setReentry] = useState<ReentryResult | null>(null)
+  const [dailyReview, setDailyReview] = useState<DailyPlanReview | null>(null)
   const [focus, setFocus] = useState(5)
   const [energy, setEnergy] = useState(5)
   const [stress, setStress] = useState(3)
@@ -41,7 +42,7 @@ export default function CheckInPage() {
   const saveDailyCheckIn = async () => {
     setSubmitting(true)
     try {
-      await apiRequest('/api/state-checkins', {
+      const result = await apiRequest<{ runtime_state: RuntimeState; daily_plan_review: DailyPlanReview | null }>('/api/state-checkins', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...runtimeState,
@@ -51,6 +52,7 @@ export default function CheckInPage() {
           local_date: new Date().toLocaleDateString('en-CA'),
         }),
       })
+      setDailyReview(result.daily_plan_review)
       setSaved(true)
       toast(t('checkin.saved'))
     } catch (error) {
@@ -140,6 +142,7 @@ export default function CheckInPage() {
               <label className="grid gap-1.5 text-sm"><span>{t('checkin.attentionResidue')}</span><Input value={attentionResidue} onChange={(event) => setAttentionResidue(event.target.value)} placeholder={t('checkin.attentionResiduePlaceholder')} /></label>
               <label className="grid gap-1.5 text-sm"><span>{t('checkin.dailyNote')}</span><textarea className="min-h-28 rounded-md border bg-background p-3 text-sm" value={dailyNote} onChange={(event) => setDailyNote(event.target.value)} placeholder={t('checkin.dailyNotePlaceholder')} /></label>
               {saved ? <div className="flex items-center justify-between rounded-xl bg-emerald-500/10 p-4 text-sm text-emerald-700"><span className="flex items-center gap-2"><CheckCircle2 className="h-5 w-5" />{t('checkin.saved')}</span><Button asChild size="sm"><Link href="/app">{t('checkin.openWorkspace')}</Link></Button></div> : <Button className="w-full" onClick={saveDailyCheckIn} disabled={submitting}>{submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{t('checkin.saveState')}</Button>}
+              {dailyReview?.requires_plan_adjustment && dailyReview.first_session && <div className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-amber-950"><h3 className="font-semibold">{locale === 'zh' ? '今天的第一个任务需要复核' : 'Your first session needs review'}</h3><p className="mt-2 text-sm"><strong>{dailyReview.first_session.task_title || dailyReview.first_session.task_id}</strong>{locale === 'zh' ? ` 原计划于 ${dailyReview.first_session.planned_start_at ? new Date(dailyReview.first_session.planned_start_at).toLocaleTimeString() : '—'} 开始。` : ` was planned for ${dailyReview.first_session.planned_start_at ? new Date(dailyReview.first_session.planned_start_at).toLocaleTimeString() : '—'}.`}</p>{dailyReview.recommendation && <p className="mt-2 text-sm">{locale === 'zh' ? `建议从 ${new Date(dailyReview.recommendation.start_at).toLocaleTimeString()} 开始，首段调整为 ${dailyReview.recommendation.duration_minutes} 分钟。` : `Suggested start: ${new Date(dailyReview.recommendation.start_at).toLocaleTimeString()}, with a ${dailyReview.recommendation.duration_minutes}-minute first session.`}</p>}<div className="mt-4 flex flex-wrap gap-2"><Button size="sm" asChild><Link href="/app/plan?adjust=daily-checkin">{locale === 'zh' ? '生成调整计划' : 'Generate adjustment'}</Link></Button><Button size="sm" variant="secondary" asChild><Link href="/app/plan?adjust=manual">{locale === 'zh' ? '我自己修改' : 'Edit manually'}</Link></Button><Button size="sm" variant="ghost" onClick={() => setDailyReview(null)}>{locale === 'zh' ? '保持原计划' : 'Keep current plan'}</Button></div></div>}
             </CardContent>
           </Card>
         ) : (

@@ -35,3 +35,21 @@ export interface ReentryResult {
   [key: string]: unknown
 }
 
+export interface DailyPlanReview {
+  requires_plan_adjustment: boolean
+  evaluated_at?: string
+  first_session: {
+    execution_session_id: string
+    task_id: string
+    task_title?: string
+    planned_start_at?: string
+    planned_end_at?: string
+    planned_work_minutes?: number
+  } | null
+  reason_codes: string[]
+  recommendation?: {
+    start_at: string
+    duration_minutes: number
+  }
+  options: string[]
+}

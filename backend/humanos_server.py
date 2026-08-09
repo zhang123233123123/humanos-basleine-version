@@ -3363,6 +3363,53 @@ class Store:
         self.log_event(user_id, "runtime_state_saved", state)
         return state
 
+    def evaluate_daily_checkin(self, user_id: str, state: dict) -> dict:
+        profile = self.ensure_profile(user_id)
+        current = self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai")
+        candidates = []
+        for session in self.list_execution_sessions(user_id, ["ready"]):
+            if not session.get("planned_start_at"):
+                continue
+            try:
+                planned_start = datetime.fromisoformat(str(session["planned_start_at"]))
+                if planned_start.tzinfo is None:
+                    planned_start = planned_start.replace(tzinfo=current.tzinfo)
+                if planned_start.astimezone(current.tzinfo).date() == current.date():
+                    candidates.append((planned_start, session))
+            except (TypeError, ValueError):
+                continue
+        if not candidates:
+            return {"requires_plan_adjustment": False, "first_session": None, "reason_codes": [], "options": ["keep_plan"]}
+        planned_start, session = min(candidates, key=lambda item: item[0])
+        reasons = []
+        if planned_start < current:
+            reasons.append("missed_start")
+        if int(state.get("energy") or 4) <= 3:
+            reasons.append("low_energy")
+        if int(state.get("focus") or 4) <= 3:
+            reasons.append("low_focus")
+        if int(state.get("stress") or 4) >= 6:
+            reasons.append("high_stress")
+        if state.get("readiness") in {"unsure", "need_rest"}:
+            reasons.append("not_ready")
+        planned_minutes = max(int(session.get("planned_work_minutes") or 0), 0)
+        reduced_load = any(reason in reasons for reason in {"low_energy", "low_focus", "high_stress", "not_ready"})
+        recommended_minutes = max(min(round(planned_minutes * 0.75), planned_minutes), 15) if reduced_load and planned_minutes else planned_minutes
+        task = self.get_task(str(session.get("task_id") or ""), user_id) or {}
+        first_session = dict(session)
+        first_session["task_title"] = task.get("title") or session.get("task_title")
+        return {
+            "requires_plan_adjustment": bool(reasons),
+            "evaluated_at": current.isoformat(),
+            "first_session": first_session,
+            "reason_codes": reasons,
+            "recommendation": {
+                "start_at": max(planned_start, current).isoformat(),
+                "duration_minutes": recommended_minutes,
+            },
+            "options": ["keep_plan"] if not reasons else ["apply_recommendation", "regenerate_today_plan", "edit_plan_manually", "keep_plan"],
+        }
+
     def latest_runtime_state(self, user_id: str) -> dict:
         with self.connect() as conn:
             row = conn.execute(
@@ -5798,7 +5845,9 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 user_id = payload.get("user_id", "demo")
                 store.ensure_profile(user_id)
-                self.send_json({"runtime_state": store.save_runtime_state(user_id, payload)}, status=201)
+                runtime_state = store.save_runtime_state(user_id, payload)
+                daily_plan_review = store.evaluate_daily_checkin(user_id, runtime_state) if payload.get("daily_checkin") else None
+                self.send_json({"runtime_state": runtime_state, "daily_plan_review": daily_plan_review}, status=201)
                 return
 
             if path == "/api/context-dumps" and method == "POST":
