@@ -2116,10 +2116,65 @@ class Store:
         saved = self.upsert_profile({**profile, "weekly_context": weekly})
         return {"item": matched, "weekly_context": saved.get("weekly_context", weekly)}
 
+    def calendar_advisor_turn(self, user_id: str, text: str, payload: dict) -> dict:
+        locale = str(payload.get("locale") or "zh")
+        query_markers = re.search(r"查看|总结|查询|解释|为什么|哪些|什么|空闲|下一个|show|summarize|what|why|when|free|next", text, re.I)
+        write_markers = re.search(r"创建|新增|帮我安排|调整|移动|删除|改到|推迟|提前|create|add|schedule|move|reschedule|delete", text, re.I)
+        if write_markers and not query_markers:
+            reply = "这是一个会修改任务或计划的操作。我不会在日程顾问中直接执行，已准备转交给任务规划助手生成预览。" if locale == "zh" else "This would change your tasks or plan. I will not execute it in Calendar Advisor; hand it to Task Planner to create a reviewable preview."
+            response = {"intent": "planner_handoff", "assistant_mode": "calendar_advisor", "reply": reply, "tasks": [], "handoff_required": True, "handoff_text": text, "read_only": True}
+            self.save_chat_turn(user_id, text, reply, "planner_handoff", {"intent": "planner_handoff", "assistant_mode": "calendar_advisor"}, [])
+            return response
+        profile = self.ensure_profile(user_id)
+        current = self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai")
+        tasks = self.list_tasks(user_id)
+        task_map = {str(task.get("id")): task for task in tasks}
+        sessions = self.list_execution_sessions(user_id)
+        today_sessions = []
+        for session in sessions:
+            try:
+                start = datetime.fromisoformat(str(session.get("planned_start_at") or "").replace("Z", "+00:00"))
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=current.tzinfo)
+                if start.astimezone(current.tzinfo).date() == current.date() and session.get("status") != "superseded":
+                    task = task_map.get(str(session.get("task_id"))) or {}
+                    today_sessions.append({**session, "task_title": task.get("title") or session.get("task_id")})
+            except (TypeError, ValueError):
+                continue
+        today_sessions.sort(key=lambda item: str(item.get("planned_start_at") or ""))
+        running = next((item for item in today_sessions if item.get("status") == "running"), None)
+        upcoming = next((item for item in today_sessions if item.get("status") in {"ready", "paused"}), None)
+        if locale == "zh":
+            lines = [f"今天共有 {len(today_sessions)} 个执行时段。"]
+            if running:
+                lines.append(f"当前正在进行：{running['task_title']}。")
+            if upcoming:
+                start_label = datetime.fromisoformat(str(upcoming["planned_start_at"]).replace("Z", "+00:00")).astimezone(current.tzinfo).strftime("%H:%M")
+                lines.append(f"下一项：{start_label} {upcoming['task_title']}（{upcoming['status']}）。")
+            if not today_sessions:
+                standalone_today = [task for task in tasks if str(task.get("start_at") or "").startswith(current.date().isoformat())]
+                lines.append(f"当前没有计划 Session；日历中有 {len(standalone_today)} 个独立任务。")
+            reply = "\n".join(lines)
+        else:
+            lines = [f"You have {len(today_sessions)} execution sessions today."]
+            if running:
+                lines.append(f"In progress: {running['task_title']}.")
+            if upcoming:
+                start_label = datetime.fromisoformat(str(upcoming["planned_start_at"]).replace("Z", "+00:00")).astimezone(current.tzinfo).strftime("%H:%M")
+                lines.append(f"Next: {upcoming['task_title']} at {start_label} ({upcoming['status']}).")
+            if not today_sessions:
+                lines.append("There are no planned execution sessions today.")
+            reply = "\n".join(lines)
+        response = {"intent": "calendar_query", "assistant_mode": "calendar_advisor", "reply": reply, "tasks": [], "handoff_required": False, "read_only": True, "summary": {"date": current.date().isoformat(), "session_count": len(today_sessions), "sessions": today_sessions}}
+        self.save_chat_turn(user_id, text, reply, "calendar_query", {"intent": "calendar_query", "assistant_mode": "calendar_advisor"}, [])
+        return response
+
     def chat_turn(self, user_id: str, payload: dict) -> dict:
         text = payload.get("text", "").strip()
         if not text:
             raise ValueError("text is required")
+        if payload.get("assistant_mode") == "calendar_advisor":
+            return self.calendar_advisor_turn(user_id, text, payload)
         chat_context = self.build_chat_context(user_id, text)
         chat_context["client_context"] = payload.get("client_context") or {}
         features = self.extract_behavior_features(user_id, text, chat_context)

@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     if (!userId) return unauthorizedResponse()
 
     const body = await req.json()
-    const { message, thread_id } = body
+    const { message, thread_id, assistant_mode, locale } = body
 
     if (!message) {
       return Response.json({ error: 'message is required' }, { status: 400 })
@@ -60,6 +60,8 @@ export async function POST(req: Request) {
         user_id: userId,
         text: message,
         thread_id: thread_id || undefined,
+        assistant_mode: assistant_mode || 'task_planner',
+        locale: locale || 'zh',
         current_time: new Date().toISOString(),
     })
 
