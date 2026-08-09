@@ -80,6 +80,8 @@ export interface HumanOSMapEventInput {
     nextStep: string
     openQuestions: string
     execution?: HumanOSTaskExecutionSnapshot
+    executionSessionId?: string
+    blockId?: string
     taskType?: string
   }
 }

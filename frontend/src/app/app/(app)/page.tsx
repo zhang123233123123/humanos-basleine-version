@@ -20,6 +20,8 @@ import { TaskReminder } from '@/hooks/use-task-reminders'
 import { Button } from '@/components/ui/button'
 import { Plus } from 'lucide-react'
 import { apiRequest } from '@/lib/client/api'
+import { useRouter } from 'next/navigation'
+import type { ExecutionSession } from '@/lib/contracts/execution-contracts'
 
 export interface CalendarEvent {
   id: string
@@ -33,6 +35,7 @@ export interface CalendarEvent {
 }
 
 function TaskInspectorWrapper() {
+  const router = useRouter()
   const { activeEvent, setActiveEvent, previewTasks, setPreviewTasks } = useModal()
   const { setEvents, refetchEvents, currentStart, currentEnd } = useEvents()
   const { t } = useTranslation()
@@ -222,7 +225,6 @@ function TaskInspectorWrapper() {
         task_patch: {
           title: task.title,
           priority: task.priority,
-          status: task.status,
           context: task.context || task.description || '',
           contextWindow: {
             progress: task.progress || '',
@@ -234,6 +236,20 @@ function TaskInspectorWrapper() {
     })
     toast(result.revision_created ? t('planning.confirmed') : t('event.eventUpdated'))
     await refetchEvents(currentStart, currentEnd)
+  }
+
+  const openFocus = async (task: { id: string; status?: string }) => {
+    const result = await apiRequest<{ execution_sessions: ExecutionSession[] }>('/api/execution-sessions?status=running,paused,ready')
+    const session = (result.execution_sessions || []).find((item) => String(item.task_id) === String(task.id))
+    if (!session) {
+      toast(t('execution.noSession'))
+      return
+    }
+    if (session.status === 'ready') {
+      await apiRequest('/api/execution-sessions/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ execution_session_id: session.execution_session_id, request_id: `calendar-start-${crypto.randomUUID()}` }) })
+      await refetchEvents(currentStart, currentEnd)
+    }
+    router.push('/app/focus')
   }
 
   const formatTime = (d: Date | null): string => {
@@ -272,6 +288,7 @@ function TaskInspectorWrapper() {
         onConfirm={activeEvent.isPreview ? handleConfirm : undefined}
         onReject={activeEvent.isPreview ? handleReject : undefined}
         onSave={!activeEvent.isPreview && activeEvent.id ? handleSave : undefined}
+        onOpenFocus={!activeEvent.isPreview && activeEvent.id ? openFocus : undefined}
       />
     )
   }

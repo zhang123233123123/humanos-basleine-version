@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { Button } from '@/components/ui/button'
-import { Check, X, Save } from 'lucide-react'
+import { Check, Play, Save, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface TaskDetail {
@@ -27,9 +27,10 @@ interface TaskInspectorProps {
   onConfirm?: (task: TaskDetail) => Promise<void>
   onReject?: () => void
   onSave?: (task: TaskDetail) => Promise<void>
+  onOpenFocus?: (task: TaskDetail) => Promise<void>
 }
 
-function InspectorContent({ task, onConfirm, onReject, onSave }: TaskInspectorProps) {
+function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus }: TaskInspectorProps) {
   const { t } = useTranslation()
   const [confirming, setConfirming] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -79,15 +80,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave }: TaskInspectorPr
     )
   }
 
-  const statusOptions = [
-    { value: 'queued', label: t('taskDialog.statusQueued') },
-    { value: 'scheduled', label: t('taskDialog.statusScheduled') },
-    { value: 'running', label: t('taskDialog.statusRunning') },
-    { value: 'paused', label: t('taskDialog.statusPaused') },
-    { value: 'completed', label: t('taskDialog.statusCompleted') },
-    { value: 'blocked', label: 'Blocked' },
-    { value: 'terminated', label: 'Terminated' },
-  ]
+  const statusLabels: Record<string, string> = { queued: t('taskDialog.statusQueued'), scheduled: t('taskDialog.statusScheduled'), ready: t('taskDialog.statusScheduled'), running: t('taskDialog.statusRunning'), paused: t('taskDialog.statusPaused'), ended: t('taskDialog.statusCompleted'), completed: t('taskDialog.statusCompleted'), blocked: 'Blocked', terminated: 'Terminated' }
 
   const priorityOptions = [
     { value: 'high', label: t('taskDialog.priorityHigh'), color: 'text-red-500 bg-red-500/10 border-red-500/30' },
@@ -172,18 +165,10 @@ function InspectorContent({ task, onConfirm, onReject, onSave }: TaskInspectorPr
             </div>
           </div>
 
-          {/* Status selector */}
+          {/* Status is owned by the execution lifecycle, not edited locally. */}
           <div>
             <span className={labelClass}>{t('taskDialog.statusLabel')}</span>
-            <select
-              className={`${inputClass} text-[10px]`}
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-            >
-              {statusOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
+            <span className="inline-flex rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[10px] font-semibold text-primary">{statusLabels[status] || status}</span>
           </div>
         </div>
       </div>
@@ -218,6 +203,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave }: TaskInspectorPr
       {/* Save button for existing tasks */}
       {isExistingTask && onSave && (
         <div className="border-b border-border p-3">
+          {onOpenFocus && !['completed', 'ended', 'terminated'].includes(status) && <Button size="sm" className="mb-2 h-9 w-full text-xs" onClick={() => void onOpenFocus(buildTask())}><Play className="mr-1 h-3.5 w-3.5" />{status === 'running' || status === 'paused' ? 'Open Focus' : 'Start and enter Focus'}</Button>}
           <Button
             size="sm"
             className="w-full text-xs h-8"
@@ -305,12 +291,12 @@ function InspectorContent({ task, onConfirm, onReject, onSave }: TaskInspectorPr
   )
 }
 
-export function TaskInspector({ task, onConfirm, onReject, onSave }: TaskInspectorProps) {
+export function TaskInspector({ task, onConfirm, onReject, onSave, onOpenFocus }: TaskInspectorProps) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => { setMounted(true) }, [])
   return (
     <aside className="w-72 shrink-0 border-l border-border h-full flex flex-col bg-background overflow-y-auto" suppressHydrationWarning>
-      {mounted ? <InspectorContent task={task} onConfirm={onConfirm} onReject={onReject} onSave={onSave} /> : null}
+      {mounted ? <InspectorContent task={task} onConfirm={onConfirm} onReject={onReject} onSave={onSave} onOpenFocus={onOpenFocus} /> : null}
     </aside>
   )
 }

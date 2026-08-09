@@ -73,7 +73,7 @@ function buildWindowDefault(task: HumanOSTask): Date {
   return now
 }
 
-function mapTaskToEvent(task: HumanOSTask): HumanOSMapEventInput | null {
+function mapTaskToEvent(task: HumanOSTask, session?: Record<string, any>): HumanOSMapEventInput | null {
   const contextWindow = readContextWindow(task)
   const candidateStart =
     toISOString(task.start_at) ||
@@ -117,7 +117,7 @@ function mapTaskToEvent(task: HumanOSTask): HumanOSMapEventInput | null {
     allDay: Boolean(task.all_day) || false,
     extendedProps: {
       description: task.context || '',
-      status: normalizeStatus(task.status),
+      status: normalizeStatus(session?.status === 'ready' ? task.status || 'scheduled' : session?.status || task.status),
       priority: normalizePriority(task.priority),
       attendees: task.attendees || [],
       context: task.context || '',
@@ -125,6 +125,8 @@ function mapTaskToEvent(task: HumanOSTask): HumanOSMapEventInput | null {
       nextStep,
       openQuestions,
       execution: task.execution || {},
+      executionSessionId: session?.execution_session_id,
+      blockId: session?.block_id,
       taskType: String(task.task_type || ''),
     },
   }
@@ -208,10 +210,23 @@ export async function GET(req: Request) {
 
   try {
     const query = withUserQuery('/api/tasks', userId)
-    const taskData = await humanosRequest('GET', query)
+    const [taskData, executionData] = await Promise.all([
+      humanosRequest('GET', query),
+      humanosRequest('GET', `/api/execution-sessions?user_id=${encodeURIComponent(userId)}`),
+    ])
     const tasks = parseTaskArrayFromBackend(taskData).filter((task) => !isPreviewTask(task))
+    const sessions = Array.isArray((executionData as any)?.execution_sessions) ? (executionData as any).execution_sessions : []
+    const activeRank: Record<string, number> = { running: 5, paused: 4, ready: 3, ended: 2, completed: 1, superseded: 0 }
+    const sessionByTask = new Map<string, Record<string, any>>()
+    sessions.forEach((session: Record<string, any>) => {
+      const key = String(session.task_id || '')
+      const current = sessionByTask.get(key)
+      const rank = activeRank[session.status] ?? 0
+      const currentRank = activeRank[current?.status] ?? 0
+      if (!current || rank > currentRank || (rank === currentRank && Number(session.updated_at || 0) > Number(current.updated_at || 0))) sessionByTask.set(key, session)
+    })
     const events = tasks
-      .map((task) => mapTaskToEvent(task))
+      .map((task) => mapTaskToEvent(task, sessionByTask.get(String(task.id || ''))))
       .filter((event): event is HumanOSMapEventInput => event !== null)
       .filter((event) => filterInRange(event, start || undefined, end || undefined))
     return Response.json({ events })
