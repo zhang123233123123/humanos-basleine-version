@@ -527,6 +527,7 @@ function AppContent({
             edit_episode_id: revised.edit_episode_id,
             decision: revised,
             plan_patch: nextPatch,
+            unscheduled_tasks: revised.unscheduled_tasks || [],
             rationale: {
               reason_codes: reason ? ['user_reported_schedule_change'] : [],
               raw_user_response: reason,

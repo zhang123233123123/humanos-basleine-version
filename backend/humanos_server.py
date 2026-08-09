@@ -3165,6 +3165,26 @@ class Store:
         decision.pop("plan_revision", None)
         decision.pop("confirmed_at", None)
         decision["base_plan_id"] = base_plan_id
+        allocated: dict[str, int] = {}
+        for block in decision.get("plan_patch") or []:
+            task_id = str(block.get("task_id") or "")
+            minutes = int(block.get("planned_work_minutes") or block.get("session_minutes") or round((float(block.get("end") or 0) - float(block.get("start") or 0)) * 60))
+            allocated[task_id] = allocated.get(task_id, 0) + max(minutes, 0)
+        unscheduled_by_task = {
+            str(item.get("task_id")): dict(item)
+            for item in (decision.get("unscheduled_tasks") or [])
+            if isinstance(item, dict) and item.get("task_id")
+        }
+        for task in self.list_tasks(user_id):
+            if task.get("removed_from_week") or task.get("status") in {"completed", "terminated", "blocked", "paused"} or schedule_task_kind(task) == "fixed_event":
+                continue
+            task_id = str(task.get("id") or "")
+            remaining = int((task.get("execution") or {}).get("remaining_duration_minutes", task.get("duration") or 0))
+            unallocated = max(remaining - allocated.get(task_id, 0), 0)
+            if unallocated:
+                previous = unscheduled_by_task.get(task_id, {})
+                unscheduled_by_task[task_id] = {"task_id": task_id, "remaining_minutes": unallocated, "reason": previous.get("reason") or "Task is not allocated in the active revision and was preserved during this edit."}
+        decision["unscheduled_tasks"] = list(unscheduled_by_task.values())
         request_id = str(payload.get("request_id") or "").strip() or new_id("revise")
         return self.save_proposed_plan(
             user_id,
@@ -3220,6 +3240,7 @@ class Store:
             "edit_episode_id": proposed.get("edit_episode_id"),
             "decision": proposed,
             "plan_patch": next_patch,
+            "unscheduled_tasks": proposed.get("unscheduled_tasks") or [],
             "rationale": {
                 "reason_codes": ["task_detail_schedule_change"],
                 "raw_user_response": str(payload.get("reason") or ""),
@@ -3239,7 +3260,11 @@ class Store:
         plan_patch = list(payload.get("plan_patch") or [])
         validation = self.validate_confirmed_schedule(user_id, {**payload, "plan_patch": plan_patch})
         if not validation.get("valid"):
-            raise ValueError(f"Plan violates hard constraints: {as_json(validation.get('violations') or [])}")
+            violations = validation.get("violations") or []
+            self.log_event(user_id, "plan_confirmation_rejected", {"violations": violations})
+            if any(item.get("type") == "unexplained_unallocated_work" for item in violations if isinstance(item, dict)):
+                raise ValueError("有任务仍有未安排的剩余时间。请将它加入计划，或明确选择“暂不安排”。")
+            raise ValueError("计划未通过时间冲突与工作量约束验证，请返回调整后重试。")
         profile = self.ensure_profile(user_id)
         decision_payload = dict(payload.get("decision") or {})
         episode_id = str(payload.get("edit_episode_id") or decision_payload.get("edit_episode_id") or "")
