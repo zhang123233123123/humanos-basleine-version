@@ -24,12 +24,13 @@ function toISOString(v: any): string | null {
 }
 
 function enrichTaskDates(task: any): any {
+  const isFixedEvent = String(task.task_type || task.schedule_type || '').toLowerCase() === 'fixed_event'
   // Try structured datetime fields first
   let start = toISOString(task.start_time) || toISOString(task.start_at) || toISOString(task.start) || null
   let end = toISOString(task.end_time) || toISOString(task.deadline_at) || toISOString(task.end) || null
 
   // Try parsing natural language from text fields
-  if (!start) {
+  if (!start && isFixedEvent) {
     start = parseDateField(task.due) || parseDateField(task.deadline) || parseDateField(task.title)
   }
   if (!end) {

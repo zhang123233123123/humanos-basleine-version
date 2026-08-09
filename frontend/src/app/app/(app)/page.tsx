@@ -155,10 +155,12 @@ function TaskInspectorWrapper() {
             body: JSON.stringify({
               request_id: `preview-confirm-${task.uniqueId}`,
               title: task.title,
-              start_at: task.start?.toISOString() || new Date().toISOString(),
-              deadline_at: task.end?.toISOString(),
+              deadline_at: task.deadlineAt || task.end?.toISOString(),
+              due: task.due || task.timeText,
+              duration: task.duration,
+              estimated_duration: task.duration,
               priority: task.priority || 'medium',
-              status: 'scheduled',
+              status: 'queued',
               context: task.context || task.description || '',
               progress: task.progress || '',
               next_step: task.nextStep || '',
@@ -189,6 +191,7 @@ function TaskInspectorWrapper() {
       setShowBatchReason(false)
       setBatchReason('')
       await refetchEvents(currentStart, currentEnd)
+      if (failedCount === 0) router.push('/app/plan')
     } finally {
       setIsConfirmingAll(false)
     }
@@ -619,7 +622,7 @@ function AppContent({
           const previewStart = getStart(task)
           const previewEnd = getEnd(task)
 
-          previewEvents.push({
+          if (previewStart) previewEvents.push({
             id: previewId,
             title: task.title || `Task ${index + 1}`,
             start: previewStart || defaultStart.toISOString(),
@@ -648,20 +651,23 @@ function AppContent({
 
         // Build ActiveEvent list for all tasks and show in right inspector
         const allPreviewTasks = tasks.map((task: any, index: number) => {
-          const taskStart = getStart(task) || defaultStart.toISOString()
-          const taskEnd = getEnd(task) || new Date(defaultStart.getTime() + 3600000).toISOString()
+          const taskStart = getStart(task)
+          const taskEnd = getEnd(task)
           return {
             id: task.id || 'chat-task',
-            uniqueId: previewEvents[index].id,
+            uniqueId: 'preview-' + (task.id || `${Date.now()}-${index}`),
             title: task.title || `Task ${index + 1}`,
-            start: new Date(taskStart),
-            end: new Date(taskEnd),
+            start: taskStart ? new Date(taskStart) : null,
+            end: taskEnd ? new Date(taskEnd) : null,
             allDay: task.all_day || false,
             timeText: task.due || task.deadline || '',
             description: task.context || data.turn.reply || '',
             attendees: task.attendees || [],
             status: task.status || 'pending',
             priority: task.priority || 'medium',
+            duration: Number(task.duration || task.estimated_duration || 0) || undefined,
+            deadlineAt: task.deadline_at || task.end_time || undefined,
+            due: task.due || task.deadline || undefined,
             isPreview: true,
             context: task.context || '',
             progress: task.progress || '',

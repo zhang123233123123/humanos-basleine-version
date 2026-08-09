@@ -27,6 +27,9 @@ type ActiveEvent = {
   openQuestions?: string
   previewAdjusted?: boolean
   adjustmentReason?: string
+  duration?: number
+  deadlineAt?: string
+  due?: string
 }
 
 type ModalContextType = {
