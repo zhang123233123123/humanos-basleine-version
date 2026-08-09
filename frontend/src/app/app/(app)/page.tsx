@@ -626,7 +626,11 @@ function AppContent({
             openQuestions: task.open_questions || '',
           }
         })
+        // New AI results must replace any previously selected task detail so
+        // the preview list and its bulk-confirm action are immediately visible.
+        setActiveEvent(null)
         setPreviewTasks(allPreviewTasks)
+        setRightOpen(true)
       }
       return data
     }
@@ -682,14 +686,11 @@ function AppContent({
                 dayHeaderFormat: { weekday: 'long', day: 'numeric' },
               },
             }}
-            dayHeaderContent={(arg: any) => (
-              <>
-                <span>
-                  {arg.date.toLocaleDateString('en-US', { weekday: 'short' }).replace('.', '')}
-                </span>{' '}
-                <span>{arg.date.getDate()}</span>
-              </>
-            )}
+            dayHeaderContent={(arg: any) => {
+              const weekday = arg.date.toLocaleDateString(undefined, { weekday: 'short' }).replace('.', '')
+              if (arg.view.type === 'dayGridMonth') return <span>{weekday}</span>
+              return <><span>{weekday}</span>{' '}<span>{arg.date.getDate()}</span></>
+            }}
             buttonText={{
               today: t('header.today'),
               month: t('header.month'),
@@ -701,6 +702,36 @@ function AppContent({
             selectable={false}
             datesSet={handleDatesSet}
             eventContent={function renderEventContent(arg) {
+              if (arg.view.type === 'dayGridMonth') {
+                const isPreview = Boolean(arg.event.extendedProps.isPreview)
+                return (
+                  <button
+                    type="button"
+                    className={`flex w-full min-w-0 items-center gap-1 overflow-hidden rounded px-1.5 py-0.5 text-left text-[11px] leading-4 ${isPreview ? 'border border-dashed border-primary/60 bg-primary/10' : 'bg-primary/15 text-primary'}`}
+                    onClick={() => setActiveEvent({
+                      id: arg.event.id,
+                      uniqueId: isPreview ? arg.event.id : `${arg.event.id}-${arg.event.start?.toISOString()}`,
+                      title: arg.event.title,
+                      start: arg.event.start,
+                      end: arg.event.end,
+                      allDay: arg.event.allDay,
+                      timeText: arg.timeText,
+                      description: arg.event.extendedProps.description || '',
+                      attendees: arg.event.extendedProps.attendees || [],
+                      status: arg.event.extendedProps.status || 'scheduled',
+                      priority: arg.event.extendedProps.priority || 'medium',
+                      isPreview,
+                      context: arg.event.extendedProps.context || '',
+                      progress: arg.event.extendedProps.progress || '',
+                      nextStep: arg.event.extendedProps.nextStep || '',
+                      openQuestions: arg.event.extendedProps.openQuestions || '',
+                    })}
+                  >
+                    {arg.timeText && <span className="shrink-0 opacity-70">{arg.timeText}</span>}
+                    <span className="truncate">{arg.event.title}</span>
+                  </button>
+                )
+              }
               return <ExpandableEvent {...arg} />
             }}
             editable={true}

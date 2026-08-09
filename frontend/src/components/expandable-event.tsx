@@ -37,7 +37,9 @@ export function ExpandableEvent(props: EventContentArg) {
   const isSmallThen30Minutes =
     (event.end?.getTime() || 0) - (event.start?.getTime() || 0) < 1800001
 
-  const uniqueId = `${event.id || event.title}-${event.start?.toISOString()}`
+  const uniqueId = isPreview
+    ? event.id
+    : `${event.id || event.title}-${event.start?.toISOString()}`
 
   const handleDeleteEvent = async () => {
     const eventData = {
