@@ -13,14 +13,15 @@ const authOptions: AuthOptions = {
       },
       async authorize(credentials) {
         if (!credentials?.email) return null
+        const email = credentials.email.trim().toLowerCase()
 
         try {
           const res = await fetch(`${HUMANOS_BACKEND}/api/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              email: credentials.email,
-              password: credentials.password || credentials.email,
+              email,
+              password: credentials.password || '',
             }),
           })
 
@@ -28,9 +29,9 @@ const authOptions: AuthOptions = {
 
           const data = await res.json()
           return {
-            id: data.user?.id || credentials.email,
-            email: credentials.email,
-            name: data.user?.name || credentials.email,
+            id: data.user?.id || email,
+            email,
+            name: data.user?.name || email,
             image: data.user?.avatar || null,
           }
         } catch {

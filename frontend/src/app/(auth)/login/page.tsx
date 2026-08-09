@@ -23,18 +23,23 @@ export default function LoginPage() {
       return
     }
     setLoading(true)
-    const result = await signIn('credentials', {
-      email,
-      password,
-      callbackUrl: '/app',
-      redirect: false,
-    })
-    if (result?.error) {
+    try {
+      const result = await signIn('credentials', {
+        email: email.trim().toLowerCase(),
+        password,
+        callbackUrl: '/app',
+        redirect: false,
+      })
+      if (!result?.ok || result.error) {
+        toast(t('login.loginFailed'))
+        return
+      }
+      window.location.assign(result.url || '/app')
+    } catch {
       toast(t('login.loginFailed'))
-    } else {
-      window.location.href = '/app'
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const handleRegister = async (e: React.FormEvent) => {
@@ -57,17 +62,22 @@ export default function LoginPage() {
         return
       }
       // Auto login after register
-      await signIn('credentials', {
-        email,
+      const result = await signIn('credentials', {
+        email: email.trim().toLowerCase(),
         password,
         callbackUrl: '/app',
         redirect: false,
       })
-      window.location.href = '/app/onboarding'
+      if (!result?.ok || result.error) {
+        toast(t('login.loginFailed'))
+        return
+      }
+      window.location.assign('/app/onboarding')
     } catch {
       toast(t('login.registerFailed'))
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   return (
