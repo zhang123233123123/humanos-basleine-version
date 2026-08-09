@@ -219,6 +219,9 @@ export default function WeeklyPlanPage() {
       setActivePlan(result.plan)
       setRationaleRequired(false)
       setStage('confirmed')
+      window.dispatchEvent(new CustomEvent('humanos:plan-updated', {
+        detail: { source: 'plan-confirmation', planRevision: result.plan?.plan_revision },
+      }))
       toast(t('planning.confirmed'))
     } catch (error) {
       toast(error instanceof Error ? error.message : t('planning.confirmFailed'))

@@ -73,6 +73,22 @@ export default function FocusPage() {
   }, [loadExecution])
 
   useEffect(() => {
+    const refreshExecution = () => void loadExecution()
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refreshExecution()
+    }
+
+    window.addEventListener('humanos:plan-updated', refreshExecution)
+    window.addEventListener('focus', refreshExecution)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      window.removeEventListener('humanos:plan-updated', refreshExecution)
+      window.removeEventListener('focus', refreshExecution)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
+  }, [loadExecution])
+
+  useEffect(() => {
     if (current?.mode !== 'running') return
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)

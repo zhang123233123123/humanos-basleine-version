@@ -234,6 +234,9 @@ function TaskInspectorWrapper() {
         },
       }),
     })
+    window.dispatchEvent(new CustomEvent('humanos:plan-updated', {
+      detail: { source: 'task-adjustment', revisionCreated: result.revision_created },
+    }))
     toast(result.revision_created ? t('planning.confirmed') : t('event.eventUpdated'))
     await refetchEvents(currentStart, currentEnd)
   }
@@ -539,6 +542,9 @@ function AppContent({
             },
           }),
         })
+        window.dispatchEvent(new CustomEvent('humanos:plan-updated', {
+          detail: { source: 'calendar-drag-confirmation' },
+        }))
       } else {
         await apiRequest('/api/tasks', {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
