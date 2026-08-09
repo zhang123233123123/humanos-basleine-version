@@ -10,7 +10,7 @@ import interactionPlugin, {
 import { DatesSetArg, EventDropArg } from '@fullcalendar/core'
 import CustomHeader from '@/components/custom-header'
 import { ExpandableEvent } from '@/components/expandable-event'
-import { ModalProvider, useModal } from '@/hooks/use-modal'
+import { useModal } from '@/hooks/use-modal'
 import { useEvents } from '@/hooks/use-events'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n/LanguageProvider'
@@ -794,17 +794,5 @@ export default function AppHome() {
     setChatFocusKey((k) => k + 1)
   }
 
-  return (
-    <ModalProvider>
-      <AppContent
-        calendarRef={calendarRef}
-        leftOpen={leftOpen}
-        setLeftOpen={setLeftOpen}
-        rightOpen={rightOpen}
-        setRightOpen={setRightOpen}
-        chatFocusKey={chatFocusKey}
-        triggerChatFocus={triggerChatFocus}
-      />
-    </ModalProvider>
-  )
+  return <AppContent calendarRef={calendarRef} leftOpen={leftOpen} setLeftOpen={setLeftOpen} rightOpen={rightOpen} setRightOpen={setRightOpen} chatFocusKey={chatFocusKey} triggerChatFocus={triggerChatFocus} />
 }

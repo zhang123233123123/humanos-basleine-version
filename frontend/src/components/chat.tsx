@@ -1,167 +1,128 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { useActions, readStreamableValue } from 'ai/rsc'
-import Markdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import Link from 'next/link'
-import { PlaceholdersAndVanishInput } from '@/components/ui/placeholders-and-vanish-input'
-import { ClientMessage } from '@/app/actions'
-import { ArrowLeft } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { ArrowLeft, ArrowUp, CalendarPlus, Loader2, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { motion } from 'framer-motion'
-import { toast } from 'sonner'
 import { useEvents } from '@/hooks/use-events'
-import { useTranslation } from '@/i18n/LanguageProvider'
+import { useModal } from '@/hooks/use-modal'
 
-export function Chat({
-  closeChat,
-  chatOpen,
-}: {
-  closeChat: () => void
-  chatOpen: string
-}) {
-  const [input, setInput] = useState(chatOpen)
-  const [messages, setMessages] = useState<ClientMessage[]>([])
-  const [threadId, setThreadId] = useState('')
-  const chatContainerRef = useRef<HTMLDivElement>(null)
+type Message = { role: 'user' | 'assistant'; text: string }
 
-  const { refetchEvents } = useEvents()
-  const { submitMessage } = useActions()
-  const { t } = useTranslation()
-
-  const scrollToBottom = () => {
-    if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight
-    }
+function readDate(task: any, keys: string[]): Date | null {
+  for (const key of keys) {
+    if (!task[key]) continue
+    const value = new Date(task[key])
+    if (!Number.isNaN(value.getTime())) return value
   }
+  return null
+}
 
-  const handleSubmission = async () => {
-    try {
-      setMessages((currentMessages) => [
-        ...currentMessages,
-        {
-          id: '123',
-          status: 'user.message.created',
-          text: input,
-          gui: null,
-        },
-      ])
+export function Chat({ closeChat, chatOpen }: { closeChat: () => void; chatOpen: string }) {
+  const router = useRouter()
+  const [input, setInput] = useState(chatOpen === 'Hello!' ? '' : chatOpen.trim())
+  const [messages, setMessages] = useState<Message[]>([])
+  const [pendingTasks, setPendingTasks] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const { setPreviewTasks, setActiveEvent } = useModal()
+  const { setEvents } = useEvents()
 
-      const response = await submitMessage(input, threadId)
-
-      ;(async () => {
-        for await (const delta of readStreamableValue<string>(
-          response.threadIdStream,
-        )) {
-          setThreadId(delta!)
-        }
-      })()
-      ;(async () => {
-        for await (const _ of readStreamableValue<string>(
-          response.refetchJobsStream,
-        )) {
-          refetchEvents()
-        }
-      })()
-
-      setMessages((currentMessages) => [...currentMessages, response])
-    } catch (error) {
-      toast(t('chat.errorSending'))
-    }
-  }
-
-  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setInput(event.target.value)
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      handleSubmission()
-    }
-  }
+  const quickActions = useMemo(() => [
+    '帮我安排今天的任务',
+    '查看我今天的日程',
+    '记录当前任务进度',
+    '解释接下来的安排',
+  ], [])
 
   useEffect(() => {
-    const down = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        closeChat()
-      }
-    }
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+  }, [messages, pendingTasks])
 
-    document.addEventListener('keydown', down)
-    return () => document.removeEventListener('keydown', down)
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') closeChat() }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
   }, [closeChat])
 
-  useEffect(() => {
-    scrollToBottom()
-  }, [messages])
+  async function send(value = input) {
+    const text = value.trim()
+    if (!text || loading) return
+    setInput('')
+    setMessages((current) => [...current, { role: 'user', text }])
+    setLoading(true)
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: text }),
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(body.message || body.error || 'Assistant unavailable')
+      setMessages((current) => [...current, { role: 'assistant', text: body.turn?.reply || '已完成分析。' }])
+      setPendingTasks(Array.isArray(body.turn?.tasks) ? body.turn.tasks : [])
+    } catch (error) {
+      setMessages((current) => [...current, { role: 'assistant', text: error instanceof Error ? error.message : 'Assistant unavailable' }])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function reviewTasks() {
+    const now = new Date()
+    const defaultStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9)
+    const previews = pendingTasks.map((task, index) => {
+      const start = readDate(task, ['start_time', 'start_at', 'start']) || defaultStart
+      const end = readDate(task, ['end_time', 'deadline_at', 'end']) || new Date(start.getTime() + 3600000)
+      return {
+        id: task.id || 'assistant-task',
+        uniqueId: `preview-assistant-${task.id || `${Date.now()}-${index}`}`,
+        title: task.title || `Task ${index + 1}`,
+        start,
+        end,
+        allDay: Boolean(task.all_day),
+        timeText: task.due || task.deadline || '',
+        description: task.context || '',
+        attendees: task.attendees || [],
+        status: task.status || 'pending',
+        priority: task.priority || 'medium',
+        isPreview: true,
+        context: task.context || '',
+        progress: task.progress || '',
+        nextStep: task.next_step || '',
+        openQuestions: task.open_questions || '',
+      }
+    })
+    const ids = new Set(previews.map((task) => task.uniqueId))
+    setEvents([
+      ...useEvents.getState().events.filter((event) => !ids.has(String(event.id))),
+      ...previews.map((task) => ({
+        id: task.uniqueId, title: task.title, start: task.start, end: task.end, allDay: task.allDay,
+        classNames: ['preview-event'],
+        extendedProps: { ...task },
+      })),
+    ])
+    setActiveEvent(null)
+    setPreviewTasks(previews)
+    closeChat()
+    router.push('/app')
+  }
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="flex border-r-1 border-r-border border-solid flex-col-reverse w-full h-full py-4"
-    >
-      <div className="flex flex-row gap-2 p-2 w-full relative">
-        <PlaceholdersAndVanishInput
-          onChange={handleInputChange}
-          onKeyDown={handleKeyDown}
-          placeholders={[
-            "What i'm have for this week?",
-            'What is the plan for today?',
-            'What is the plan for tomorrow?',
-            'Can i schedule a meeting?',
-            'Schedule a meeting with John Doe',
-          ]}
-          onSubmit={handleSubmission}
-          value={input}
-          setValue={setInput}
-          showDropdown={false}
-        />
+    <div className="flex h-full w-full flex-col overflow-hidden rounded-3xl bg-background">
+      <header className="flex items-center justify-between border-b px-4 py-3">
+        <div className="flex items-center gap-2"><span className="grid h-8 w-8 place-items-center rounded-xl bg-primary text-primary-foreground"><Sparkles className="h-4 w-4" /></span><div><p className="text-sm font-semibold">HumanOS Assistant</p><p className="text-[11px] text-muted-foreground">理解任务，但由你确认变更</p></div></div>
+        <Button size="icon" variant="ghost" onClick={closeChat}><ArrowLeft className="h-4 w-4" /></Button>
+      </header>
+
+      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
+        {messages.length === 0 && <div className="rounded-2xl border bg-muted/35 p-4"><p className="text-sm font-medium">你现在想处理什么？</p><p className="mt-1 text-xs leading-5 text-muted-foreground">可以创建任务、调整计划、查询日程或记录进度。任何计划变化都会先让你确认。</p><div className="mt-3 flex flex-wrap gap-2">{quickActions.map((action) => <button key={action} onClick={() => void send(action)} className="rounded-full border bg-background px-3 py-1.5 text-xs hover:border-primary/50">{action}</button>)}</div></div>}
+        {messages.map((message, index) => <div key={index} className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm leading-6 ${message.role === 'user' ? 'ml-auto bg-primary text-primary-foreground' : 'border bg-muted/40'}`}>{message.text}</div>)}
+        {loading && <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />正在理解并检查上下文...</div>}
+        {pendingTasks.length > 0 && <div className="rounded-2xl border border-primary/30 bg-primary/5 p-3"><p className="text-sm font-semibold">识别到 {pendingTasks.length} 个待确认任务</p><div className="mt-2 space-y-1">{pendingTasks.map((task, index) => <p key={index} className="truncate text-xs text-muted-foreground">{index + 1}. {task.title}</p>)}</div><Button className="mt-3 w-full" size="sm" onClick={reviewTasks}><CalendarPlus className="mr-2 h-4 w-4" />前往工作台确认</Button></div>}
       </div>
 
-      <div
-        ref={chatContainerRef}
-        className="flex flex-col overflow-y-auto h-[calc(100dvh-100px)]"
-      >
-        {messages.map((message, index) => (
-          <div
-            key={message.id + index}
-            className={'flex flex-col gap-1 p-2 w-full'}
-          >
-            <div className="flex flex-col gap-2">{message.gui}</div>
-            {message.status === 'user.message.created' ? (
-              <div className="bg-primary text-primary-foreground rounded-md w-fit p-2 self-end">
-                <Markdown
-                  disallowedElements={['img', 'code']}
-                  remarkPlugins={[remarkGfm]}
-                  className="prose flex flex-col gap-2"
-                  components={{
-                    a: ({ children, href }) => (
-                      <Link href={href!} className="text-primary-foreground">
-                        {children}
-                      </Link>
-                    ),
-                    pre: ({ children }) => (
-                      <pre className="not-prose">{children}</pre>
-                    ),
-                  }}
-                >
-                  {message.text as string}
-                </Markdown>
-              </div>
-            ) : (
-              <>{message.text}</>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <Button variant="ghost" className="w-fit" onClick={closeChat}>
-        <ArrowLeft size={24} />
-      </Button>
-    </motion.div>
+      <form className="border-t p-3" onSubmit={(event) => { event.preventDefault(); void send() }}><div className="flex items-end gap-2 rounded-2xl border bg-muted/25 p-2"><textarea rows={2} className="min-h-10 flex-1 resize-none bg-transparent px-2 py-1 text-sm outline-none" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }} placeholder="创建任务、调整计划或查询日程..." /><Button type="submit" size="icon" disabled={loading || !input.trim()}><ArrowUp className="h-4 w-4" /></Button></div></form>
+    </div>
   )
 }
