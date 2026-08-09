@@ -660,7 +660,11 @@ class Store:
                   password_hash TEXT NOT NULL,
                   salt TEXT NOT NULL,
                   created_at INTEGER NOT NULL,
-                  last_login_at INTEGER
+                  last_login_at INTEGER,
+                  account_type TEXT NOT NULL DEFAULT 'normal',
+                  test_clock_base TEXT,
+                  test_clock_anchor_ms INTEGER,
+                  test_time_scale REAL NOT NULL DEFAULT 0
                 );
 
                 CREATE TABLE IF NOT EXISTS tasks (
@@ -964,6 +968,16 @@ class Store:
             execution_columns = {row["name"] for row in conn.execute("PRAGMA table_info(execution_sessions)").fetchall()}
             if "resumed_at" not in execution_columns:
                 conn.execute("ALTER TABLE execution_sessions ADD COLUMN resumed_at TEXT")
+            user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+            user_migrations = {
+                "account_type": "TEXT NOT NULL DEFAULT 'normal'",
+                "test_clock_base": "TEXT",
+                "test_clock_anchor_ms": "INTEGER",
+                "test_time_scale": "REAL NOT NULL DEFAULT 0",
+            }
+            for name, definition in user_migrations.items():
+                if name not in user_columns:
+                    conn.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
 
     def password_hash(self, password: str, salt: str) -> str:
         return hashlib.sha256(f"{salt}:{password}".encode("utf-8")).hexdigest()
@@ -975,7 +989,71 @@ class Store:
             "name": row["name"],
             "created_at": row["created_at"],
             "last_login_at": row["last_login_at"],
+            "account_type": row["account_type"],
         }
+
+    def user_row(self, identity: str) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM users WHERE id=? OR lower(email)=lower(?)",
+                (identity, identity),
+            ).fetchone()
+
+    def account_capabilities(self, identity: str) -> dict:
+        row = self.user_row(identity)
+        is_test = bool(row and row["account_type"] == "test")
+        return {"account_type": "test" if is_test else "normal", "test_clock": is_test, "qa_tools": is_test}
+
+    def user_clock_now(self, identity: str, timezone_name: str | None = None) -> datetime:
+        row = self.user_row(identity)
+        target_zone = safe_timezone(timezone_name) if timezone_name else None
+        if not row or row["account_type"] != "test" or not row["test_clock_base"]:
+            return clock_now(target_zone)
+        base = datetime.fromisoformat(str(row["test_clock_base"]))
+        if base.tzinfo is None:
+            base = base.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+        anchor_ms = int(row["test_clock_anchor_ms"] or int(time.time() * 1000))
+        scale = max(float(row["test_time_scale"] or 0), 0)
+        elapsed_minutes = max(int(time.time() * 1000) - anchor_ms, 0) / 60000 * scale
+        current = base + timedelta(minutes=elapsed_minutes)
+        return current.astimezone(target_zone) if target_zone else current
+
+    def user_clock_state(self, identity: str) -> dict:
+        row = self.user_row(identity)
+        if not row or row["account_type"] != "test":
+            raise PermissionError("not found")
+        current = self.user_clock_now(identity)
+        return {
+            "enabled": True,
+            "simulated_now": current.isoformat(),
+            "time_scale": float(row["test_time_scale"] or 0),
+            "week_id": iso_week_id(current),
+            "using_real_time": not bool(row["test_clock_base"]),
+        }
+
+    def update_user_clock(self, identity: str, payload: dict) -> dict:
+        row = self.user_row(identity)
+        if not row or row["account_type"] != "test":
+            raise PermissionError("not found")
+        if payload.get("use_real_time"):
+            with self.connect() as conn:
+                conn.execute("UPDATE users SET test_clock_base=NULL,test_clock_anchor_ms=NULL,test_time_scale=0 WHERE id=?", (row["id"],))
+        else:
+            current = self.user_clock_now(identity)
+            if payload.get("set_time") or payload.get("simulated_now"):
+                current = datetime.fromisoformat(str(payload.get("set_time") or payload.get("simulated_now")))
+                if current.tzinfo is None:
+                    current = current.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+            current += timedelta(days=float(payload.get("advance_days") or 0), minutes=float(payload.get("advance_minutes") or 0))
+            scale = max(float(payload.get("time_scale", row["test_time_scale"] or 0)), 0)
+            with self.connect() as conn:
+                conn.execute(
+                    "UPDATE users SET test_clock_base=?,test_clock_anchor_ms=?,test_time_scale=? WHERE id=?",
+                    (current.isoformat(), int(time.time() * 1000), scale, row["id"]),
+                )
+        state = self.user_clock_state(identity)
+        self.log_event(identity, "test_clock_adjusted", {"simulated_now": state["simulated_now"], "time_scale": state["time_scale"], "using_real_time": state["using_real_time"]})
+        return state
 
     def create_user(self, email: str, password: str, name: str = "") -> dict:
         email = email.strip().lower()
@@ -3470,7 +3548,8 @@ class Store:
         if mode == "up_next" and session.get("planned_start_at"):
             try:
                 planned_start = datetime.fromisoformat(session["planned_start_at"])
-                if clock_now(planned_start.tzinfo) >= planned_start:
+                profile = self.ensure_profile(user_id)
+                if self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai") >= planned_start:
                     mode = "ready_to_start"
             except ValueError:
                 pass
@@ -3502,7 +3581,7 @@ class Store:
         request_id = str(payload.get("request_id") or "").strip() or None
         timestamp = now_ms()
         profile = self.ensure_profile(user_id)
-        actual_start = str(payload.get("actual_start_at") or clock_now(ZoneInfo(profile.get("timezone") or "Asia/Shanghai")).isoformat())
+        actual_start = str(payload.get("actual_start_at") or self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai").isoformat())
         with self.connect() as conn:
             replay = self._execution_request_seen(conn, user_id, request_id)
             if replay:
@@ -3535,7 +3614,7 @@ class Store:
         session_id = str(payload.get("execution_session_id") or "")
         timestamp = now_ms()
         profile = self.ensure_profile(user_id)
-        paused_at = str(payload.get("paused_at") or clock_now(ZoneInfo(profile.get("timezone") or "Asia/Shanghai")).isoformat())
+        paused_at = str(payload.get("paused_at") or self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai").isoformat())
         confirmed_minutes = max(int(payload.get("actual_minutes") or 0), 0)
         request_id = str(payload.get("request_id") or "").strip() or None
         with self.connect() as conn:
@@ -3559,7 +3638,7 @@ class Store:
         session_id = str(payload.get("execution_session_id") or "")
         timestamp = now_ms()
         profile = self.ensure_profile(user_id)
-        ended_at = str(payload.get("actual_end_at") or clock_now(ZoneInfo(profile.get("timezone") or "Asia/Shanghai")).isoformat())
+        ended_at = str(payload.get("actual_end_at") or self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai").isoformat())
         actual_minutes = max(int(payload.get("actual_minutes") or 0), 0)
         request_id = str(payload.get("request_id") or "").strip() or None
         with self.connect() as conn:
@@ -5494,16 +5573,24 @@ class Handler(BaseHTTPRequestHandler):
                 })
                 return
 
+            if path == "/api/account/capabilities" and method == "GET":
+                user_id = query.get("user_id", [""])[0]
+                self.send_json(store.account_capabilities(user_id))
+                return
+
             if path == "/api/test-clock":
-                if not TEST_MODE:
+                request_user_id = query.get("user_id", [""])[0]
+                if method == "POST":
+                    payload = self.read_json()
+                    request_user_id = str(payload.get("user_id") or request_user_id)
+                if not TEST_MODE and not store.account_capabilities(request_user_id).get("test_clock"):
                     self.send_json({"error": "not_found", "path": path}, status=404)
                     return
                 if method == "GET":
-                    self.send_json(test_clock_state())
+                    self.send_json(test_clock_state() if TEST_MODE else store.user_clock_state(request_user_id))
                     return
                 if method == "POST":
-                    payload = self.read_json()
-                    state = update_test_clock(payload)
+                    state = update_test_clock(payload) if TEST_MODE else store.update_user_clock(request_user_id, payload)
                     user_id = str(payload.get("user_id") or "test-clock")
                     if payload.get("user_id") and not QA_MODE:
                         store.log_event(user_id, "test_clock_advanced", {
