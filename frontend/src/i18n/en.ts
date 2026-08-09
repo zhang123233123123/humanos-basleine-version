@@ -262,7 +262,7 @@ const en = {
   },
   execution: {
     title: 'Focus Execution', subtitle: 'Advance one explicit session at a time while keeping pause, end, and task completion distinct.', workspace: 'Back to workspace', loadFailed: 'Failed to load execution state', untitledTask: 'Untitled task',
-    mode_up_next: 'Up next', mode_running: 'Running', mode_paused: 'Paused', mode_empty: 'No active execution', mode_none: 'No active execution', mode_idle: 'No active execution',
+    mode_up_next: 'Up next', mode_ready_to_start: 'Ready to start', mode_running: 'Running', mode_paused: 'Paused', mode_empty: 'No active execution', mode_none: 'No active execution', mode_idle: 'No active execution',
     started: 'Session started', startFailed: 'Failed to start', paused: 'Session paused', pauseFailed: 'Failed to pause', ended: 'Session ended. Submit feedback next.', endFailed: 'Failed to end session',
     elapsed: 'Elapsed this session', planned: 'Planned', remaining: 'Session remaining', pause: 'Pause', resume: 'Resume', start: 'Start focus', end: 'End session', captureContext: 'Capture interruption context',
     context: 'Task context', noContext: 'No task context available.', nextStep: 'First step when returning', schedule: 'Schedule',

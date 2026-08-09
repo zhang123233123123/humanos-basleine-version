@@ -34,6 +34,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus }: Ta
   const { t } = useTranslation()
   const [confirming, setConfirming] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [openingFocus, setOpeningFocus] = useState(false)
 
   // Editable state — initialized from task
   const [title, setTitle] = useState('')
@@ -203,7 +204,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus }: Ta
       {/* Save button for existing tasks */}
       {isExistingTask && onSave && (
         <div className="border-b border-border p-3">
-          {onOpenFocus && !['completed', 'ended', 'terminated'].includes(status) && <Button size="sm" className="mb-2 h-9 w-full text-xs" onClick={() => void onOpenFocus(buildTask())}><Play className="mr-1 h-3.5 w-3.5" />{status === 'running' || status === 'paused' ? 'Open Focus' : 'Start and enter Focus'}</Button>}
+          {onOpenFocus && !['completed', 'ended', 'terminated'].includes(status) && <Button size="sm" className="mb-2 h-9 w-full text-xs" disabled={openingFocus} onClick={async () => { setOpeningFocus(true); try { await onOpenFocus(buildTask()) } finally { setOpeningFocus(false) } }}><Play className="mr-1 h-3.5 w-3.5" />{openingFocus ? 'Opening Focus...' : status === 'running' || status === 'paused' ? 'Open Focus' : 'Start and enter Focus'}</Button>}
           <Button
             size="sm"
             className="w-full text-xs h-8"

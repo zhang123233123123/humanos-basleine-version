@@ -242,17 +242,23 @@ function TaskInspectorWrapper() {
   }
 
   const openFocus = async (task: { id: string; status?: string }) => {
-    const result = await apiRequest<{ execution_sessions: ExecutionSession[] }>('/api/execution-sessions?status=running,paused,ready')
-    let session = (result.execution_sessions || []).find((item) => String(item.task_id) === String(task.id))
-    if (!session) {
-      const ensured = await apiRequest<{ execution_session: ExecutionSession }>('/api/execution-sessions/ensure', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_id: task.id }) })
-      session = ensured.execution_session
+    try {
+      const result = await apiRequest<{ execution_sessions: ExecutionSession[] }>('/api/execution-sessions?status=running,paused,ready')
+      let session = (result.execution_sessions || []).find((item) => String(item.task_id) === String(task.id))
+      if (!session) {
+        const ensured = await apiRequest<{ execution_session: ExecutionSession }>('/api/execution-sessions/ensure', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_id: task.id }) })
+        session = ensured.execution_session
+      }
+      if (session && !['running', 'paused'].includes(String(session.status))) {
+        await apiRequest('/api/execution-sessions/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ execution_session_id: session.execution_session_id, request_id: `calendar-start-${crypto.randomUUID()}` }) })
+        await refetchEvents(currentStart, currentEnd)
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('execution.startFailed'))
+    } finally {
+      setActiveEvent(null)
+      router.push('/app/focus')
     }
-    if (session.status === 'ready') {
-      await apiRequest('/api/execution-sessions/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ execution_session_id: session.execution_session_id, request_id: `calendar-start-${crypto.randomUUID()}` }) })
-      await refetchEvents(currentStart, currentEnd)
-    }
-    router.push('/app/focus')
   }
 
   const formatTime = (d: Date | null): string => {

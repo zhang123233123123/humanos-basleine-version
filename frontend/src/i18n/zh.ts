@@ -262,7 +262,7 @@ const zh = {
   },
   execution: {
     title: '专注执行', subtitle: '一次只推进一个明确的 Session，暂停、结束和完成保持清晰边界。', workspace: '返回工作台', loadFailed: '加载执行状态失败', untitledTask: '未命名任务',
-    mode_up_next: '下一项', mode_running: '执行中', mode_paused: '已暂停', mode_empty: '当前无执行', mode_none: '当前无执行', mode_idle: '当前无执行',
+    mode_up_next: '下一项', mode_ready_to_start: '可以开始', mode_running: '执行中', mode_paused: '已暂停', mode_empty: '当前无执行', mode_none: '当前无执行', mode_idle: '当前无执行',
     started: 'Session 已开始', startFailed: '开始失败', paused: 'Session 已暂停', pauseFailed: '暂停失败', ended: 'Session 已结束，请提交反馈', endFailed: '结束失败',
     elapsed: '本次已执行', planned: '计划时长', remaining: 'Session 剩余', pause: '暂停', resume: '继续', start: '开始专注', end: '结束 Session', captureContext: '记录中断上下文',
     context: '任务上下文', noContext: '暂无任务上下文。', nextStep: '回来后的第一步', schedule: '计划信息',
