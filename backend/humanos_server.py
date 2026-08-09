@@ -3158,6 +3158,64 @@ class Store:
             {"week_id": row["week_id"], "request_id": request_id},
         )
 
+    def adjust_scheduled_task(self, user_id: str, payload: dict) -> dict:
+        task_id = str(payload.get("task_id") or "").strip()
+        if not task_id:
+            raise ValueError("task_id is required")
+        task = self.get_task(task_id, user_id)
+        if not task:
+            raise KeyError(task_id)
+        task_patch = dict(payload.get("task_patch") or {})
+        start_at = str(payload.get("start_at") or "").strip()
+        end_at = str(payload.get("end_at") or "").strip()
+        active = self.active_plan(user_id)
+        active_blocks = list((active or {}).get("plan_patch") or [])
+        target = next((block for block in active_blocks if str(block.get("task_id")) == task_id), None)
+        if not active or not target or not start_at or not end_at:
+            allowed = {key: value for key, value in task_patch.items() if key not in {"slot", "start", "end", "start_at", "end_at", "deadline_at"}}
+            return {"task": self.patch_task(task_id, allowed, user_id), "plan": active, "revision_created": False}
+        start = datetime.fromisoformat(start_at)
+        end = datetime.fromisoformat(end_at)
+        if end <= start:
+            raise ValueError("end_at must be after start_at")
+        proposed = self.revise_plan(user_id, {"plan_id": active["plan_id"], "request_id": payload.get("request_id") or new_id("adjust")})
+        next_patch = []
+        for block in proposed.get("plan_patch") or []:
+            if str(block.get("block_id")) != str(target.get("block_id")):
+                next_patch.append(block)
+                continue
+            local_start = start
+            local_end = end
+            next_patch.append({
+                **block,
+                "day_index": (local_start.weekday()),
+                "start": local_start.hour + local_start.minute / 60,
+                "end": local_end.hour + local_end.minute / 60,
+                "start_at": local_start.isoformat(),
+                "end_at": local_end.isoformat(),
+                "session_minutes": max(round((local_end - local_start).total_seconds() / 60), 1),
+                "planned_work_minutes": max(round((local_end - local_start).total_seconds() / 60), 1),
+            })
+        result = self.confirm_plan(user_id, {
+            "plan_id": proposed["plan_id"],
+            "week_id": proposed["week_id"],
+            "edit_episode_id": proposed.get("edit_episode_id"),
+            "decision": proposed,
+            "plan_patch": next_patch,
+            "rationale": {
+                "reason_codes": ["task_detail_schedule_change"],
+                "raw_user_response": str(payload.get("reason") or ""),
+                "parsed_reason": {"reason_codes": ["task_detail_schedule_change"], "raw_text": str(payload.get("reason") or "")},
+                "affected_task_ids": [task_id],
+                "response_status": "answered" if payload.get("reason") else "skipped",
+                "generalizability": "not_sure",
+                "request_id": payload.get("request_id"),
+            },
+        })
+        allowed = {key: value for key, value in task_patch.items() if key not in {"slot", "start", "end", "start_at", "end_at", "deadline_at"}}
+        updated_task = self.patch_task(task_id, allowed, user_id) if allowed else self.get_task(task_id, user_id)
+        return {"task": updated_task, "plan": result.get("plan"), "validation": result.get("validation"), "revision_created": True}
+
     def confirm_plan(self, user_id: str, payload: dict) -> dict:
         plan_id = str(payload.get("plan_id") or "")
         plan_patch = list(payload.get("plan_patch") or [])
@@ -5820,6 +5878,13 @@ class Handler(BaseHTTPRequestHandler):
                 user_id = payload.get("user_id", "demo")
                 store.ensure_profile(user_id)
                 self.send_json({"plan": store.revise_plan(user_id, payload)}, status=201)
+                return
+
+            if path == "/api/plans/adjust-task" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                store.ensure_profile(user_id)
+                self.send_json(store.adjust_scheduled_task(user_id, payload), status=201)
                 return
 
             if path == "/api/auth/register" and method == "POST":

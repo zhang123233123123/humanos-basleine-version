@@ -210,22 +210,29 @@ function TaskInspectorWrapper() {
     nextStep?: string
     openQuestions?: string
   }) => {
-    await fetch('/api/tasks', {
-      method: 'PUT',
+    if (!activeEvent?.id) return
+    const result = await apiRequest<{ revision_created: boolean }>('/api/plans/adjust-task', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        id: activeEvent?.id,
-        title: task.title,
+        task_id: activeEvent.id,
         start_at: task.start?.toISOString(),
-        deadline_at: task.end?.toISOString(),
-        priority: task.priority,
-        status: task.status,
-        context: task.context || task.description || '',
-        progress: task.progress || '',
-        next_step: task.nextStep || '',
-        open_questions: task.openQuestions || '',
+        end_at: task.end?.toISOString(),
+        request_id: `task-adjust-${crypto.randomUUID()}`,
+        task_patch: {
+          title: task.title,
+          priority: task.priority,
+          status: task.status,
+          context: task.context || task.description || '',
+          contextWindow: {
+            progress: task.progress || '',
+            nextStep: task.nextStep || '',
+            openQuestions: task.openQuestions || '',
+          },
+        },
       }),
     })
+    toast(result.revision_created ? t('planning.confirmed') : t('event.eventUpdated'))
     await refetchEvents(currentStart, currentEnd)
   }
 
