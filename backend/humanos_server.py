@@ -1752,6 +1752,8 @@ class Store:
         )
 
     def looks_like_compact_multi_task_list(self, text: str) -> bool:
+        if len(self.english_task_segments(text)) >= 2:
+            return True
         parts = [
             part.strip(" ，,。；;、")
             for part in re.split(r"(?:，|,|。|；|;|、|然后|再|接着|最后)", text)
@@ -2417,6 +2419,8 @@ class Store:
     def parse_time_followup_for_recent_tasks(self, user_id: str, text: str, chat_context: dict | None = None) -> list[dict]:
         recent_tasks = (chat_context or {}).get("recent_tasks") or self.latest_task_turn_tasks(user_id)
         if not recent_tasks:
+            return []
+        if len(self.english_task_segments(text)) >= 2:
             return []
         has_time = re.search(r"\d{1,2}\s*(点|时)|\d{1,2}[:：]\d{2}", normalize_chinese_clock(text))
         if not has_time:

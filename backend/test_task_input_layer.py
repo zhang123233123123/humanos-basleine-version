@@ -78,8 +78,19 @@ class TaskInputLayerTests(unittest.TestCase):
 7. Do the laundry, 45 minutes, low priority, due Saturday at 18:00.
 8. Listen to an English research podcast, 30 minutes, low priority, due Saturday at 18:00."""
 
+        existing = self.store.create_task("user-a", {
+            "title": "Existing task",
+            "due": "today 12:00",
+            "duration": 60,
+        })
+        updates = self.store.parse_time_followup_for_recent_tasks(
+            "user-a",
+            text,
+            {"recent_tasks": [existing]},
+        )
         tasks = self.store.local_parse_tasks_from_text("user-a", text, create_tasks=False)
 
+        self.assertEqual([], updates)
         self.assertEqual(8, len(tasks))
         self.assertEqual([150, 120, 45, 75, 120, 45, 45, 30], [task["duration"] for task in tasks])
         self.assertEqual(["高", "高", "高", "中", "高", "低", "低", "低"], [task["priority"] for task in tasks])
