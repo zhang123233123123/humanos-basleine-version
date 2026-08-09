@@ -411,7 +411,7 @@ function AppContent({
     currentStart,
   } = useEvents()
 
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const { activeEvent, setActiveEvent, setPreviewTasks } = useModal()
   const [pendingCalendarEdit, setPendingCalendarEdit] = useState<{
     taskId: string
@@ -574,7 +574,7 @@ function AppContent({
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, assistant_mode: 'task_planner', locale }),
     })
     if (res.ok) {
       await refetchEvents(currentStart, currentEnd)

@@ -19,7 +19,7 @@ interface WorkspaceSidebarProps {
 }
 
 function SidebarContent({ focusChatTrigger, onSendMessage }: WorkspaceSidebarProps) {
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const [activeNav, setActiveNav] = useState('chat')
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
@@ -35,6 +35,17 @@ function SidebarContent({ focusChatTrigger, onSendMessage }: WorkspaceSidebarPro
       textareaRef.current?.focus()
     }
   }, [focusChatTrigger])
+
+  useEffect(() => {
+    const receiveHandoff = (event: Event) => {
+      const text = String((event as CustomEvent<{ text?: string }>).detail?.text || '')
+      setActiveNav('chat')
+      setChatInput(text)
+      window.setTimeout(() => textareaRef.current?.focus(), 0)
+    }
+    window.addEventListener('humanos:planner-handoff', receiveHandoff)
+    return () => window.removeEventListener('humanos:planner-handoff', receiveHandoff)
+  }, [])
 
   const [focus, setFocus] = useState(5)
   const [energy, setEnergy] = useState(4)
@@ -87,8 +98,8 @@ function SidebarContent({ focusChatTrigger, onSendMessage }: WorkspaceSidebarPro
       {/* Chat Panel */}
       <div className="flex-1 flex flex-col min-h-0">
         <div className="px-3 py-2 border-b border-border">
-          <h3 className="text-sm font-semibold">{t('workspace.aiAssistant')}</h3>
-          <p className="text-xs text-muted-foreground">{t('workspace.assistantHint')}</p>
+          <h3 className="text-sm font-semibold">{locale === 'zh' ? '任务规划助手' : 'Task Planner'}</h3>
+          <p className="text-xs text-muted-foreground">{locale === 'zh' ? '创建、拆解或调整任务，确认后才写入' : 'Create, break down or adjust tasks; changes require confirmation'}</p>
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2 text-sm">
