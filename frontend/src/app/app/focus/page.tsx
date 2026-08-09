@@ -81,7 +81,7 @@ export default function FocusPage() {
   const session = current?.session || null
   const task = current?.task || session?.task || null
   const title = session?.task_title || session?.title || task?.title || t('execution.untitledTask')
-  const startedAt = timestamp(session?.started_at)
+  const startedAt = timestamp(session?.actual_start_at ?? session?.started_at)
   const persistedMinutes = Number(session?.actual_minutes || 0)
   const elapsedSeconds = current?.mode === 'running' && startedAt
     ? persistedMinutes * 60 + Math.max(Math.floor((now - startedAt) / 1000), 0)

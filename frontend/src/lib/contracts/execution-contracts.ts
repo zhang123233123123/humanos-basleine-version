@@ -14,6 +14,7 @@ export interface ExecutionSession {
   actual_minutes?: number
   session_remaining_minutes?: number
   started_at?: string | number | null
+  actual_start_at?: string | number | null
   paused_at?: string | number | null
   resumed_at?: string | number | null
   pause_reason?: string | null
