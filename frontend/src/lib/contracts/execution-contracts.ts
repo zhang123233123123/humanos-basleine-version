@@ -36,6 +36,7 @@ export interface CurrentExecution {
   mode: ExecutionMode
   session?: ExecutionSession | null
   task?: ExecutionSession['task'] | null
+  deferred_sessions?: ExecutionSession[]
   [key: string]: unknown
 }
 

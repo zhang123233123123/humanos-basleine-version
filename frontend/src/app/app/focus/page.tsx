@@ -139,6 +139,8 @@ export default function FocusPage() {
       setCurrent({ mode: 'paused', session: result.execution_session, task })
       setResumeImpact(result.pause_review.requires_plan_adjustment ? result.pause_review : null)
       setPausePrompt(false)
+      await loadExecution()
+      setResumeImpact(null)
       toast(t('execution.paused'))
     } catch (error) {
       toast(error instanceof Error ? error.message : t('execution.pauseFailed'))
@@ -199,6 +201,23 @@ export default function FocusPage() {
     }
   }
 
+  const resumeDeferred = async (deferred: ExecutionSession) => {
+    setSubmitting(true)
+    try {
+      const analysis = await apiRequest<{ impact: ExecutionImpact }>('/api/execution-sessions/impact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ execution_session_id: deferred.execution_session_id, remaining_minutes: deferred.remaining_at_pause ?? deferred.session_remaining_minutes, action: 'resume' }) })
+      if (analysis.impact.requires_plan_adjustment) {
+        setCurrent({ mode: 'paused', session: deferred, task: deferred.task })
+        setResumeImpact(analysis.impact)
+        return
+      }
+      await apiRequest('/api/execution-sessions/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ execution_session_id: deferred.execution_session_id, request_id: requestId('resume-deferred') }) })
+      await loadExecution()
+      toast(t('execution.started'))
+    } catch (error) {
+      toast(error instanceof Error ? error.message : t('execution.startFailed'))
+    } finally { setSubmitting(false) }
+  }
+
   const statusLabel = useMemo(() => t(`execution.mode_${current?.mode || 'none'}`), [current?.mode, t])
 
   if (loading) return <div className="grid h-full place-items-center"><Loader2 className="h-7 w-7 animate-spin" /></div>
@@ -244,6 +263,7 @@ export default function FocusPage() {
           <Card className="py-12 text-center"><CardContent><div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-full bg-muted"><Clock3 /></div><h2 className="text-xl font-semibold">{t('execution.noSession')}</h2><p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">{t('execution.noSessionDescription')}</p><Button className="mt-5" asChild><Link href="/app/plan">{t('execution.openPlan')}</Link></Button></CardContent></Card>
         )}
 
+        {(current?.deferred_sessions?.length || 0) > 0 && <Card className="border-amber-300 bg-amber-50/60"><CardHeader><CardTitle>{locale === 'zh' ? '待恢复任务' : 'Deferred sessions'}</CardTitle><CardDescription>{locale === 'zh' ? '这些任务已退出当前执行队列，不会阻塞下一项安排。' : 'These sessions no longer block the next scheduled task.'}</CardDescription></CardHeader><CardContent className="space-y-3">{current?.deferred_sessions?.map((item) => <div key={item.execution_session_id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-background p-4"><div><p className="font-medium">{item.task_title || item.title || item.task_id}</p><p className="mt-1 text-xs text-muted-foreground">{locale === 'zh' ? `剩余 ${item.remaining_at_pause ?? item.session_remaining_minutes ?? 0} 分钟 · ${item.pause_reason || '未填写暂停原因'}` : `${item.remaining_at_pause ?? item.session_remaining_minutes ?? 0} min remaining · ${item.pause_reason || 'No pause reason'}`}</p></div><div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => void resumeDeferred(item)} disabled={submitting}>{locale === 'zh' ? '现在恢复' : 'Resume now'}</Button><Button size="sm" asChild><Link href="/app/plan?adjust=deferred-session">{locale === 'zh' ? '安排恢复时间' : 'Schedule return'}</Link></Button></div></div>)}</CardContent></Card>}
         <Card><CardHeader><CardTitle>{t('execution.history')}</CardTitle><CardDescription>{t('execution.historyDescription')}</CardDescription></CardHeader><CardContent className="space-y-2">{history.length === 0 ? <p className="text-sm text-muted-foreground">{t('execution.noHistory')}</p> : history.slice(0, 12).map((item) => <div key={item.execution_session_id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border p-3 text-sm"><div><p className="font-medium">{item.task_title || item.title || item.task_id}</p><p className="text-xs text-muted-foreground">{item.planned_start_at ? new Date(item.planned_start_at).toLocaleString() : item.block_id}</p></div><span className="rounded-full bg-muted px-3 py-1 text-xs">{item.status}</span></div>)}</CardContent></Card>
       </div>
     </main>

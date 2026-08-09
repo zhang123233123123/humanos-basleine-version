@@ -3738,21 +3738,41 @@ class Store:
         paused = [item for item in sessions if item["status"] == "paused"]
         ended = [item for item in sessions if item["status"] == "ended"]
         ready = [item for item in sessions if item["status"] == "ready"]
-        selected = (running or paused or ended or ready[:1])
+        profile = self.ensure_profile(user_id)
+        current = self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai")
+        deferred = []
+        actionable_paused = []
+        for item in paused:
+            preference = str(item.get("resume_preference") or "")
+            preferred_at = item.get("preferred_resume_at")
+            should_defer = preference == "unknown"
+            if preferred_at:
+                try:
+                    resume_at = datetime.fromisoformat(str(preferred_at).replace("Z", "+00:00"))
+                    if resume_at.tzinfo is None:
+                        resume_at = resume_at.replace(tzinfo=current.tzinfo)
+                    should_defer = should_defer or resume_at > current
+                except ValueError:
+                    pass
+            (deferred if should_defer else actionable_paused).append(item)
+        deferred_sessions = []
+        for item in deferred:
+            task = self.get_task(str(item.get("task_id") or ""), user_id) or {}
+            deferred_sessions.append({**item, "task_title": task.get("title"), "task": task})
+        selected = (running or actionable_paused or ended or ready[:1])
         if not selected:
-            return {"mode": "empty", "session": None, "task": None}
+            return {"mode": "empty", "session": None, "task": None, "deferred_sessions": deferred_sessions}
         session = selected[0]
         task = self.get_task(session["task_id"], user_id)
         mode = "now" if session["status"] == "running" else "paused" if session["status"] == "paused" else "session_ended" if session["status"] == "ended" else "up_next"
         if mode == "up_next" and session.get("planned_start_at"):
             try:
                 planned_start = datetime.fromisoformat(session["planned_start_at"])
-                profile = self.ensure_profile(user_id)
-                if self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai") >= planned_start:
+                if current >= planned_start:
                     mode = "ready_to_start"
             except ValueError:
                 pass
-        return {"mode": mode, "session": session, "task": task}
+        return {"mode": mode, "session": session, "task": task, "deferred_sessions": deferred_sessions}
 
     def _parallel_start_allowed(self, user_id: str, first_block_id: str, second_block_id: str) -> bool:
         plan = self.active_plan(user_id) or {}
