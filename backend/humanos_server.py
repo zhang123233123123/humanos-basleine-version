@@ -1650,14 +1650,22 @@ class Store:
         if not clean:
             raise ValueError("task text is required")
         expected_count = self.estimated_task_count(clean)
-        explicit_schedule_tasks = self.parse_explicit_schedule_lines(user_id, clean, create_tasks=create_tasks)
+        profile = self.ensure_profile(user_id)
+        timezone_name = str(profile.get("timezone") or "Asia/Shanghai")
+        typed_tasks = parse_tasks_with_agent(
+            clean,
+            current_time=self.user_clock_now(user_id, timezone_name).isoformat(),
+            timezone_name=timezone_name,
+            chat_context=chat_context,
+        ) if parse_tasks_with_agent else None
+        explicit_schedule_tasks = [] if typed_tasks else self.parse_explicit_schedule_lines(user_id, clean, create_tasks=create_tasks)
         if explicit_schedule_tasks:
             return explicit_schedule_tasks
         shared_time = re.search(
             r"(?:然后)?(?:它们|这些|都是|每个|全部).*?((?:早上|上午|中午|下午|晚上)\s*\d{1,2}\s*(?:[:：]\s*\d{2}|点|时))",
             clean,
         )
-        if shared_time:
+        if shared_time and not typed_tasks:
             prefix = clean[:shared_time.start()].strip(" ，,。；;")
             clauses = [part.strip() for part in re.split(r"(?:然后|，|,|。|；|;)", prefix) if part.strip()]
             dated_clauses = [part for part in clauses if re.search(r"今天|今晚|明天|后天|周[一二三四五六日天]|星期[一二三四五六日天]", part)]
@@ -1667,14 +1675,6 @@ class Store:
                 expanded = "，".join(f"{part} {shared_clock}" for part in dated_clauses)
                 return self.local_parse_tasks_from_text(user_id, expanded, create_tasks=create_tasks)
         prefer_local_parser = self.looks_like_compact_multi_task_list(clean) or bool(self.english_task_segments(clean))
-        profile = self.ensure_profile(user_id)
-        timezone_name = str(profile.get("timezone") or "Asia/Shanghai")
-        typed_tasks = parse_tasks_with_agent(
-            clean,
-            current_time=self.user_clock_now(user_id, timezone_name).isoformat(),
-            timezone_name=timezone_name,
-            chat_context=chat_context,
-        ) if parse_tasks_with_agent else None
         if typed_tasks:
             llm_result = {"tasks": typed_tasks}
             parser_name = "pydantic_ai"
@@ -1994,6 +1994,7 @@ class Store:
             )
             title_text = re.sub(r"(这周|本周|我需要|我要|我在|我|在|并且|而且|以及|要)", "", title_text)
             title_text = re.sub(r"\b(?:high|medium|low)\s+priority\b|\bdue\b", " ", title_text, flags=re.I)
+            title_text = re.sub(r"(?:高|中|低)\s*优先级", "", title_text)
             title_text = re.sub(r"睡觉(?:觉)+", "睡觉", title_text)
             title_text = re.sub(
                 r"\b(i|we|the|a|an|to|at|on|by|before|after|and|also|need|needs|have|has|plan|planned|want|"
