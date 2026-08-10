@@ -1070,6 +1070,14 @@ class Store:
         events = [{"id": row["id"], "type": row["type"], "payload": from_json(row["payload_json"], {}), "created_at": row["created_at"]} for row in event_rows]
         plan_edits = [{key: from_json(row[key], {}) if key in {"before_json", "after_json", "validation_result_json"} else row[key] for key in row.keys()} for row in edit_rows]
         return {
+            "view": {
+                "kind": "qa_aggregate_snapshot",
+                "read_only": True,
+                "ordinary_user_visible": False,
+                "aggregate_roots": ["profile", "task"],
+                "coordination_records": ["plans", "execution_sessions"],
+                "evidence_records": ["events", "plan_edit_events"],
+            },
             "generated_at": self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai").isoformat(),
             "account": {"email": user_id, "account_type": "test"},
             "profile": profile,
@@ -6096,6 +6104,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/developer/snapshot" and method == "GET":
+                if not QA_MODE:
+                    self.send_json({"error": "not_found", "path": path}, status=404)
+                    return
                 user_id = query.get("user_id", [""])[0]
                 self.send_json(store.developer_snapshot(user_id))
                 return
@@ -6412,10 +6423,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    host = "0.0.0.0"
+    host = os.environ.get("HUMANOS_BACKEND_HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "8787"))
-    print(f"HumanOS backend listening on http://127.0.0.1:{port}")
-    print(f"External access uses http://<server-ip>:{port}")
+    print(f"HumanOS backend listening on http://{host}:{port}")
     print(f"SQLite database: {DB_PATH}")
     ThreadingHTTPServer((host, port), Handler).serve_forever()
 
