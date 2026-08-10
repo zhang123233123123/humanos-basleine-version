@@ -3228,6 +3228,9 @@ class Store:
             )
             for candidate in stored.get("candidate_plans") or []:
                 candidate["plan_patch"] = self._decorate_plan_blocks(list(candidate.get("plan_patch") or []), week_id, revision, timezone_name)
+            from app.application.project_plan import project_plan_for_persistence
+
+            stored = project_plan_for_persistence(stored, profile=profile)
             stored.update({"plan_id": plan_id,"plan_revision": revision,"plan_status": "proposed","week_id": week_id})
             conn.execute(
                 "UPDATE plans SET plan_status='superseded',updated_at=? WHERE user_id=? AND week_id=? AND plan_status='proposed'",
@@ -3464,6 +3467,9 @@ class Store:
                 timezone_name=timezone_name,
                 blocks=decorated,
             )
+            from app.application.project_plan import project_plan_for_persistence
+
+            stored = project_plan_for_persistence(stored, profile=profile)
             if episode:
                 rationale_payload = dict(rationale or {})
                 if canonical_diff.get("has_changes"):
