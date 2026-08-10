@@ -3398,7 +3398,16 @@ class Store:
             ).fetchone() if plan_id else None
             if row and row["plan_status"] == "confirmed":
                 result = from_json(row["plan_json"], {})
-                return {"plan": result,"tasks": self.list_tasks(user_id),"validation": validation,"replayed": True}
+                return {
+                    "plan": result,
+                    "validation": validation,
+                    "replayed": True,
+                    "resources": {
+                        "profile": "/api/profile",
+                        "tasks": "/api/tasks",
+                        "execution_sessions": "/api/execution-sessions",
+                    },
+                }
             if not row:
                 max_row = conn.execute(
                     "SELECT COALESCE(MAX(plan_revision),0) AS revision FROM plans WHERE user_id=? AND week_id=?",
@@ -3509,7 +3518,19 @@ class Store:
                 "INSERT INTO events (id,user_id,type,payload_json,created_at) VALUES (?,?,?,?,?)",
                 (new_id("evt"),user_id,"plan_confirmed",as_json({"plan_id":plan_id,"week_id":week_id,"plan_revision":revision}),timestamp),
             )
-        return {"plan": stored,"tasks": self.list_tasks(user_id),"validation": validation,"replayed": False,"requires_rationale": False,"edit_episode_id": episode_id or None,"canonical_diff": canonical_diff}
+        return {
+            "plan": stored,
+            "validation": validation,
+            "replayed": False,
+            "requires_rationale": False,
+            "edit_episode_id": episode_id or None,
+            "canonical_diff": canonical_diff,
+            "resources": {
+                "profile": "/api/profile",
+                "tasks": "/api/tasks",
+                "execution_sessions": "/api/execution-sessions",
+            },
+        }
 
     def active_plan(self, user_id: str, week_id: str | None = None) -> dict | None:
         profile = self.ensure_profile(user_id)

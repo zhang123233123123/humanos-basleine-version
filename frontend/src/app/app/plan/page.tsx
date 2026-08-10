@@ -227,11 +227,12 @@ export default function WeeklyPlanPage() {
         toast(t('planning.rationaleRequired'))
         return
       }
-      setActivePlan(result.plan)
+      const activePlanResult = await apiRequest<{ plan: PlanDecision | null }>('/api/plans/active')
+      setActivePlan(activePlanResult.plan)
       setRationaleRequired(false)
       setStage('confirmed')
       window.dispatchEvent(new CustomEvent('humanos:plan-updated', {
-        detail: { source: 'plan-confirmation', planRevision: result.plan?.plan_revision },
+        detail: { source: 'plan-confirmation', planRevision: activePlanResult.plan?.plan_revision },
       }))
       toast(t('planning.confirmed'))
     } catch (error) {
