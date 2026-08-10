@@ -3609,7 +3609,18 @@ class Store:
             }
             new_context = sanitize_weekly_context(new_context)
             conn.execute("UPDATE profiles SET weekly_context_json=?,active_week_id=?,active_plan_revision=NULL,last_daily_checkin_date=NULL,updated_at=? WHERE user_id=?", (as_json(new_context),new_week,timestamp,user_id))
-        return {"profile": self.ensure_profile(user_id),"tasks": self.list_tasks(user_id),"week_id": new_week,"carried_task_ids": sorted(carry_ids)}
+        return {
+            "week_id": new_week,
+            "previous_week_id": old_week,
+            "carried_task_ids": sorted(carry_ids),
+            "active_plan_revision": None,
+            "resources": {
+                "profile": "/api/profile",
+                "tasks": "/api/tasks",
+                "active_plan": f"/api/plans/active?week_id={new_week}",
+                "week_status": f"/api/weeks/status?week_id={new_week}",
+            },
+        }
 
     def delete_task(self, task_id: str, user_id: str) -> dict:
         current = self.get_task(task_id, user_id)
