@@ -116,7 +116,7 @@ export default function WeeklyPlanPage() {
         temporary_constraints: temporaryConstraints.split('\n').map((item) => item.trim()).filter(Boolean),
         keep_buffer: keepBuffer,
       }
-      const result = await apiRequest<any>('/api/weekly-setup/reconcile', {
+      await apiRequest('/api/weekly-setup/reconcile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -133,8 +133,7 @@ export default function WeeklyPlanPage() {
           })),
         }),
       })
-      setTasks(result.active_ready_tasks || result.tasks || tasks)
-      setProfile(result.profile || { ...profile, weekly_context: weeklyContext })
+      await loadPlanningState()
       toast(t('planning.setupSaved'))
     } catch (error) {
       toast(error instanceof Error ? error.message : t('planning.saveFailed'))

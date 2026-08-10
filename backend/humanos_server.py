@@ -3054,22 +3054,17 @@ class Store:
                 ),
             )
 
-        active_ready = [
-            task for task in self.list_tasks(user_id)
-            if task.get("week_id") == week_id
-            and not task.get("removed_from_week")
-            and task.get("status") not in {"completed", "terminated", "blocked", "paused"}
-            and int((task.get("execution") or {}).get("remaining_duration_minutes", task.get("duration") or 0)) > 0
-        ]
         return {
-            "profile": self.ensure_profile(user_id),
-            "tasks": self.list_tasks(user_id),
-            "active_ready_tasks": active_ready,
             "task_diff": {"created": created_ids,"updated": updated_ids,"archived": archived_ids,"changes": task_changes},
             "invalidated_task_ids": sorted(invalidated_ids),
             "plan_needs_update": bool(invalidated_ids or weekly_scope),
             "message": "Your task information changed. The current plan needs an update." if invalidated_ids or weekly_scope else "Weekly information saved without changing the current plan.",
             "week_id": week_id,
+            "resources": {
+                "profile": "/api/profile",
+                "tasks": "/api/tasks",
+                "active_plan": f"/api/plans/active?week_id={week_id}",
+            },
         }
 
     def _decorate_plan_blocks(self, blocks: list[dict], week_id: str, revision: int, timezone_name: str) -> list[dict]:
