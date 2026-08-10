@@ -4285,44 +4285,33 @@ class Store:
 
     def pattern_candidates(self, user_id: str) -> list[dict]:
         """Three similar episodes create a candidate; static profile still needs confirmation."""
+        profile = self.ensure_profile(user_id)
         with self.connect() as conn:
             rows = conn.execute(
                 "SELECT metadata_json, created_at FROM memories WHERE user_id=? AND source_type='episodic_memory'",
                 (user_id,),
             ).fetchall()
-        groups: dict[str, list[int]] = {}
-        for row in rows:
-            metadata = from_json(row["metadata_json"], {})
-            label = metadata.get("pattern_label") or metadata.get("stop_reason")
-            if label:
-                groups.setdefault(str(label), []).append(row["created_at"])
-        return [
-            {
-                "pattern_label": label,
-                "episode_count": len(dates),
-                "status": "candidate" if len(dates) >= 3 else "insufficient_evidence",
-                "can_suggest_update": len(set(time.strftime("%Y-%m-%d", time.localtime(date / 1000)) for date in dates)) >= 5,
-                "requires_user_confirmation": True,
-            }
-            for label, dates in groups.items()
-        ]
+        from app.domain.profile import build_pattern_candidates
+
+        return build_pattern_candidates(
+            [
+                {"metadata": from_json(row["metadata_json"], {}), "created_at": row["created_at"]}
+                for row in rows
+            ],
+            timezone_name=profile.get("timezone") or "Asia/Shanghai",
+        )
 
     def promote_pattern(self, user_id: str, payload: dict) -> dict:
-        if not payload.get("user_confirmed"):
-            raise ValueError("user confirmation is required before updating static profile")
-        label = str(payload.get("pattern_label") or "").strip()
-        if not label:
-            raise ValueError("pattern_label is required")
         profile = self.ensure_profile(user_id)
-        patterns = list(profile.get("learned_patterns") or [])
-        if not any(item.get("pattern_label") == label for item in patterns):
-            patterns.append({
-                "pattern_label": label,
-                "evidence_count": int(payload.get("evidence_count") or 1),
-                "user_confirmed": True,
-                "confirmed_at": now_ms(),
-            })
-        profile["learned_patterns"] = patterns
+        from app.domain.profile import promote_confirmed_pattern
+
+        profile["learned_patterns"] = promote_confirmed_pattern(
+            list(profile.get("learned_patterns") or []),
+            pattern_label=str(payload.get("pattern_label") or ""),
+            evidence_count=int(payload.get("evidence_count") or 1),
+            user_confirmed=bool(payload.get("user_confirmed")),
+            confirmed_at=now_ms(),
+        )
         updated = self.upsert_profile(profile)
         return {"learned_patterns": updated.get("learned_patterns", [])}
 
