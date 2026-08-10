@@ -315,6 +315,18 @@ Complete one vertical workflow at a time. A vertical workflow includes its page,
 - Do not add mock API success fallbacks to production paths.
 - Preserve existing user changes and unrelated worktree modifications.
 
+## 12.1 Production deployment mapping
+
+The DigitalOcean production application has one canonical frontend source tree:
+
+- Local `frontend/src/` -> server `/root/humanos-app/src/`
+- Local `backend/` -> server `/root/humanos-app/backend/`
+- Frontend PM2 process: `humanos-app` on port `3000`
+- Backend PM2 process: `humanos-backend` on port `8787`
+- Nginx proxies HTTPS traffic to `127.0.0.1:3000`
+
+Do not create or synchronize `/root/humanos-app/frontend/`. It is not a production source root and causes Next.js type checking to scan duplicate files. Do not start additional frontend PM2 processes on alternate ports. After a successful production build, restart only the affected canonical process.
+
 ## 13. Definition of done
 
 A feature is complete only when:
