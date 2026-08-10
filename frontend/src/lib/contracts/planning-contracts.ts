@@ -1,10 +1,9 @@
-import type { HumanOSTask } from '@/lib/contracts/task-contracts'
-
 export interface WeekStatus {
   current_week_id: string
   active_week_id: string
   new_week: boolean
-  unfinished_tasks: HumanOSTask[]
+  unfinished_task_ids: string[]
+  resources?: { tasks?: string }
 }
 
 export interface PlanBlock {
@@ -46,4 +45,3 @@ export interface PlanDecision {
   error?: string
   [key: string]: unknown
 }
-

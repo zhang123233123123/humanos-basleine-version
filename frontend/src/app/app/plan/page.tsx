@@ -49,15 +49,18 @@ export default function WeeklyPlanPage() {
   const loadPlanningState = useCallback(async () => {
     setLoading(true)
     try {
-      const [status, profileData, planData] = await Promise.all([
+      const [status, profileData, taskData, planData] = await Promise.all([
         apiRequest<WeekStatus>('/api/weeks/status'),
         apiRequest<{ profile: Record<string, any> }>('/api/profile'),
+        apiRequest<{ tasks: HumanOSTask[] }>('/api/tasks'),
         apiRequest<{ plan: PlanDecision | null }>('/api/plans/active'),
       ])
+      const unfinishedIds = new Set((status.unfinished_task_ids || []).map(String))
+      const unfinishedTasks = (taskData.tasks || []).filter((task) => unfinishedIds.has(String(task.id)))
       setWeekStatus(status)
       setProfile(profileData.profile)
-      setTasks(status.unfinished_tasks || [])
-      setCarryIds((status.unfinished_tasks || []).map((task) => String(task.id)))
+      setTasks(unfinishedTasks)
+      setCarryIds(unfinishedTasks.map((task) => String(task.id)))
       const weekly = profileData.profile?.weekly_context || {}
       setWeeklyGoal(String(weekly.weekly_goal || ''))
       setAvailableWindows(String(weekly.weekly_available_windows || ''))
@@ -284,7 +287,7 @@ export default function WeeklyPlanPage() {
           <Card className="border-amber-500/40 bg-amber-500/5">
             <CardHeader><CardTitle className="text-lg">{t('planning.newWeek')}</CardTitle><CardDescription>{t('planning.newWeekDescription')}</CardDescription></CardHeader>
             <CardContent className="space-y-3">
-              {weekStatus.unfinished_tasks.map((task) => (
+              {tasks.map((task) => (
                 <label key={task.id} className="flex items-center gap-3 text-sm">
                   <input type="checkbox" checked={carryIds.includes(String(task.id))} onChange={(event) => setCarryIds((current) => event.target.checked ? [...current, String(task.id)] : current.filter((id) => id !== task.id))} />
                   {task.title}

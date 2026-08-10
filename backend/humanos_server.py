@@ -3550,14 +3550,20 @@ class Store:
         profile = self.ensure_profile(user_id)
         current_week = str(requested_week_id or iso_week_id(timezone_name=profile.get("timezone")))
         active_week = str(profile.get("active_week_id") or (profile.get("weekly_context") or {}).get("week_id") or current_week)
-        unfinished = [
-            task for task in self.list_tasks(user_id)
+        unfinished_task_ids = [
+            str(task.get("id")) for task in self.list_tasks(user_id)
             if task.get("week_id") == active_week
             and not task.get("removed_from_week")
             and task.get("status") not in {"completed", "terminated"}
             and int((task.get("execution") or {}).get("remaining_duration_minutes", task.get("duration") or 0)) > 0
         ]
-        return {"current_week_id": current_week,"active_week_id": active_week,"new_week": current_week != active_week,"unfinished_tasks": unfinished}
+        return {
+            "current_week_id": current_week,
+            "active_week_id": active_week,
+            "new_week": current_week != active_week,
+            "unfinished_task_ids": unfinished_task_ids,
+            "resources": {"tasks": "/api/tasks"},
+        }
 
     def rollover_week(self, user_id: str, payload: dict) -> dict:
         profile = self.ensure_profile(user_id)
