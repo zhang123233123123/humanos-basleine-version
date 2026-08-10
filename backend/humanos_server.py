@@ -1160,9 +1160,12 @@ class Store:
                 ),
             )
             row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-        profile = self.ensure_profile(user_id)
+        self.ensure_profile(user_id)
         self.log_event(user_id, "user_registered", {"email": email})
-        return {"user": self.public_user(row), "profile": profile}
+        return {
+            "user": self.public_user(row),
+            "resources": {"profile": "/api/profile"},
+        }
 
     def authenticate_user(self, email: str, password: str) -> dict:
         email = email.strip().lower()
@@ -1172,9 +1175,12 @@ class Store:
                 raise PermissionError("invalid email or password")
             conn.execute("UPDATE users SET last_login_at=? WHERE id=?", (now_ms(), row["id"]))
             row = conn.execute("SELECT * FROM users WHERE id=?", (row["id"],)).fetchone()
-        profile = self.ensure_profile(row["id"])
+        self.ensure_profile(row["id"])
         self.log_event(row["id"], "user_logged_in", {"email": email})
-        return {"user": self.public_user(row), "profile": profile}
+        return {
+            "user": self.public_user(row),
+            "resources": {"profile": "/api/profile"},
+        }
 
     def ensure_profile(self, user_id: str) -> dict:
         existing = self.get_profile(user_id)
