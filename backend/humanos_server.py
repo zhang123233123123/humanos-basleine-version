@@ -6190,12 +6190,20 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/profile":
                 user_id = query.get("user_id", ["demo"])[0]
                 if method == "GET":
-                    self.send_json({"profile": store.ensure_profile(user_id)})
+                    self.send_json({
+                        "data": {"profile": store.ensure_profile(user_id)},
+                        "resources": {"self": "/api/profile", "tasks": "/api/tasks"},
+                        "meta": {"resource": "profile", "aggregate_root": "profile", "read_only": False},
+                    })
                     return
                 if method == "PUT":
                     payload = self.read_json()
                     payload["user_id"] = payload.get("user_id", user_id)
-                    self.send_json({"profile": store.upsert_profile(payload)})
+                    self.send_json({
+                        "data": {"profile": store.upsert_profile(payload)},
+                        "resources": {"self": "/api/profile", "tasks": "/api/tasks"},
+                        "meta": {"resource": "profile", "aggregate_root": "profile", "read_only": False},
+                    })
                     return
 
             if path == "/api/weekly-setup/reconcile" and method == "POST":

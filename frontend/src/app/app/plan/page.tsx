@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { apiRequest } from '@/lib/client/api'
 import type { HumanOSTask } from '@/lib/contracts/task-contracts'
 import type { PlanBlock, PlanDecision, PlanValidation, WeekStatus } from '@/lib/contracts/planning-contracts'
+import type { ResourceEnvelope } from '@/lib/contracts/api-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 
@@ -51,17 +52,17 @@ export default function WeeklyPlanPage() {
     try {
       const [status, profileData, taskData, planData] = await Promise.all([
         apiRequest<WeekStatus>('/api/weeks/status'),
-        apiRequest<{ profile: Record<string, any> }>('/api/profile'),
+        apiRequest<ResourceEnvelope<{ profile: Record<string, any> }>>('/api/profile'),
         apiRequest<{ tasks: HumanOSTask[] }>('/api/tasks'),
         apiRequest<{ plan: PlanDecision | null }>('/api/plans/active'),
       ])
       const unfinishedIds = new Set((status.unfinished_task_ids || []).map(String))
       const unfinishedTasks = (taskData.tasks || []).filter((task) => unfinishedIds.has(String(task.id)))
       setWeekStatus(status)
-      setProfile(profileData.profile)
+      setProfile(profileData.data.profile)
       setTasks(unfinishedTasks)
       setCarryIds(unfinishedTasks.map((task) => String(task.id)))
-      const weekly = profileData.profile?.weekly_context || {}
+      const weekly = profileData.data.profile?.weekly_context || {}
       setWeeklyGoal(String(weekly.weekly_goal || ''))
       setAvailableWindows(String(weekly.weekly_available_windows || ''))
       setTemporaryConstraints(

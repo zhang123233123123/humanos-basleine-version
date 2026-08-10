@@ -35,7 +35,7 @@ export default function SettingsPage() {
       ])
       if (!profileResponse.ok) throw new Error('无法加载设置')
       const profileBody = await profileResponse.json()
-      setProfile(profileBody.profile || profileBody)
+      setProfile(profileBody.data?.profile || null)
       if (healthResponse.ok) setHealth(await healthResponse.json())
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '无法加载设置')
@@ -61,7 +61,7 @@ export default function SettingsPage() {
       const response = await fetch('/api/profile', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(profile) })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(body.message || '保存失败')
-      setProfile(body.profile || body)
+      setProfile(body.data?.profile || null)
       setSaved(true)
       toast.success('设置已保存')
     } catch (error) {

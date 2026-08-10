@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { apiRequest } from '@/lib/client/api'
+import type { ResourceEnvelope } from '@/lib/contracts/api-contracts'
 import type { LearnedPattern, MemoryResult, PatternCandidate } from '@/lib/contracts/insights-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
@@ -34,10 +35,10 @@ export default function InsightsPage() {
     try {
       const [patternData, profileData] = await Promise.all([
         apiRequest<{ patterns: PatternCandidate[] }>('/api/patterns/candidates'),
-        apiRequest<{ profile: { learned_patterns?: LearnedPattern[] } }>('/api/profile'),
+        apiRequest<ResourceEnvelope<{ profile: { learned_patterns?: LearnedPattern[] } }>>('/api/profile'),
       ])
       setCandidates(patternData.patterns || [])
-      setLearned((profileData.profile.learned_patterns || []).filter((pattern) => pattern.user_confirmed))
+      setLearned((profileData.data.profile.learned_patterns || []).filter((pattern) => pattern.user_confirmed))
     } catch (error) {
       toast(error instanceof Error ? error.message : t('insights.loadFailed'))
     } finally {
@@ -133,4 +134,3 @@ export default function InsightsPage() {
     </main>
   )
 }
-

@@ -10,8 +10,6 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 
-const HUMANOS_BACKEND = process.env.NEXT_PUBLIC_HUMANOS_BACKEND_URL || 'http://localhost:8788'
-
 const STEPS = [
   { step: 0, badge: 'step1of', title: 'step1Title', desc: 'step1Desc' },
   { step: 1, badge: 'step2of', title: 'step2Title', desc: 'step2Desc' },
@@ -74,8 +72,8 @@ export default function OnboardingPage() {
   const handleSubmit = async () => {
     setLoading(true)
     try {
-      const res = await fetch(`${HUMANOS_BACKEND}/api/profile`, {
-        method: 'POST',
+      const res = await fetch('/api/profile', {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           role,
