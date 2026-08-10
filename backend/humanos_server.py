@@ -1444,16 +1444,36 @@ class Store:
         context_window = payload.get("contextWindow") or payload.get("context_window") or {}
         if not isinstance(context_window, dict):
             context_window = {}
-        context_window = {
-            **context_window,
-            "taskType": schedule_type,
-            "deadline": deadline,
-            "estimatedDuration": duration,
-            "timezone": payload.get("timezone") or context_window.get("timezone"),
-            "startAt": payload.get("start_at") or context_window.get("startAt"),
-            "deadlineAt": payload.get("deadline_at") or context_window.get("deadlineAt"),
-            "deadlineAssumption": payload.get("deadline_assumption") or context_window.get("deadlineAssumption"),
-        }
+        from app.domain.task import prepare_task_creation
+
+        aggregate = prepare_task_creation(
+            task_id=task_id,
+            user_id=user_id,
+            title=title,
+            domain_type=domain_type,
+            schedule_type=schedule_type,
+            deadline=deadline,
+            duration_minutes=duration,
+            priority=priority,
+            status=status,
+            context=context,
+            context_window=context_window,
+            task_demand=demand,
+            cognitive_load=cognitive_load,
+            ambiguity=ambiguity,
+            switch_cost=switch_cost,
+            reentry_cost=reentry_cost,
+            execution=payload.get("execution"),
+            resource_modality=payload.get("resource_modality"),
+            parallelizable=bool(payload.get("parallelizable", False)),
+            expected_difficulty=demand.get("expected_difficulty"),
+            week_id=payload.get("week_id") or iso_week_id(timezone_name=payload.get("timezone")),
+            timezone_name=payload.get("timezone"),
+            start_at=payload.get("start_at"),
+            deadline_at=payload.get("deadline_at"),
+            deadline_assumption=payload.get("deadline_assumption"),
+        )
+        context_window = aggregate.context_window
         timestamp = now_ms()
         with self.connect() as conn:
             conn.execute(
@@ -1486,17 +1506,11 @@ class Store:
                     as_json(payload.get("slot")),
                     as_json(payload.get("checkpoints", [])),
                     as_json(demand),
-                    as_json(payload.get("execution") or {
-                        "original_estimate_minutes": duration,
-                        "accumulated_actual_minutes": 0,
-                        "remaining_duration_minutes": duration,
-                        "progress_percent": 0,
-                        "sessions": [],
-                    }),
-                    as_json(payload.get("resource_modality", [])),
-                    int(bool(payload.get("parallelizable", False))),
-                    demand.get("expected_difficulty"),
-                    payload.get("week_id") or iso_week_id(timezone_name=payload.get("timezone")),
+                    as_json(aggregate.execution.model_dump()),
+                    as_json(aggregate.resource_modality),
+                    int(aggregate.parallelizable),
+                    aggregate.expected_difficulty,
+                    aggregate.week_id,
                     0,
                     None,
                     create_request_id,
