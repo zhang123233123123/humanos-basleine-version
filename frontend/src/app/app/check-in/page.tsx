@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { apiRequest } from '@/lib/client/api'
-import type { ContextDump, DailyPlanReview, ReentryResult, RuntimeState } from '@/lib/contracts/checkin-contracts'
+import type { CheckInResourceEnvelope, ContextDump, DailyPlanReview, ReentryResult, RuntimeState } from '@/lib/contracts/checkin-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 
@@ -42,7 +42,7 @@ export default function CheckInPage() {
   const saveDailyCheckIn = async () => {
     setSubmitting(true)
     try {
-      const result = await apiRequest<{ runtime_state: RuntimeState; daily_plan_review: DailyPlanReview | null }>('/api/state-checkins', {
+      const result = await apiRequest<CheckInResourceEnvelope<{ runtime_state: RuntimeState; daily_plan_review: DailyPlanReview | null }>>('/api/state-checkins', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...runtimeState,
@@ -52,7 +52,7 @@ export default function CheckInPage() {
           local_date: new Date().toLocaleDateString('en-CA'),
         }),
       })
-      setDailyReview(result.daily_plan_review)
+      setDailyReview(result.data.daily_plan_review)
       setSaved(true)
       toast(t('checkin.saved'))
     } catch (error) {

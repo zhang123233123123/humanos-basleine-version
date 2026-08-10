@@ -53,3 +53,9 @@ export interface DailyPlanReview {
   }
   options: string[]
 }
+
+export interface CheckInResourceEnvelope<T> {
+  data: T
+  resources: { self: string; profile: string; active_plan: string; execution_sessions: string }
+  meta: { resource: 'daily_checkin'; aggregate_root: 'profile'; read_only: boolean }
+}

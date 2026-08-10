@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { ArrowLeft, CalendarCheck, Loader2, RefreshCw, ShieldCheck, Sparkles, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -26,6 +27,8 @@ function hourLabel(value: number) {
 
 export default function WeeklyPlanPage() {
   const { t, locale } = useTranslation()
+  const searchParams = useSearchParams()
+  const adjustmentTrigger = searchParams.get('adjust') || ''
   const [stage, setStage] = useState<Stage>('setup')
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -72,13 +75,14 @@ export default function WeeklyPlanPage() {
       )
       setKeepBuffer(weekly.keep_buffer !== false)
       setActivePlan(planData.data.plan)
-      if (planData.data.plan?.plan_status === 'confirmed') setStage('confirmed')
+      if (planData.data.plan?.plan_status === 'confirmed' && !adjustmentTrigger) setStage('confirmed')
+      if (adjustmentTrigger) setStage('setup')
     } catch (error) {
       toast(error instanceof Error ? error.message : t('planning.loadFailed'))
     } finally {
       setLoading(false)
     }
-  }, [t])
+  }, [adjustmentTrigger, t])
 
   useEffect(() => {
     void loadPlanningState()
@@ -154,7 +158,7 @@ export default function WeeklyPlanPage() {
       const result = await apiRequest<{ decision: PlanDecision }>('/api/schedules/decide', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ week_id: weekId, client_now: new Date().toISOString() }),
+        body: JSON.stringify({ week_id: weekId, client_now: new Date().toISOString(), adjustment_trigger: adjustmentTrigger || undefined }),
       })
       if (result.decision?.unavailable || result.decision?.error) {
         throw new Error(result.decision.error || t('planning.aiUnavailable'))
@@ -296,6 +300,12 @@ export default function WeeklyPlanPage() {
               ))}
               <Button onClick={rolloverWeek} disabled={submitting}>{t('planning.startWeek')}</Button>
             </CardContent>
+          </Card>
+        )}
+
+        {adjustmentTrigger && (
+          <Card className="border-amber-500/40 bg-amber-500/5">
+            <CardHeader><CardTitle className="text-lg">{locale === 'zh' ? '根据当前状态重新规划' : 'Replan from your current state'}</CardTitle><CardDescription>{locale === 'zh' ? '系统会使用刚刚的 Daily Check-in，重新计算今天第一个未开始 Session。生成后仍需预览、验证并确认，现有计划不会被直接覆盖。' : 'HumanOS will use your latest Daily Check-in to reconsider today’s first unstarted session. The result still requires review, validation, and confirmation.'}</CardDescription></CardHeader>
           </Card>
         )}
 
