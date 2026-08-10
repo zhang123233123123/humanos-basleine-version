@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from ..agents.task_parser import PydanticAITaskParser
+from ..domain.task.classifier import classify_task
+from ..domain.task.validator import validate_enriched_task
 
 
 def parse_structured_tasks(
@@ -20,4 +22,14 @@ def parse_structured_tasks(
     )
     if result is None:
         return None
-    return [task.model_dump() for task in result.tasks]
+    enriched = []
+    for task in result.tasks:
+        classification = classify_task(task.title)
+        validation = validate_enriched_task(task, classification.domain_type)
+        enriched.append({
+            **task.model_dump(),
+            "domain_type": classification.domain_type,
+            "classification_rule": classification.rule_id,
+            "classification_validation": validation,
+        })
+    return enriched

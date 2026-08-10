@@ -1706,6 +1706,13 @@ class Store:
                 payload = {
                     "title": item.get("title") or "",
                     "task_type": task_type,
+                    "domain_type": item.get("domain_type") or "general",
+                    "classification_rule": item.get("classification_rule") or "legacy_unclassified",
+                    "classification_validation": item.get("classification_validation") or {
+                        "valid": True,
+                        "errors": [],
+                        "checked_by": "legacy_parser",
+                    },
                     "deadline": due_value,
                     "due": due_value,
                     "timezone": timezone_name,
