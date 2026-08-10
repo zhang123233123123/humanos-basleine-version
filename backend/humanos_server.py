@@ -25,6 +25,14 @@ from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+try:
+    from .task_parser_agent import parse_tasks_with_agent
+except ImportError:
+    try:
+        from task_parser_agent import parse_tasks_with_agent
+    except ImportError:
+        parse_tasks_with_agent = None
+
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
@@ -1658,9 +1666,23 @@ class Store:
                 shared_clock = format_clock_hour(shared_hour) if shared_hour is not None else shared_time.group(1)
                 expanded = "，".join(f"{part} {shared_clock}" for part in dated_clauses)
                 return self.local_parse_tasks_from_text(user_id, expanded, create_tasks=create_tasks)
-        if self.looks_like_compact_multi_task_list(clean) or self.english_task_segments(clean):
+        prefer_local_parser = self.looks_like_compact_multi_task_list(clean) or bool(self.english_task_segments(clean))
+        profile = self.ensure_profile(user_id)
+        timezone_name = str(profile.get("timezone") or "Asia/Shanghai")
+        typed_tasks = parse_tasks_with_agent(
+            clean,
+            current_time=self.user_clock_now(user_id, timezone_name).isoformat(),
+            timezone_name=timezone_name,
+            chat_context=chat_context,
+        ) if parse_tasks_with_agent else None
+        if typed_tasks:
+            llm_result = {"tasks": typed_tasks}
+            parser_name = "pydantic_ai"
+        elif prefer_local_parser:
             return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
-        llm_result = chat_completion(task_parsing_messages(clean, chat_context))
+        else:
+            llm_result = chat_completion(task_parsing_messages(clean, chat_context))
+            parser_name = "deepseek_legacy"
         if llm_result:
             if isinstance(llm_result, list):
                 raw_tasks = llm_result
@@ -1685,6 +1707,10 @@ class Store:
                     "task_type": task_type,
                     "deadline": due_value,
                     "due": due_value,
+                    "timezone": timezone_name,
+                    "start_at": item.get("start_at"),
+                    "deadline_at": item.get("deadline_at"),
+                    "deadline_assumption": "pydantic_ai_resolved" if item.get("deadline_at") else None,
                     "estimated_duration": parsed_duration,
                     "duration": parsed_duration,
                     "priority": item.get("priority") if item.get("priority") in {"高", "中", "低"} else None,
@@ -1693,7 +1719,7 @@ class Store:
                     "source_spans": item.get("source_spans") or [],
                     "confidence": item.get("confidence") or 0.0,
                 }
-                payload["parser"] = "deepseek"
+                payload["parser"] = parser_name
                 payloads.append(payload)
             if expected_count > 1 and len(payloads) < expected_count:
                 self.log_event(
@@ -1708,7 +1734,7 @@ class Store:
                 )
                 return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
             if payloads:
-                return self.materialize_parsed_tasks(user_id, payloads, "deepseek", create_tasks)
+                return self.materialize_parsed_tasks(user_id, payloads, parser_name, create_tasks)
 
         return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
 
