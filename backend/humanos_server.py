@@ -2675,15 +2675,11 @@ class Store:
         current = self.get_task(task_id, user_id)
         if not current:
             raise KeyError(task_id)
-        if "deadline" in patch and "due" not in patch:
-            patch["due"] = patch["deadline"]
-        if "estimated_duration" in patch and "duration" not in patch:
-            patch["duration"] = patch["estimated_duration"]
-        scheduling_keys = {
-            "due", "start_at", "deadline_at", "duration", "priority",
-            "expected_difficulty", "cognitive_load", "task_demand", "dependency",
-        }
-        schedule_changed = any(key in patch and patch.get(key) != current.get(key) for key in scheduling_keys)
+        from app.domain.task import decide_task_patch, status_after_schedule_change
+
+        decision = decide_task_patch(current, patch)
+        patch = decision.patch
+        schedule_changed = decision.schedule_changed
         allowed = {
             "title",
             "type",
@@ -2715,46 +2711,8 @@ class Store:
             updates["slot_json"] = as_json(patch["slot"])
         if "checkpoints" in patch:
             updates["checkpoints_json"] = as_json(patch["checkpoints"])
-        if (
-            "contextWindow" in patch
-            or "context_window" in patch
-            or "start_at" in patch
-            or "deadline_at" in patch
-        ):
-            current_window = current.get("contextWindow") or {}
-            incoming_window = patch.get("contextWindow") or patch.get("context_window") or {}
-            if not isinstance(current_window, dict):
-                current_window = {}
-            if not isinstance(incoming_window, dict):
-                incoming_window = {}
-            context_window = {**current_window, **incoming_window}
-            if "start_at" in patch:
-                context_window["startAt"] = patch.get("start_at")
-            if "deadline_at" in patch:
-                context_window["deadlineAt"] = patch.get("deadline_at")
-            updates["context_window_json"] = as_json(context_window)
-        if any(
-            key in patch
-            for key in (
-                "deadline", "start_at", "deadline_at", "estimated_duration",
-                "task_type", "taskType",
-            )
-        ):
-            context_window = {
-                **(current.get("contextWindow") or {}),
-                **(patch.get("contextWindow") or patch.get("context_window") or {}),
-            }
-            if "deadline" in patch:
-                context_window["deadline"] = patch["deadline"]
-            if "start_at" in patch:
-                context_window["startAt"] = patch.get("start_at")
-            if "deadline_at" in patch:
-                context_window["deadlineAt"] = patch.get("deadline_at")
-            if "estimated_duration" in patch:
-                context_window["estimatedDuration"] = patch["estimated_duration"]
-            if "task_type" in patch or "taskType" in patch:
-                context_window["taskType"] = patch.get("task_type") or patch.get("taskType")
-            updates["context_window_json"] = as_json(context_window)
+        if decision.context_window is not None:
+            updates["context_window_json"] = as_json(decision.context_window)
         if "task_demand" in patch:
             updates["demand_json"] = as_json(patch["task_demand"])
         if "execution" in patch:
@@ -2763,10 +2721,6 @@ class Store:
             updates["resource_modality_json"] = as_json(patch["resource_modality"])
         if "parallelizable" in patch:
             updates["parallelizable"] = int(bool(patch["parallelizable"]))
-        if "dependency" in patch:
-            context_window = dict(current.get("contextWindow") or {})
-            context_window["dependency"] = patch.get("dependency")
-            updates["context_window_json"] = as_json(context_window)
         if schedule_changed:
             profile = self.ensure_profile(user_id)
             week_id = str(current.get("week_id") or profile.get("active_week_id") or iso_week_id(timezone_name=profile.get("timezone")))
@@ -2776,7 +2730,7 @@ class Store:
             keys = {str(item.get("block_id")) for item in known if item.get("block_id")}
             known.extend(item for item in history if not item.get("block_id") or str(item.get("block_id")) not in keys)
             execution["history_sessions"] = known
-            if "duration" in patch:
+            if decision.duration_changed:
                 actual = int(execution.get("accumulated_actual_minutes") or 0)
                 execution["original_estimate_minutes"] = int(patch.get("duration") or current.get("duration") or 0)
                 execution["remaining_duration_minutes"] = max(execution["original_estimate_minutes"] - actual, 0)
@@ -2786,8 +2740,9 @@ class Store:
             # feedback marking a Task completed) is authoritative. Do not
             # overwrite it merely because the same patch also calibrates Task
             # Demand and therefore affects future scheduling.
-            if "status" not in patch and current.get("status") not in {"completed", "terminated", "blocked", "paused"}:
-                updates["status"] = "queued"
+            next_status = status_after_schedule_change(current.get("status") or "queued", patch.get("status"))
+            if next_status is not None:
+                updates["status"] = next_status
         updates["updated_at"] = now_ms()
         assignments = ", ".join(f"{key}=?" for key in updates)
         values = list(updates.values()) + [task_id, user_id]
