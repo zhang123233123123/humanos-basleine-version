@@ -4212,42 +4212,21 @@ class Store:
                     "UPDATE execution_sessions SET status=?,completion_outcome=?,actual_end_at=?,accumulated_active_minutes=?,updated_at=? WHERE id=? AND user_id=?",
                     (session_status, outcome, clock_now(ZoneInfo(feedback_profile.get("timezone") or "Asia/Shanghai")).isoformat(), confirmed_actual, feedback["created_at"], feedback["execution_session_id"], user_id),
                 )
-        execution = task.get("execution") or {}
         task_eval = feedback["task_evaluation"]
-        completion = str(task_eval.get("completion") or "partial")
-        actual = 0 if completion in {"not_started", "did_not_start"} else max(int(task_eval.get("actual_minutes") or 0), 0)
-        execution["accumulated_actual_minutes"] = int(execution.get("accumulated_actual_minutes") or 0) + actual
-        if task_eval.get("remaining_duration_minutes") is not None:
-            execution["remaining_duration_minutes"] = int(task_eval["remaining_duration_minutes"])
-        if task_eval.get("completion") == "completed":
-            execution["remaining_duration_minutes"] = 0
-        elif task_eval.get("remaining_duration_minutes") is None:
-            previous_remaining = int(execution.get("remaining_duration_minutes") or task.get("duration") or 0)
-            execution["remaining_duration_minutes"] = max(previous_remaining - actual, 0)
-        execution["last_perceived_difficulty"] = task_eval.get("perceived_difficulty")
-        execution.setdefault("sessions", []).append({
-            "feedback_id": feedback["id"],
-            "actual_minutes": actual,
-            "completion": task_eval.get("completion", "partial"),
-            "perceived_difficulty": task_eval.get("perceived_difficulty"),
-        })
-        demand = task.get("task_demand") or {}
-        if task_eval.get("perceived_difficulty") is not None:
-            demand.setdefault("calibration_history", []).append({
-                "feedback_id": feedback["id"],
-                "expected_difficulty": task.get("expected_difficulty"),
-                "perceived_difficulty": task_eval.get("perceived_difficulty"),
-            })
-            demand["last_calibrated_at"] = feedback["created_at"]
-        patch = {"execution": execution, "task_demand": demand}
-        if task_eval.get("completion") == "completed":
-            patch["status"] = "completed"
-        else:
-            # Ending a session also ends its live-running Task state. Partial
-            # work and a reported non-start remain active work for a future
-            # session; neither should be left looking as if it is still
-            # running after feedback has been submitted.
-            patch["status"] = "queued"
+        from app.domain.task import apply_execution_feedback
+
+        feedback_decision = apply_execution_feedback(
+            task,
+            task_eval,
+            feedback_id=feedback["id"],
+            feedback_created_at=feedback["created_at"],
+        )
+        actual = feedback_decision.actual_minutes
+        patch = {
+            "execution": feedback_decision.execution,
+            "task_demand": feedback_decision.task_demand,
+            "status": feedback_decision.task_status,
+        }
         self.patch_task(task_id, patch, user_id)
         self.add_memory(
             user_id=user_id,
