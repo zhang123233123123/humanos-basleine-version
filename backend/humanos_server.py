@@ -3566,6 +3566,13 @@ class Store:
                 )
             stored = dict(payload.get("decision") or {})
             stored.update({"plan_id": plan_id,"plan_revision": revision,"plan_status": "confirmed","week_id": week_id,"plan_patch": decorated,"confirmed_at": timestamp})
+            from app.application.build_timeline import build_weekly_timeline_snapshot
+
+            stored["weekly_timeline"] = build_weekly_timeline_snapshot(
+                week_id=week_id,
+                timezone_name=timezone_name,
+                blocks=decorated,
+            )
             if episode:
                 rationale_payload = dict(rationale or {})
                 if canonical_diff.get("has_changes"):
@@ -3592,9 +3599,10 @@ class Store:
             )
             # A confirmed revision is the single source of future calendar
             # truth. Keep completed/ended/running history, but retire unstarted
-            # Sessions from earlier revisions so they cannot reappear as Up Next.
+            # and paused Sessions from earlier revisions so they cannot reappear
+            # in Now / Up Next after the user confirms a replacement plan.
             conn.execute(
-                "UPDATE execution_sessions SET status='superseded',updated_at=? WHERE user_id=? AND week_id=? AND plan_revision<>? AND status='ready'",
+                "UPDATE execution_sessions SET status='superseded',completion_outcome=CASE WHEN status='paused' THEN 'replaced_by_revision' ELSE completion_outcome END,updated_at=? WHERE user_id=? AND week_id=? AND plan_revision<>? AND status IN ('ready','paused')",
                 (timestamp, user_id, week_id, revision),
             )
             conn.execute(
