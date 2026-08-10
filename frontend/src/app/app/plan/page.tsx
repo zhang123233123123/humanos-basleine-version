@@ -53,11 +53,11 @@ export default function WeeklyPlanPage() {
       const [status, profileData, taskData, planData] = await Promise.all([
         apiRequest<WeekStatus>('/api/weeks/status'),
         apiRequest<ResourceEnvelope<{ profile: Record<string, any> }>>('/api/profile'),
-        apiRequest<{ tasks: HumanOSTask[] }>('/api/tasks'),
+        apiRequest<ResourceEnvelope<{ tasks: HumanOSTask[] }>>('/api/tasks?view=resource'),
         apiRequest<{ plan: PlanDecision | null }>('/api/plans/active'),
       ])
       const unfinishedIds = new Set((status.unfinished_task_ids || []).map(String))
-      const unfinishedTasks = (taskData.tasks || []).filter((task) => unfinishedIds.has(String(task.id)))
+      const unfinishedTasks = (taskData.data.tasks || []).filter((task) => unfinishedIds.has(String(task.id)))
       setWeekStatus(status)
       setProfile(profileData.data.profile)
       setTasks(unfinishedTasks)

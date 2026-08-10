@@ -196,6 +196,7 @@ function isPreviewTask(task: HumanOSTask) {
 function parseTaskArrayFromBackend(raw: unknown): HumanOSTask[] {
   if (!raw) return []
   if (Array.isArray(raw)) return raw as HumanOSTask[]
+  if (Array.isArray((raw as { data?: { tasks?: unknown[] } })?.data?.tasks)) return (raw as { data: { tasks: HumanOSTask[] } }).data.tasks
   if (Array.isArray((raw as { tasks?: unknown[] })?.tasks)) return (raw as { tasks?: HumanOSTask[] }).tasks || []
   return []
 }
@@ -207,9 +208,13 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const start = searchParams.get('start')
   const end = searchParams.get('end')
+  const view = searchParams.get('view')
 
   try {
     const query = withUserQuery('/api/tasks', userId)
+    if (view === 'resource') {
+      return Response.json(await humanosRequest('GET', query))
+    }
     const [taskData, executionData] = await Promise.all([
       humanosRequest('GET', query),
       humanosRequest('GET', `/api/execution-sessions?user_id=${encodeURIComponent(userId)}`),
@@ -246,12 +251,7 @@ export async function POST(req: Request) {
       user_id: userId,
       status: body?.status || 'queued',
     })
-    const data: any = await humanosRequest('POST', '/api/tasks', normalized)
-    const payload = data.task || data
-    if (data.task) {
-      return Response.json({ task: payload })
-    }
-    return Response.json(data)
+    return Response.json(await humanosRequest('POST', '/api/tasks', normalized))
   } catch (error) {
     return humanosErrorResponse(error)
   }
@@ -273,9 +273,7 @@ export async function PUT(req: Request) {
       user_id: userId,
     })
     delete (normalized as { id?: unknown }).id
-    const data: any = await humanosRequest('PATCH', `/api/tasks/${taskId}`, normalized)
-    const payload = data.task || data
-    return Response.json({ task: payload })
+    return Response.json(await humanosRequest('PATCH', `/api/tasks/${taskId}`, normalized))
   } catch (error) {
     return humanosErrorResponse(error)
   }

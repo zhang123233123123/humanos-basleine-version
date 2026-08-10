@@ -6229,13 +6229,21 @@ class Handler(BaseHTTPRequestHandler):
                 user_id = query.get("user_id", ["demo"])[0]
                 if method == "GET":
                     store.ensure_profile(user_id)
-                    self.send_json({"tasks": store.list_tasks(user_id)})
+                    self.send_json({
+                        "data": {"tasks": store.list_tasks(user_id)},
+                        "resources": {"self": "/api/tasks", "profile": "/api/profile"},
+                        "meta": {"resource": "tasks", "aggregate_root": "task", "read_only": False},
+                    })
                     return
                 if method == "POST":
                     payload = self.read_json()
                     user_id = payload.get("user_id", user_id)
                     store.ensure_profile(user_id)
-                    self.send_json({"task": store.create_task(user_id, payload)}, status=201)
+                    self.send_json({
+                        "data": {"task": store.create_task(user_id, payload)},
+                        "resources": {"collection": "/api/tasks"},
+                        "meta": {"resource": "task", "aggregate_root": "task", "read_only": False},
+                    }, status=201)
                     return
 
             if path == "/api/tasks/parse" and method == "POST":
@@ -6266,20 +6274,32 @@ class Handler(BaseHTTPRequestHandler):
                 task = store.get_task(task_id, user_id)
                 if not task:
                     raise KeyError(task_id)
-                self.send_json({"task": task})
+                self.send_json({
+                    "data": {"task": task},
+                    "resources": {"collection": "/api/tasks"},
+                    "meta": {"resource": "task", "aggregate_root": "task", "read_only": False},
+                })
                 return
 
             if path.startswith("/api/tasks/") and method == "PATCH":
                 task_id = path.split("/")[-1]
                 payload = self.read_json()
                 user_id = payload.get("user_id") or query.get("user_id", ["demo"])[0]
-                self.send_json({"task": store.patch_task(task_id, payload, user_id)})
+                self.send_json({
+                    "data": {"task": store.patch_task(task_id, payload, user_id)},
+                    "resources": {"collection": "/api/tasks"},
+                    "meta": {"resource": "task", "aggregate_root": "task", "read_only": False},
+                })
                 return
 
             if path.startswith("/api/tasks/") and method == "DELETE":
                 task_id = path.split("/")[-1]
                 user_id = query.get("user_id", ["demo"])[0]
-                self.send_json({"task": store.delete_task(task_id, user_id)})
+                self.send_json({
+                    "data": {"task": store.delete_task(task_id, user_id)},
+                    "resources": {"collection": "/api/tasks"},
+                    "meta": {"resource": "task", "aggregate_root": "task", "read_only": False},
+                })
                 return
 
             if path == "/api/state-checkins" and method == "POST":
