@@ -42,7 +42,7 @@ export const useEvents = create<State & Actions>((set, get) => ({
 
       for (const range of rangesToFetch) {
         const response = await fetch(
-          `/api/tasks?start=${range.start}&end=${range.end}`,
+          `/api/calendar/events?start=${range.start}&end=${range.end}`,
         )
 
         if (!response.ok) {
@@ -50,7 +50,7 @@ export const useEvents = create<State & Actions>((set, get) => ({
         }
 
         const data = await response.json()
-        newEvents = [...newEvents, ...data.events]
+        newEvents = [...newEvents, ...(data.data?.events || [])]
       }
 
       set((state) => {
