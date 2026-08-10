@@ -58,6 +58,12 @@ export interface ExecutionImpact {
   options: string[]
 }
 
+export interface ExecutionFeedbackResult {
+  feedback: Record<string, unknown>
+  task: Record<string, unknown>
+  execution_session: ExecutionSession | null
+}
+
 export interface ExecutionResourceEnvelope<T> {
   data: T
   resources: {

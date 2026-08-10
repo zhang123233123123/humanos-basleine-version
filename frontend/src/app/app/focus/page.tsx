@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { apiRequest } from '@/lib/client/api'
 import { requestId } from '@/lib/client/request-id'
-import type { CurrentExecution, ExecutionImpact, ExecutionResourceEnvelope, ExecutionSession } from '@/lib/contracts/execution-contracts'
+import type { CurrentExecution, ExecutionFeedbackResult, ExecutionImpact, ExecutionResourceEnvelope, ExecutionSession } from '@/lib/contracts/execution-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 
@@ -187,7 +187,7 @@ export default function FocusPage() {
     if (!endedSession) return
     setSubmitting(true)
     try {
-      await apiRequest('/api/execution-feedback', {
+      const result = await apiRequest<{ data: ExecutionFeedbackResult }>('/api/execution-feedback', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           task_id: endedSession.task_id,
@@ -205,6 +205,9 @@ export default function FocusPage() {
         }),
       })
       setEndedSession(null)
+      window.dispatchEvent(new CustomEvent('humanos:plan-updated', {
+        detail: { source: 'execution-feedback', task: result.data.task, executionSession: result.data.execution_session },
+      }))
       await loadExecution()
       toast(t('execution.feedbackSaved'))
     } catch (error) {

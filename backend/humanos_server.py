@@ -4232,6 +4232,15 @@ class Store:
             "research_context_revision": int(feedback_profile.get("research_context_revision") or 0),
             "created_at": now_ms(),
         }
+        task_eval = feedback["task_evaluation"]
+        from app.domain.task import apply_execution_feedback
+
+        feedback_decision = apply_execution_feedback(
+            task,
+            task_eval,
+            feedback_id=feedback["id"],
+            feedback_created_at=feedback["created_at"],
+        )
         with self.connect() as conn:
             conn.execute(
                 """
@@ -4269,22 +4278,18 @@ class Store:
                     "UPDATE execution_sessions SET status=?,completion_outcome=?,actual_end_at=?,accumulated_active_minutes=?,updated_at=? WHERE id=? AND user_id=?",
                     (session_status, outcome, clock_now(ZoneInfo(feedback_profile.get("timezone") or "Asia/Shanghai")).isoformat(), confirmed_actual, feedback["created_at"], feedback["execution_session_id"], user_id),
                 )
-        task_eval = feedback["task_evaluation"]
-        from app.domain.task import apply_execution_feedback
-
-        feedback_decision = apply_execution_feedback(
-            task,
-            task_eval,
-            feedback_id=feedback["id"],
-            feedback_created_at=feedback["created_at"],
-        )
-        actual = feedback_decision.actual_minutes
-        patch = {
-            "execution": feedback_decision.execution,
-            "task_demand": feedback_decision.task_demand,
-            "status": feedback_decision.task_status,
-        }
-        self.patch_task(task_id, patch, user_id)
+            conn.execute(
+                "UPDATE tasks SET execution_json=?,demand_json=?,status=?,updated_at=? WHERE id=? AND user_id=?",
+                (as_json(feedback_decision.execution), as_json(feedback_decision.task_demand), feedback_decision.task_status, feedback["created_at"], task_id, user_id),
+            )
+            conn.execute(
+                "UPDATE plans SET plan_status='needs_update',updated_at=? WHERE user_id=? AND week_id=? AND plan_status='confirmed'",
+                (feedback["created_at"], user_id, task.get("week_id")),
+            )
+            conn.execute(
+                "UPDATE profiles SET active_plan_revision=NULL,updated_at=? WHERE user_id=?",
+                (feedback["created_at"], user_id),
+            )
         self.add_memory(
             user_id=user_id,
             source_type="episodic_memory",
@@ -6322,7 +6327,10 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 user_id = payload.get("user_id", "demo")
                 store.ensure_profile(user_id)
-                self.send_json({"feedback": store.save_execution_feedback(user_id, payload)}, status=201)
+                feedback = store.save_execution_feedback(user_id, payload)
+                sessions = store.list_execution_sessions(user_id)
+                session = next((item for item in sessions if item.get("execution_session_id") == feedback.get("execution_session_id")), None)
+                self.send_json({"feedback": feedback, "task": store.get_task(feedback["task_id"], user_id), "execution_session": session}, status=201)
                 return
 
             if path == "/api/plan-edits/events" and method == "POST":
