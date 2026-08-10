@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .models import ProfileAggregate
+from .weekly import sanitize_weekly_context
 
 
 def build_default_profile(user_id: str, *, timezone_name: str, week_of: str) -> ProfileAggregate:
@@ -22,10 +23,8 @@ def build_default_profile(user_id: str, *, timezone_name: str, week_of: str) -> 
             "fixed_events": [],
             "context_items": [],
             "weekly_goal": "",
-            "current_tasks": "",
             "temporary_constraints": [],
             "other_commitments": [],
-            "task_deadlines": [],
             "weekly_note": "",
             "keep_buffer": True,
             "buffer_preference": "保留可调整时间与无任务时段",
@@ -96,7 +95,7 @@ def merge_profile_patch(
         control_preference=value("control_preference", "ai_proposed_user_editable"),
         blocker_patterns=value("blocker_patterns", []),
         task_preferences=value("task_preferences", {}),
-        weekly_context=value("weekly_context", {}),
+        weekly_context=sanitize_weekly_context(value("weekly_context", {})),
         learned_patterns=value("learned_patterns", []),
         timezone=value("timezone", "Asia/Shanghai"),
         active_week_id=value("active_week_id", None),

@@ -1209,6 +1209,8 @@ class Store:
             row = conn.execute("SELECT * FROM profiles WHERE user_id=?", (user_id,)).fetchone()
         if not row:
             return None
+        from app.domain.profile import sanitize_weekly_context
+
         return {
             "user_id": row["user_id"],
             "role": row["role"],
@@ -1217,7 +1219,7 @@ class Store:
             "control_preference": row["control_preference"],
             "blocker_patterns": from_json(row["blocker_patterns"], []),
             "task_preferences": from_json(row["task_preferences"], {}),
-            "weekly_context": from_json(row["weekly_context_json"], {}),
+            "weekly_context": sanitize_weekly_context(from_json(row["weekly_context_json"], {})),
             "learned_patterns": from_json(row["learned_patterns_json"], []),
             "timezone": row["timezone"] or "Asia/Shanghai",
             "active_week_id": row["active_week_id"],
@@ -2853,10 +2855,9 @@ class Store:
             rows = conn.execute("SELECT * FROM tasks WHERE user_id=?", (user_id,)).fetchall()
             existing = {str(row["id"]): self.task_row(row) for row in rows}
             old_weekly = dict(current_profile.get("weekly_context") or {})
-            new_weekly = dict(profile_patch.get("weekly_context") or old_weekly)
-            # The tasks table is the sole source of concrete tasks.
-            for duplicate_key in ("current_tasks", "task_deadlines", "managed_task_ids", "confirmed_plan_summary"):
-                new_weekly.pop(duplicate_key, None)
+            from app.domain.profile import sanitize_weekly_context
+
+            new_weekly = sanitize_weekly_context(profile_patch.get("weekly_context") or old_weekly)
             new_weekly["week_id"] = week_id
             new_weekly["week_of"] = week_id
             weekly_scope = self._weekly_change_scope(old_weekly, new_weekly)
@@ -3542,7 +3543,9 @@ class Store:
         new_week = str(payload.get("week_id") or iso_week_id(timezone_name=profile.get("timezone")))
         carry_ids = {str(item) for item in (payload.get("carry_task_ids") or [])}
         use_last = bool(payload.get("use_last_week"))
-        weekly = dict(profile.get("weekly_context") or {})
+        from app.domain.profile import sanitize_weekly_context
+
+        weekly = sanitize_weekly_context(profile.get("weekly_context") or {})
         timestamp = now_ms()
         with self.connect() as conn:
             conn.execute(
@@ -3582,6 +3585,7 @@ class Store:
                 "keep_buffer": weekly.get("keep_buffer", True),
                 "weekly_note": "",
             }
+            new_context = sanitize_weekly_context(new_context)
             conn.execute("UPDATE profiles SET weekly_context_json=?,active_week_id=?,active_plan_revision=NULL,last_daily_checkin_date=NULL,updated_at=? WHERE user_id=?", (as_json(new_context),new_week,timestamp,user_id))
         return {"profile": self.ensure_profile(user_id),"tasks": self.list_tasks(user_id),"week_id": new_week,"carried_task_ids": sorted(carry_ids)}
 
