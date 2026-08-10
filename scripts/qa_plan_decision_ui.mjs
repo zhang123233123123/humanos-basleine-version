@@ -43,6 +43,27 @@ try {
   if (readyAudit.confirmDisabled || readyAudit.technical) throw new Error(`Ready-state audit failed: ${JSON.stringify(readyAudit)}`);
   await shot("plan-ready-user-view.png");
 
+  const softRiskAudit = await evaluate(`(async () => {
+    pendingSchedulePlan.ai_analysis={warnings:['Two demanding sessions are consecutive without a preferred break.']};
+    confirmScheduleBtn.click();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    return {softRiskShown:softRiskDialog.open && softRiskList.textContent.includes('demanding sessions')};
+  })()`);
+  if (!softRiskAudit.softRiskShown) throw new Error(`Soft-risk audit failed: ${JSON.stringify(softRiskAudit)}`);
+  await shot("ux-completion-soft-risk.png");
+  const completionAudit = await evaluate(`(() => {
+    document.getElementById('modifySoftRiskPlanBtn').click();
+    openTaskDialog(tasks[0]);
+    const sessionFieldsVisible=!document.getElementById('plannedSessionFields').classList.contains('hidden');
+    document.getElementById('plannedSessionStart').value='10:15';
+    document.getElementById('plannedSessionEnd').value='11:15';
+    const sessionChanged=applyTaskSessionFields(tasks[0].id);
+    return {sessionFieldsVisible,sessionChanged,start:pendingSchedulePlan.plan_patch[0].start,end:pendingSchedulePlan.plan_patch[0].end};
+  })()`);
+  if (!completionAudit.sessionFieldsVisible || !completionAudit.sessionChanged || completionAudit.start !== 10.25 || completionAudit.end !== 11.25) throw new Error(`Completion audit failed: ${JSON.stringify(completionAudit)}`);
+  await shot("ux-completion-session-edit.png");
+  await evaluate(`dialog.close()`);
+
   await evaluate(`pendingSchedulePlan={...pendingSchedulePlan,plan_patch:[{...pendingSchedulePlan.plan_patch[0],start:11,end:13}],validation:{valid:false,violations:[{type:'hard_constraint_conflict',task_id:'experiment',block_ids:['experiment-valid-1'],constraint:'Lunch',conflicting_item_id:'ctx-lunch',conflicting_label:'Lunch',day_index:2,start:12,end:13}]}};render()`);
   await waitFor("planReviewTitle.textContent === 'HumanOS needs one decision'");
   const decisionAudit = await evaluate(`({title:planReviewTitle.textContent,count:planReviewCount.textContent,message:pendingScheduleText.textContent,confirmDisabled:confirmScheduleBtn.disabled,marked:Boolean(document.querySelector('.task-event.constraint-conflict'))})`);
@@ -54,8 +75,17 @@ try {
   const dragAudit = await evaluate(`({start:pendingSchedulePlan.plan_patch[0].start,toast:document.getElementById('productToast').textContent,planValid:pendingSchedulePlan.validation.valid,hasConflictCard:Boolean(document.getElementById('calendarConflictPrompt')),confirmDisabled:confirmScheduleBtn.disabled,events:window.__failedEditEvents.map(event=>({type:event.eventType,effective:event.effective}))})`);
   if (dragAudit.start !== 9 || !dragAudit.planValid || dragAudit.hasConflictCard || dragAudit.confirmDisabled || dragAudit.toast !== "Couldn’t move — overlaps Lunch 12:00–13:00." || dragAudit.events.length !== 1 || dragAudit.events[0].type !== "failed_edit_attempt" || dragAudit.events[0].effective !== false) throw new Error(`Drag-conflict audit failed: ${JSON.stringify(dragAudit)}`);
   await shot("calendar-local-drag-conflict-toast.png");
-  writeFileSync(join(artifacts, "plan-decision-ui-audit.json"), JSON.stringify({ readyAudit, decisionAudit, dragAudit }, null, 2));
-  console.log(JSON.stringify({ readyAudit, decisionAudit, dragAudit }));
+  const parallelFocusAudit = await evaluate(`(() => {
+    const shared={block_id:'parallel-primary',day_index:2,start:9,end:9.5,session_minutes:30,planned_work_minutes:30,parallel_group_id:'pair-1',parallel_user_confirmed:true,parallel_task_ids:['laundry','podcast'],parallel_role:'primary'};
+    tasks=[normalizeBackendTask({id:'laundry',title:'Laundry',duration:40,status:'running',execution:{remaining_duration_minutes:40},slot:{sessions:[shared]}}),normalizeBackendTask({id:'podcast',title:'English podcast',duration:30,status:'running',execution:{remaining_duration_minutes:30},slot:{sessions:[{...shared,block_id:'parallel-secondary',task_id:'podcast',parallel_role:'secondary'}]}})];
+    currentExecutionState={mode:'now',task:tasks[0],session:{execution_session_id:'execution-pair',task_id:'laundry',status:'running',planned_work_minutes:30,accumulated_active_minutes:5,timeline:[]}};
+    focusWorkspaceDismissedSessionId=null;renderFocusExperience();
+    return {focusVisible:!focusScreen.classList.contains('hidden'),companionVisible:!focusParallelCompanion.classList.contains('hidden'),companion:focusCompanionTitle.textContent,pet:sessionPetTask.textContent};
+  })()`);
+  if (!parallelFocusAudit.focusVisible || !parallelFocusAudit.companionVisible || parallelFocusAudit.companion !== 'English podcast') throw new Error(`Parallel Focus audit failed: ${JSON.stringify(parallelFocusAudit)}`);
+  await shot("ux-completion-parallel-focus.png");
+  writeFileSync(join(artifacts, "plan-decision-ui-audit.json"), JSON.stringify({ readyAudit, softRiskAudit, completionAudit, decisionAudit, dragAudit, parallelFocusAudit }, null, 2));
+  console.log(JSON.stringify({ readyAudit, softRiskAudit, completionAudit, decisionAudit, dragAudit, parallelFocusAudit }));
 } finally {
   try { socket?.close(); } catch {}
   browser.kill();

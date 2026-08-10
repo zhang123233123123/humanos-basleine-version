@@ -179,6 +179,24 @@ class UnifiedDataFlowTests(unittest.TestCase):
         self.assertIn('rightRailMode = "plan"', resume)
         self.assertIn('rightRailMode = "plan"', feedback)
 
+    def test_21_product_frontend_can_resume_reviewable_revision(self):
+        revision = self.revision(9.25)
+        current = self.store.proposed_plan("flow-user", "2026-08-03")
+        self.assertEqual((revision["plan_id"], "proposed"), (current["plan_id"], current["plan_status"]))
+        self.store.cancel_plan_revision("flow-user", {
+            "plan_id": revision["plan_id"],
+            "base_plan_id": self.confirmed["plan_id"],
+        })
+        self.assertIsNone(self.store.proposed_plan("flow-user", "2026-08-03"))
+
+    def test_22_product_focus_reuses_confirmed_plan_session(self):
+        first = self.store.ensure_execution_session("flow-user", self.first["id"])
+        replay = self.store.ensure_execution_session("flow-user", self.first["id"])
+        self.assertEqual(first["execution_session_id"], replay["execution_session_id"])
+        self.assertEqual(self.first["id"], first["task_id"])
+        self.assertEqual("ready", first["status"])
+        self.assertEqual("flow-a", first["block_id"])
+
 
 if __name__ == "__main__":
     unittest.main()

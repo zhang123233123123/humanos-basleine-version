@@ -3236,6 +3236,21 @@ class Store:
         plan.update({"plan_id":row["id"],"plan_revision":row["plan_revision"],"plan_status":row["plan_status"],"week_id":row["week_id"]})
         return plan
 
+    def proposed_plan(self, user_id: str, week_id: str | None = None) -> dict | None:
+        """Return the latest reviewable revision without treating it as active."""
+        profile = self.ensure_profile(user_id)
+        target_week = str(week_id or profile.get("active_week_id") or iso_week_id(timezone_name=profile.get("timezone")))
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM plans WHERE user_id=? AND week_id=? AND plan_status='proposed' ORDER BY plan_revision DESC,updated_at DESC LIMIT 1",
+                (user_id,target_week),
+            ).fetchone()
+        if not row:
+            return None
+        plan = from_json(row["plan_json"], {})
+        plan.update({"plan_id":row["id"],"plan_revision":row["plan_revision"],"plan_status":row["plan_status"],"week_id":row["week_id"]})
+        return plan
+
     def propose_plan_revision(self, user_id: str, payload: dict) -> dict:
         """Create a draft revision without mutating Task slots or Execution Sessions."""
         base = self.active_plan(user_id, payload.get("week_id"))
@@ -3750,9 +3765,12 @@ class Store:
         return data
 
     @staticmethod
-    def _append_execution_timeline(row: sqlite3.Row, event_type: str, at: str, active_minutes: int) -> str:
+    def _append_execution_timeline(row: sqlite3.Row, event_type: str, at: str, active_minutes: int, details: dict | None = None) -> str:
         timeline = from_json(dict(row).get("timeline_json") or "[]", [])
-        timeline.append({"type": event_type, "at": at, "active_minutes": max(int(active_minutes), 0)})
+        event = {"type": event_type, "at": at, "active_minutes": max(int(active_minutes), 0)}
+        if isinstance(details, dict):
+            event.update({key: value for key, value in details.items() if key in {"duration_minutes", "ends_at", "pause_kind"}})
+        timeline.append(event)
         return as_json(timeline)
 
     @staticmethod
@@ -3837,6 +3855,18 @@ class Store:
                 pass
         return {"mode": mode, "session": session, "task": task}
 
+    def ensure_execution_session(self, user_id: str, task_id: str) -> dict:
+        """Return the plan-owned session for a task without inventing a slot."""
+        self.current_execution(user_id)  # Lazily upgrades legacy confirmed plans.
+        candidates = [
+            item for item in self.list_execution_sessions(user_id, ["running", "paused", "ready"])
+            if str(item.get("task_id") or "") == str(task_id or "")
+        ]
+        if not candidates:
+            raise ValueError("This task has no session in the confirmed plan")
+        rank = {"running": 0, "paused": 1, "ready": 2}
+        return sorted(candidates, key=lambda item: (rank.get(str(item.get("status")), 9), str(item.get("planned_start_at") or "")))[0]
+
     def _parallel_start_allowed(self, user_id: str, first_block_id: str, second_block_id: str) -> bool:
         plan = self.active_plan(user_id) or {}
         blocks = {str(item.get("block_id")): item for item in (plan.get("plan_patch") or [])}
@@ -3917,10 +3947,18 @@ class Store:
                 if not reason:
                     raise ValueError("A reason is required when correcting tracked active time")
                 active = max(int(adjustment.get("minutes") or 0), 0)
-            timeline_json = self._append_execution_timeline(row, "pause", paused_at, active)
+            pause_kind = "break" if str(payload.get("pause_kind") or "") == "break" else "pause"
+            timeline_details = None
+            if pause_kind == "break":
+                timeline_details = {
+                    "pause_kind": "break",
+                    "duration_minutes": max(int(payload.get("break_duration_minutes") or 0), 0),
+                    "ends_at": str(payload.get("break_ends_at") or "") or None,
+                }
+            timeline_json = self._append_execution_timeline(row, pause_kind, paused_at, active, timeline_details)
             conn.execute("UPDATE execution_sessions SET status='paused',paused_at=?,resumed_at=NULL,accumulated_active_minutes=?,timeline_json=?,updated_at=? WHERE id=? AND user_id=?", (paused_at, active, timeline_json, timestamp, session_id, user_id))
             conn.execute("UPDATE tasks SET status='paused',updated_at=? WHERE id=? AND user_id=?", (timestamp, row["task_id"], user_id))
-            self._record_execution_request(conn, user_id, request_id, session_id, "pause", timestamp)
+            self._record_execution_request(conn, user_id, request_id, session_id, pause_kind, timestamp)
             updated = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (session_id,)).fetchone()
         return self.execution_session_row(updated)
 
@@ -6173,6 +6211,27 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(store.current_execution(user_id))
                 return
 
+            if path == "/api/execution-sessions/ensure" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                self.send_json({"execution_session": store.ensure_execution_session(user_id, str(payload.get("task_id") or ""))})
+                return
+
+            if path == "/api/execution-sessions/impact" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                action = str(payload.get("action") or "resume")
+                if not payload.get("task_id") and payload.get("execution_session_id"):
+                    with store.connect() as conn:
+                        session_row = conn.execute(
+                            "SELECT task_id FROM execution_sessions WHERE id=? AND user_id=?",
+                            (str(payload.get("execution_session_id")), user_id),
+                        ).fetchone()
+                    if session_row:
+                        payload["task_id"] = session_row["task_id"]
+                self.send_json({"impact": store.evaluate_local_adjustment(user_id, {**payload, "action": action})})
+                return
+
             if path == "/api/execution-sessions/start" and method == "POST":
                 payload = self.read_json()
                 user_id = payload.get("user_id", "demo")
@@ -6229,6 +6288,12 @@ class Handler(BaseHTTPRequestHandler):
                 user_id = query.get("user_id", ["demo"])[0]
                 week_id = query.get("week_id", [None])[0]
                 self.send_json({"plan": store.active_plan(user_id, week_id)})
+                return
+
+            if path == "/api/plans/revisions/current" and method == "GET":
+                user_id = query.get("user_id", ["demo"])[0]
+                week_id = query.get("week_id", [None])[0]
+                self.send_json({"plan": store.proposed_plan(user_id, week_id)})
                 return
 
             if path == "/api/plans/revisions/propose" and method == "POST":

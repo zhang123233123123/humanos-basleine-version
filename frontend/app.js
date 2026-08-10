@@ -107,6 +107,7 @@ let confirmedSchedulePlan = null;
 let scheduleRequestInFlight = null;
 let scheduleConfirmationInFlight = false;
 let pendingRationaleSubmission = null;
+let pendingSoftRiskConfirmation = false;
 let qaRationalePreview = false;
 let qaScenarioManifest = null;
 let qaActiveScenarioId = null;
@@ -118,6 +119,8 @@ let rightRailMode = "plan";
 let previousRightRailMode = "plan";
 let pendingReviewKey = "";
 let pendingTaskPreview = [];
+let focusWorkspaceDismissedSessionId = null;
+let activeBreak = null;
 const promptedSlots = new Set(JSON.parse(localStorage.getItem("humanosSyy7PromptedSlots") || "[]"));
 function createDefaultProfile() {
   return {
@@ -127,7 +130,7 @@ function createDefaultProfile() {
     control_preference: "ai_proposed_user_editable",
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     weekly_context: {},
-    research_context: { planning_tools: [], primary_planning_tool: null, planning_tool_use_frequency: null, source: "user_self_report", captured_at: null, revision: 0 },
+    research_context: { planning_failure_reasons: [], recent_plan_example: null, source: "user_self_report", captured_at: null, revision: 0 },
     learned_patterns: []
   };
 }
@@ -180,6 +183,7 @@ const profileControl = document.getElementById("profileControl");
 const profilePlanningTools = document.getElementById("profilePlanningTools");
 const profilePrimaryPlanningTool = document.getElementById("profilePrimaryPlanningTool");
 const profilePlanningFrequency = document.getElementById("profilePlanningFrequency");
+const profileRecentPlanExample = document.getElementById("profileRecentPlanExample");
 const openProfileWizardBtn = document.getElementById("openProfileWizardBtn");
 const authScreen = document.getElementById("authScreen");
 const authForm = document.getElementById("authForm");
@@ -196,6 +200,7 @@ const userBadge = document.getElementById("userBadge");
 const logoutBtn = document.getElementById("logoutBtn");
 const workspaceNavBtn = document.getElementById("workspaceNavBtn");
 const profileHomeBtn = document.getElementById("profileHomeBtn");
+const assistantNavBtn = document.getElementById("assistantNavBtn");
 const workspaceView = document.getElementById("workspaceView");
 const profileHomeView = document.getElementById("profileHomeView");
 const dayViewBtn = document.getElementById("dayViewBtn");
@@ -233,6 +238,9 @@ const executionEditPlanBtn = document.getElementById("executionEditPlanBtn");
 const viewFullDayBtn = document.getElementById("viewFullDayBtn");
 const planRationaleDialog = document.getElementById("planRationaleDialog");
 const planRationaleForm = document.getElementById("planRationaleForm");
+const softRiskDialog = document.getElementById("softRiskDialog");
+const softRiskList = document.getElementById("softRiskList");
+const softRiskNote = document.getElementById("softRiskNote");
 const selectedTaskDetails = document.getElementById("selectedTaskDetails");
 const closeTaskDetailsBtn = document.getElementById("closeTaskDetailsBtn");
 const chatDrawer = document.getElementById("chatDrawer");
@@ -253,6 +261,7 @@ const wizardRole = document.getElementById("wizardRole");
 const wizardPlanningTools = document.getElementById("wizardPlanningTools");
 const wizardPrimaryPlanningTool = document.getElementById("wizardPrimaryPlanningTool");
 const wizardPlanningFrequency = document.getElementById("wizardPlanningFrequency");
+const wizardRecentPlanExample = document.getElementById("wizardRecentPlanExample");
 const wizardDeepWork = document.getElementById("wizardDeepWork");
 const wizardAvailableWindows = document.getElementById("wizardAvailableWindows");
 const wizardLowEnergy = document.getElementById("wizardLowEnergy");
@@ -311,9 +320,47 @@ const weekRolloverForm = document.getElementById("weekRolloverForm");
 const weekRolloverTasks = document.getElementById("weekRolloverTasks");
 const weekRolloverSummary = document.getElementById("weekRolloverSummary");
 const startFreshWeekBtn = document.getElementById("startFreshWeekBtn");
+const rightPlanningRail = document.getElementById("rightPlanningRail");
+const workspaceTaskList = document.getElementById("workspaceTaskList");
+const focusScreen = document.getElementById("focusScreen");
+const focusModeLabel = document.getElementById("focusModeLabel");
+const focusTaskTitle = document.getElementById("focusTaskTitle");
+const focusSessionGoal = document.getElementById("focusSessionGoal");
+const focusCountdown = document.getElementById("focusCountdown");
+const focusElapsed = document.getElementById("focusElapsed");
+const focusRemainingWork = document.getElementById("focusRemainingWork");
+const focusStartBtn = document.getElementById("focusStartBtn");
+const focusPauseBtn = document.getElementById("focusPauseBtn");
+const focusBreakBtn = document.getElementById("focusBreakBtn");
+const focusSwitchBtn = document.getElementById("focusSwitchBtn");
+const focusFinishBtn = document.getElementById("focusFinishBtn");
+const focusNextSessions = document.getElementById("focusNextSessions");
+const focusParallelCompanion = document.getElementById("focusParallelCompanion");
+const focusCompanionTitle = document.getElementById("focusCompanionTitle");
+const focusCompanionStatus = document.getElementById("focusCompanionStatus");
+const focusFinishCompanionBtn = document.getElementById("focusFinishCompanionBtn");
+const backToWorkspaceBtn = document.getElementById("backToWorkspaceBtn");
+const sessionPet = document.getElementById("sessionPet");
+const sessionPetTask = document.getElementById("sessionPetTask");
+const sessionPetStatus = document.getElementById("sessionPetStatus");
+const breakDialog = document.getElementById("breakDialog");
+const breakForm = document.getElementById("breakForm");
+const customBreakMinutes = document.getElementById("customBreakMinutes");
+const switchTaskDialog = document.getElementById("switchTaskDialog");
+const switchTaskOptions = document.getElementById("switchTaskOptions");
 let pendingWeekRollover = null;
+let focusCompanionTaskId = null;
+const notifiedReadySessions = new Set();
 let weeklyTaskRowCounter = 0;
 let structuredContextRowCounter = 0;
+
+// Keep the existing panels and their event wiring, but place them in the new
+// three-column workspace: assistant / calendar / current planning state.
+document.querySelector(".left-rail")?.appendChild(chatDrawer);
+if (rightPlanningRail) {
+  rightPlanningRail.appendChild(executionRail);
+  rightPlanningRail.appendChild(planReviewPanel);
+}
 
 function save() {
   localStorage.setItem("humanosSyy7MotionTasks", JSON.stringify(tasks));
@@ -408,13 +455,12 @@ function selectTask(taskId, mode = "manual") {
 }
 
 function syncRightRailMode() {
-  const showingAgent = rightRailMode === "agent";
   const showingTask = rightRailMode === "task" && hasSelectedTask();
   const confirmed = Boolean(confirmedSchedulePlan?.plan_patch?.length && !pendingSchedulePlan?.plan_patch?.length);
-  const executionRunning = currentExecutionState?.mode === "now" || currentExecutionState?.mode === "paused";
-  executionRail?.classList.toggle("hidden", !confirmed || ((showingAgent || showingTask) && !executionRunning));
-  executionRail?.classList.toggle("compact-now", confirmed && (showingTask || showingAgent) && executionRunning);
-  planReviewPanel?.classList.toggle("hidden", showingAgent || (confirmed && !showingTask));
+  const executionRunning = ["now", "paused", "break"].includes(currentExecutionState?.mode);
+  executionRail?.classList.toggle("hidden", !confirmed || (showingTask && !executionRunning));
+  executionRail?.classList.toggle("compact-now", confirmed && showingTask && executionRunning);
+  planReviewPanel?.classList.toggle("hidden", confirmed && !showingTask);
   const addTaskAction = document.getElementById("addTaskBtn");
   const draftIsOpen = Boolean(pendingSchedulePlan?.plan_patch?.length);
   addTaskAction?.classList.toggle("primary", !draftIsOpen);
@@ -422,8 +468,7 @@ function syncRightRailMode() {
   [planReviewHead, planDecisionTrace, planReviewEmpty, pendingSchedule].forEach((element) => {
     element?.classList.toggle("rail-mode-hidden", showingTask);
   });
-  selectedTaskDetails?.classList.toggle("hidden", !showingTask || showingAgent);
-  if (!showingAgent && chatDrawer?.open) chatDrawer.open = false;
+  selectedTaskDetails?.classList.toggle("hidden", !showingTask);
 }
 
 function hasSelectedTask() {
@@ -848,7 +893,7 @@ function setWizardStep(step) {
   const meta = {
     profile: ["Start with what stays true", "A few stable preferences help HumanOS make a useful first plan."],
     rhythm: ["Describe your working rhythm", "These are scheduling preferences, not predictions about every day."],
-    context: ["When can HumanOS schedule work, and what time should it avoid?", "Add available time and the activities HumanOS should protect or place flexibly."],
+    context: ["Let’s plan your next week.", "Add available time and the activities HumanOS should protect or place flexibly."],
     tasks: ["Add this week's work", "HumanOS proposes sessions only inside the times you just provided."]
   }[step] || ["Set up HumanOS", "Review each page before continuing."];
   document.querySelectorAll("[data-wizard-page]").forEach((page) => {
@@ -973,9 +1018,8 @@ function setCheckedValues(container, values) {
 
 function researchContextFromWizard() {
   return {
-    planning_tools: checkedValues(wizardPlanningTools),
-    primary_planning_tool: wizardPrimaryPlanningTool?.value || null,
-    planning_tool_use_frequency: wizardPlanningFrequency?.value || null,
+    planning_failure_reasons: checkedValues(wizardPlanningTools),
+    recent_plan_example: wizardRecentPlanExample?.value.trim() || null,
     source: "user_self_report"
   };
 }
@@ -1056,9 +1100,8 @@ function restoreOnboardingDraft() {
   wizardFocus.value = draft.focus || wizardFocus.value;
   wizardEnergy.value = draft.energy || wizardEnergy.value;
   wizardStress.value = draft.stress || wizardStress.value;
-  setCheckedValues(wizardPlanningTools, draft.research_context?.planning_tools);
-  wizardPrimaryPlanningTool.value = draft.research_context?.primary_planning_tool || "";
-  wizardPlanningFrequency.value = draft.research_context?.planning_tool_use_frequency || "";
+  setCheckedValues(wizardPlanningTools, draft.research_context?.planning_failure_reasons || draft.research_context?.planning_tools);
+  if (wizardRecentPlanExample) wizardRecentPlanExample.value = draft.research_context?.recent_plan_example || "";
   availableWindowRows.innerHTML = "";
   valueList(draft.available_windows).forEach((item) => addAvailableWindowRow(item));
   fixedEventRows.innerHTML = "";
@@ -1230,6 +1273,7 @@ function showWorkspaceView() {
   profileHomeView.classList.add("hidden");
   workspaceNavBtn.classList.add("active");
   profileHomeBtn.classList.remove("active");
+  assistantNavBtn?.classList.remove("active");
 }
 
 function showProfileHomeView() {
@@ -1237,6 +1281,7 @@ function showProfileHomeView() {
   profileHomeView.classList.remove("hidden");
   workspaceNavBtn.classList.remove("active");
   profileHomeBtn.classList.add("active");
+  assistantNavBtn?.classList.remove("active");
   renderProfileSummary();
 }
 
@@ -2404,9 +2449,8 @@ function syncProfileForm() {
   profileDeepWork.value = currentProfile.deep_work_window || "09:00-11:30";
   profileControl.value = "ai_proposed_user_editable";
   const research = currentProfile.research_context || {};
-  setCheckedValues(profilePlanningTools, research.planning_tools);
-  profilePrimaryPlanningTool.value = research.primary_planning_tool || "";
-  profilePlanningFrequency.value = research.planning_tool_use_frequency || "";
+  setCheckedValues(profilePlanningTools, research.planning_failure_reasons || research.planning_tools);
+  if (profileRecentPlanExample) profileRecentPlanExample.value = research.recent_plan_example || "";
 }
 
 function syncWizardForm() {
@@ -2428,9 +2472,8 @@ function syncWizardForm() {
   wizardEveningEnergy.value = String(rhythm.evening_energy || 5);
   wizardLearningMode.value = preferences.learning_mode || "reading_writing";
   const research = currentProfile.research_context || {};
-  setCheckedValues(wizardPlanningTools, research.planning_tools);
-  wizardPrimaryPlanningTool.value = research.primary_planning_tool || "";
-  wizardPlanningFrequency.value = research.planning_tool_use_frequency || "";
+  setCheckedValues(wizardPlanningTools, research.planning_failure_reasons || research.planning_tools);
+  if (wizardRecentPlanExample) wizardRecentPlanExample.value = research.recent_plan_example || "";
   wizardNearDeadlines.value = "";
   wizardFixedEvents.value = (weekly.fixed_events || []).join("，");
   wizardTemporaryConstraints.value = (weekly.temporary_constraints || []).join("，");
@@ -2497,9 +2540,67 @@ function renderProfileSummary() {
     </div>
     <div class="summary-row research-summary-row">
       <span>Planning background · research only</span>
-      <strong>${valueList(research.planning_tools).map((value) => ({ paper_planner: "Paper planner", calendar_app: "Calendar app", task_manager: "Task manager", notes_workspace: "Notes / workspace", ai_assistant: "AI assistant", none: "None", other: "Other" }[value] || value)).join(" / ") || "Not provided"}</strong>
+      <strong>${valueList(research.planning_failure_reasons || research.planning_tools).map((value) => ({ task_unclear: "Unclear tasks", fatigue_or_anxiety: "Fatigue or anxiety", external_interruptions: "External interruptions", hard_to_resume: "Hard to resume", underestimate_time: "Underestimated time", priority_changes: "Changing priorities", other: "Other" }[value] || value)).join(" / ") || "Not provided"}</strong>
     </div>
   `;
+}
+
+function workspacePlanBlocks() {
+  if (pendingSchedulePlan?.plan_patch?.length) return valueList(pendingSchedulePlan.plan_patch);
+  if (confirmedSchedulePlan?.plan_patch?.length) return valueList(confirmedSchedulePlan.plan_patch);
+  return tasks.flatMap((task) => taskSlotSessions(task).map((session) => ({ ...session, task_id: task.id })));
+}
+
+function workspaceSessionLabel(block) {
+  const labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  return `${labels[Number(block.day_index)] || "Day"} ${formatHour(block.start)}–${formatHour(block.end)}`;
+}
+
+function renderWorkspaceTaskList() {
+  if (!workspaceTaskList) return;
+  const blocks = workspacePlanBlocks().filter((block) => block?.task_id);
+  const taskIds = [...new Set(blocks.map((block) => String(block.task_id)))];
+  const planTasks = taskIds.map((id) => tasks.find((task) => String(task.id) === id)).filter(Boolean);
+  if (!planTasks.length) {
+    workspaceTaskList.innerHTML = "";
+    return;
+  }
+  workspaceTaskList.innerHTML = planTasks.map((task) => {
+    const sessions = blocks.filter((block) => String(block.task_id) === String(task.id)).sort((a, b) => Number(a.day_index) - Number(b.day_index) || Number(a.start) - Number(b.start));
+    return `<article class="workspace-task-row">
+      <header><h3>${escapeHtml(task.title)}</h3><span>${pendingSchedulePlan ? "Draft" : "Confirmed"}</span></header>
+      <p><b>Deadline</b> ${escapeHtml(localizeDisplayTime(task.due || "Not set"))}</p>
+      <p><b>Planned</b> ${sessions.map(workspaceSessionLabel).join(" · ")}</p>
+      <div class="task-row-actions"><button class="ghost" type="button" data-workspace-edit="${escapeHtml(task.id)}">Edit</button><button class="ghost" type="button" data-workspace-cancel="${escapeHtml(task.id)}">Cancel</button></div>
+    </article>`;
+  }).join("");
+  workspaceTaskList.querySelectorAll("[data-workspace-edit]").forEach((button) => button.addEventListener("click", () => {
+    const task = tasks.find((item) => String(item.id) === String(button.dataset.workspaceEdit));
+    if (task) openTaskDialog(task);
+  }));
+  workspaceTaskList.querySelectorAll("[data-workspace-cancel]").forEach((button) => button.addEventListener("click", () => cancelTaskFromPlan(button.dataset.workspaceCancel)));
+}
+
+async function cancelTaskFromPlan(taskId) {
+  const task = tasks.find((item) => String(item.id) === String(taskId));
+  if (!task) return;
+  task.removed_from_week = true;
+  task.status = "terminated";
+  task.slot = null;
+  if (pendingSchedulePlan?.plan_patch) {
+    pendingSchedulePlan.plan_patch = pendingSchedulePlan.plan_patch.filter((block) => String(block.task_id) !== String(taskId));
+    pendingSchedulePlan.unscheduled_tasks = valueList(pendingSchedulePlan.unscheduled_tasks).filter((item) => String(item.task_id) !== String(taskId));
+    recalculateAllPendingTaskSessions();
+  }
+  try {
+    await patchBackendTask(task);
+    showProductToast(`${task.title} was removed from this week's plan.`);
+  } catch (error) {
+    task.removed_from_week = false;
+    task.status = "queued";
+    showProductToast("The task could not be removed. Try again.");
+  }
+  render();
 }
 
 function commaList(value) {
@@ -2625,9 +2726,8 @@ async function saveProfileToBackend() {
     control_preference: "ai_proposed_user_editable",
     research_context: {
       ...(currentProfile.research_context || {}),
-      planning_tools: checkedValues(profilePlanningTools),
-      primary_planning_tool: profilePrimaryPlanningTool.value || null,
-      planning_tool_use_frequency: profilePlanningFrequency.value || null,
+      planning_failure_reasons: checkedValues(profilePlanningTools),
+      recent_plan_example: profileRecentPlanExample?.value.trim() || null,
       source: "user_self_report"
     }
   };
@@ -4282,7 +4382,9 @@ function render() {
   weekViewBtn.classList.toggle("active", calendarView === "week");
   renderProfileSummary();
   renderPendingSchedule();
+  renderWorkspaceTaskList();
   renderNowCard();
+  renderFocusExperience();
   renderChat();
   renderCalendar();
   renderActiveTask();
@@ -4506,8 +4608,192 @@ function renderNowCard() {
   }));
   const needsClockTick = effectiveMode === "now" || Number(sharedTestClock?.time_scale || 0) > 0;
   const clockTickMs = Number(sharedTestClock?.time_scale || 0) > 0 ? 1000 : 30000;
-  if (needsClockTick && !executionClockTimer) executionClockTimer = window.setInterval(renderNowCard, clockTickMs);
+  if (needsClockTick && !executionClockTimer) executionClockTimer = window.setInterval(() => { renderNowCard(); renderFocusExperience(); }, clockTickMs);
   if (!needsClockTick && executionClockTimer) { clearInterval(executionClockTimer); executionClockTimer = null; }
+}
+
+function executionActiveSeconds(session) {
+  let seconds = Math.max(0, Number(session?.accumulated_active_minutes || 0) * 60);
+  if (session?.status === "running") {
+    const segmentStart = session.resumed_at || session.actual_start_at;
+    if (segmentStart) seconds += Math.max(0, Math.floor((appNowMs() - new Date(segmentStart).getTime()) / 1000));
+  }
+  return Math.floor(seconds);
+}
+
+function focusTimeLabel(seconds) {
+  const safe = Math.max(0, Math.floor(Number(seconds || 0)));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const secs = safe % 60;
+  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}` : `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
+function focusSessionKey(session) {
+  return String(session?.execution_session_id || session?.id || `${session?.task_id || "task"}-${session?.planned_start_at || "session"}`);
+}
+
+function renderFocusExperience() {
+  if (!focusScreen || !sessionPet) return;
+  let state = currentExecutionState;
+  const lastTimelineEvent = valueList(state?.session?.timeline).slice(-1)[0];
+  if (state?.mode === "paused" && lastTimelineEvent?.type === "break" && lastTimelineEvent?.ends_at && new Date(lastTimelineEvent.ends_at).getTime() > appNowMs()) {
+    activeBreak = {
+      execution_session_id: state.session.execution_session_id,
+      duration_minutes: Number(lastTimelineEvent.duration_minutes || 0),
+      started_at: lastTimelineEvent.at,
+      ends_at: lastTimelineEvent.ends_at
+    };
+    state = { ...state, mode: "break" };
+    currentExecutionState = state;
+  }
+  const session = state?.session;
+  const task = state?.task || tasks.find((item) => String(item.id) === String(session?.task_id));
+  const mode = state?.mode;
+  if (!session || !task || !["ready_to_start", "now", "paused", "break"].includes(mode)) {
+    focusScreen.classList.add("hidden");
+    const showIdlePet = Boolean(currentUser && appRoot && !appRoot.classList.contains("hidden") && workspaceView && !workspaceView.classList.contains("hidden"));
+    sessionPet.classList.toggle("hidden", !showIdlePet);
+    sessionPet.classList.toggle("pet-idle", showIdlePet);
+    sessionPet.dataset.petMode = showIdlePet ? "idle" : "";
+    if (showIdlePet) {
+      sessionPetTask.textContent = "Ask HumanOS";
+      sessionPetStatus.textContent = "Ready when you are";
+    }
+    return;
+  }
+  sessionPet.classList.remove("pet-idle");
+  sessionPet.dataset.petMode = "session";
+  const sessionKey = focusSessionKey(session);
+  if (mode === "ready_to_start" && document.hidden && !notifiedReadySessions.has(sessionKey)) {
+    notifiedReadySessions.add(sessionKey);
+    if ("Notification" in window && Notification.permission === "granted") {
+      try { new Notification("HumanOS · Session ready", { body: `${task.title} is ready to start.` }); }
+      catch { document.title = `Session ready · ${task.title}`; }
+    } else {
+      document.title = `Session ready · ${task.title}`;
+    }
+  }
+  const shouldShowFocus = focusWorkspaceDismissedSessionId !== sessionKey;
+  focusScreen.classList.toggle("hidden", !shouldShowFocus);
+  sessionPet.classList.toggle("hidden", shouldShowFocus);
+
+  const activeSeconds = executionActiveSeconds(session);
+  const plannedSeconds = Math.max(60, Number(session.planned_work_minutes || 0) * 60);
+  const breakSeconds = mode === "break" && activeBreak?.ends_at ? Math.max(0, Math.floor((new Date(activeBreak.ends_at).getTime() - appNowMs()) / 1000)) : null;
+  const remainingSeconds = breakSeconds === null ? Math.max(plannedSeconds - activeSeconds, 0) : breakSeconds;
+  const taskRemaining = taskWorkRemainingMinutes(task);
+  const context = normalizeContextWindow(task);
+  const goal = context.nextStep || context.progress || task.context || "Continue with the next clear step.";
+  const modeText = mode === "now" ? "Focusing" : mode === "paused" ? "Paused" : mode === "break" ? "On break" : "Focus ready";
+
+  focusModeLabel.textContent = modeText;
+  focusTaskTitle.textContent = task.title;
+  focusSessionGoal.textContent = goal;
+  focusCountdown.textContent = focusTimeLabel(remainingSeconds);
+  focusElapsed.textContent = `${Math.floor(activeSeconds / 60)} min`;
+  focusRemainingWork.textContent = `${taskRemaining} min`;
+  focusStartBtn.textContent = mode === "paused" ? "Resume" : mode === "break" ? "End break and resume" : "Start";
+  focusStartBtn.classList.toggle("hidden", mode === "now");
+  focusPauseBtn.classList.toggle("hidden", mode !== "now");
+  focusBreakBtn.classList.toggle("hidden", !["now", "paused"].includes(mode));
+  focusFinishBtn.classList.toggle("hidden", mode === "ready_to_start");
+
+  const parallelSession = parallelGroupForTask(task);
+  const companionId = valueList(parallelSession?.parallel_task_ids).map(String).find((id) => id !== String(task.id));
+  const companionTask = companionId ? tasks.find((item) => String(item.id) === companionId) : null;
+  focusCompanionTaskId = companionTask?.id || null;
+  focusParallelCompanion?.classList.toggle("hidden", !companionTask);
+  if (companionTask) {
+    focusCompanionTitle.textContent = companionTask.title;
+    focusCompanionStatus.textContent = `${taskWorkRemainingMinutes(companionTask)} min remaining · tracked separately`;
+  }
+
+  const todayIndex = (appNow().getDay() + 6) % 7;
+  const nowHour = currentHourFloat();
+  const nextBlocks = visibleCalendarBlocks().filter((block) => block.task_id && String(block.task_id) !== String(task.id) && String(block.task_id) !== String(companionTask?.id || "") && (!parallelSession || block.parallel_group_id !== parallelSession.parallel_group_id) && (Number(block.day_index) > todayIndex || (Number(block.day_index) === todayIndex && Number(block.end) > nowHour))).sort((a, b) => Number(a.day_index) - Number(b.day_index) || Number(a.start) - Number(b.start)).slice(0, 3);
+  focusNextSessions.innerHTML = nextBlocks.length ? nextBlocks.map((block) => `<div class="focus-next-item"><time>${escapeHtml(workspaceSessionLabel(block))}</time><strong>${escapeHtml(executionBlockTitle(block))}</strong></div>`).join("") : '<p>No more sessions are planned after this one.</p>';
+
+  sessionPetTask.textContent = companionTask ? `${task.title} + ${companionTask.title}` : task.title;
+  sessionPetStatus.textContent = `${modeText} · ${focusTimeLabel(remainingSeconds)} left`;
+}
+
+function openBreakPicker() {
+  if (!currentExecutionState?.session || !breakDialog) return;
+  if (!breakDialog.open) breakDialog.showModal();
+}
+
+async function beginExecutionBreak(minutes) {
+  const session = currentExecutionState?.session;
+  if (!session || executionActionInFlight) return;
+  const duration = Math.max(1, Math.min(120, Number(minutes || 10)));
+  const startedAt = appNow();
+  const endsAt = new Date(startedAt.getTime() + duration * 60000);
+  executionActionInFlight = true;
+  try {
+    let pausedSession = session;
+    if (backendOnline && session.status === "running") {
+      const response = await api("/api/execution-sessions/pause", { method: "POST", body: JSON.stringify({ user_id: currentUserId(), execution_session_id: session.execution_session_id, pause_kind: "break", break_duration_minutes: duration, break_ends_at: endsAt.toISOString(), request_id: `break-${session.execution_session_id}-${Date.now()}` }) });
+      pausedSession = response.execution_session;
+    }
+    activeBreak = { execution_session_id: session.execution_session_id, duration_minutes: duration, started_at: startedAt.toISOString(), ends_at: endsAt.toISOString() };
+    currentExecutionState = { ...currentExecutionState, mode: "break", session: pausedSession };
+    if (backendOnline) await api("/api/state-transitions", { method: "POST", body: JSON.stringify({ user_id: currentUserId(), task_id: session.task_id, before_state: { execution_session_id: session.execution_session_id, status: session.status }, action: { type: "break", duration_minutes: duration }, predicted_state: { resume_at: activeBreak.ends_at }, actual_state: { break_started_at: activeBreak.started_at }, outcome: { pending_resume: true } }) });
+    showProductToast(`${duration}-minute break started.`);
+    render();
+  } finally { executionActionInFlight = false; }
+}
+
+function switchCandidateScore(task) {
+  const difficulty = Number(task.expected_difficulty || task.task_demand?.expected_difficulty || 4);
+  const remaining = taskWorkRemainingMinutes(task);
+  const currentFocus = Number(focusInput?.value || 4);
+  return (currentFocus <= 3 ? difficulty * 20 : -difficulty * 8) + Math.min(remaining, 90);
+}
+
+function openSwitchTaskPicker() {
+  const currentTaskId = currentExecutionState?.session?.task_id;
+  const candidates = tasks.filter((task) => String(task.id) !== String(currentTaskId) && !task.removed_from_week && !["completed", "terminated"].includes(task.status)).sort((a, b) => switchCandidateScore(a) - switchCandidateScore(b)).slice(0, 6);
+  switchTaskOptions.innerHTML = candidates.length ? candidates.map((task) => `<button class="switch-task-option" type="button" data-switch-task="${escapeHtml(task.id)}"><strong>${escapeHtml(task.title)}</strong><small>${taskWorkRemainingMinutes(task)} min remaining · ${escapeHtml(localizeDisplayTime(task.due || "No deadline"))}</small></button>`).join("") : '<p>No other ready task is available right now.</p>';
+  switchTaskOptions.querySelectorAll("[data-switch-task]").forEach((button) => button.addEventListener("click", () => switchExecutionTask(button.dataset.switchTask)));
+  if (!switchTaskDialog.open) switchTaskDialog.showModal();
+}
+
+async function switchExecutionTask(nextTaskId) {
+  const currentSession = currentExecutionState?.session;
+  const currentTask = tasks.find((task) => String(task.id) === String(currentSession?.task_id));
+  const nextTask = tasks.find((task) => String(task.id) === String(nextTaskId));
+  if (!currentSession || !nextTask || executionActionInFlight) return;
+  executionActionInFlight = true;
+  try {
+    if (backendOnline && currentSession.status === "running") {
+      const paused = await api("/api/execution-sessions/pause", { method: "POST", body: JSON.stringify({ user_id: currentUserId(), execution_session_id: currentSession.execution_session_id, request_id: `switch-pause-${currentSession.execution_session_id}-${Date.now()}` }) });
+      currentExecutionState = { ...currentExecutionState, session: paused.execution_session };
+    }
+    if (currentTask) {
+      currentTask.status = "paused";
+      currentTask.contextWindow = { ...normalizeContextWindow(currentTask), interruption: { ...(normalizeContextWindow(currentTask).interruption || {}), stopped_at: appNow().toISOString(), reason: "task_switch", next_task_id: nextTask.id } };
+      await patchBackendTask(currentTask);
+    }
+    let nextSession = null;
+    if (backendOnline) {
+      const ensured = await api("/api/execution-sessions/ensure", { method: "POST", body: JSON.stringify({ user_id: currentUserId(), task_id: nextTask.id }) });
+      nextSession = ensured.execution_session;
+      await api("/api/state-transitions", { method: "POST", body: JSON.stringify({ user_id: currentUserId(), task_id: currentTask?.id, before_state: { active_task_id: currentTask?.id }, action: { type: "switch_task", next_task_id: nextTask.id }, predicted_state: { active_task_id: nextTask.id }, actual_state: { original_task_status: "paused" }, outcome: { awaiting_start: true } }) });
+    }
+    if (!nextSession) {
+      const block = workspacePlanBlocks().find((item) => String(item.task_id) === String(nextTask.id));
+      nextSession = { execution_session_id: `local-${nextTask.id}-${Date.now()}`, task_id: nextTask.id, status: "ready", planned_work_minutes: Number(block?.planned_work_minutes || block?.session_minutes || Math.min(taskWorkRemainingMinutes(nextTask), 45)), planned_start_at: appNow().toISOString(), planned_end_at: new Date(appNowMs() + 45 * 60000).toISOString(), accumulated_active_minutes: 0 };
+    }
+    currentExecutionState = { mode: "ready_to_start", session: nextSession, task: nextTask };
+    focusWorkspaceDismissedSessionId = null;
+    activeId = nextTask.id;
+    switchTaskDialog.close();
+    showProductToast(`${currentTask?.title || "Current task"} is paused. ${nextTask.title} is ready.`);
+    render();
+  } catch (error) {
+    showProductToast("HumanOS could not switch tasks. Try again.");
+  } finally { executionActionInFlight = false; }
 }
 
 async function startCurrentExecution() {
@@ -4515,9 +4801,10 @@ async function startCurrentExecution() {
   if (!backendOnline || !session || executionActionInFlight) return;
   executionActionInFlight = true;
   try {
-    const action = currentExecutionState?.mode === "paused" ? "resume" : "start";
+    const action = ["paused", "break"].includes(currentExecutionState?.mode) ? "resume" : "start";
     const response = await api("/api/execution-sessions/start", { method: "POST", body: JSON.stringify({ user_id: currentUserId(), execution_session_id: session.execution_session_id, request_id: `${action}-${session.execution_session_id}-${Date.now()}` }) });
     currentExecutionState = { ...currentExecutionState, mode: "now", session: response.execution_session };
+    activeBreak = null;
     const task = tasks.find((item) => String(item.id) === String(session.task_id));
     if (task) task.status = "running";
     showProductToast(`${action === "resume" ? "Resumed" : "Started"} · ${response.execution_session.session_remaining_minutes} min remaining.`);
@@ -4786,7 +5073,10 @@ function renderPendingSchedule() {
     return;
   }
   planReviewActions?.classList.remove("hidden");
-  planConfidenceInput.closest("label")?.classList.remove("hidden");
+  // The weekly plan is confirmed once as a whole. Confidence remains part of
+  // the data contract for backwards compatibility, but is no longer another
+  // visible decision in the streamlined review flow.
+  planConfidenceInput.closest("label")?.classList.add("hidden");
   rejectScheduleBtn.dataset.mode = "pending";
   rejectScheduleBtn.textContent = "Cancel plan";
   confirmScheduleBtn.dataset.mode = "pending";
@@ -4927,8 +5217,8 @@ function renderPendingSchedule() {
   confirmScheduleBtn.disabled = !hasDraftTasks || mandatoryDecisions.length > 0;
   confirmScheduleBtn.textContent = pendingSchedulePlan.local_adjustment?.scope === "today_after_pause"
     ? "Update today"
-    : "Add plan to calendar";
-  planConfidenceInput.closest("label")?.classList.toggle("hidden", mandatoryDecisions.length > 0);
+    : "Confirm plan";
+  planConfidenceInput.closest("label")?.classList.add("hidden");
   conflictLegend?.classList.toggle("hidden", mandatoryDecisions.length === 0);
   parallelLegend?.classList.toggle("hidden", !valueList(pendingSchedulePlan.plan_patch).some((block) => block.parallel_group_id && block.parallel_user_confirmed));
   const uncertainItems = pendingSchedulePlan.constraint_summary?.uncertain_constraints || [];
@@ -5093,15 +5383,64 @@ function cleanUserVisibleTaskContext(value) {
     .trim();
 }
 
+function populateTaskSessionFields(task) {
+  const section = document.getElementById("plannedSessionFields");
+  const choice = document.getElementById("plannedSessionChoice");
+  const blocks = valueList(pendingSchedulePlan?.plan_patch).filter((block) => String(block.task_id) === String(task?.id));
+  section?.classList.toggle("hidden", !blocks.length);
+  if (!blocks.length) return;
+  choice.innerHTML = blocks.map((block, index) => `<option value="${escapeHtml(block.block_id || String(index))}">Session ${index + 1} · ${escapeHtml(workspaceSessionLabel(block))}</option>`).join("");
+  const showBlock = () => {
+    const block = blocks.find((item, index) => String(item.block_id || index) === choice.value) || blocks[0];
+    document.getElementById("plannedSessionDay").value = String(block.day_index);
+    document.getElementById("plannedSessionStart").value = formatHour(block.start);
+    document.getElementById("plannedSessionEnd").value = formatHour(block.end);
+  };
+  choice.onchange = showBlock;
+  showBlock();
+}
+
+function applyTaskSessionFields(taskId) {
+  const section = document.getElementById("plannedSessionFields");
+  if (!pendingSchedulePlan?.plan_patch?.length || section?.classList.contains("hidden")) return null;
+  const choice = document.getElementById("plannedSessionChoice");
+  const matching = pendingSchedulePlan.plan_patch.filter((item) => String(item.task_id) === String(taskId));
+  const block = matching.find((item, index) => String(item.block_id || index) === choice.value);
+  if (!block) return null;
+  const startInput = document.getElementById("plannedSessionStart");
+  const endInput = document.getElementById("plannedSessionEnd");
+  const start = parseClockToken(startInput.value);
+  const end = parseClockToken(endInput.value);
+  const onGrid = (value) => Number.isFinite(value) && Math.abs(value * 4 - Math.round(value * 4)) < 0.001;
+  if (!onGrid(start) || !onGrid(end) || end <= start) {
+    endInput.setCustomValidity("Choose an end time after the start, using 15-minute steps.");
+    endInput.reportValidity();
+    return false;
+  }
+  endInput.setCustomValidity("");
+  const day = Number(document.getElementById("plannedSessionDay").value);
+  const changed = day !== Number(block.day_index) || start !== Number(block.start) || end !== Number(block.end);
+  if (changed) {
+    Object.assign(block, { day_index: day, start, end, session_minutes: Math.round((end - start) * 60), draft_changed: true });
+    pendingSchedulePlan.local_adjustment = {
+      ...(pendingSchedulePlan.local_adjustment || {}),
+      scope: "manual_session_edit",
+      changed_block_ids: [...new Set([...valueList(pendingSchedulePlan.local_adjustment?.changed_block_ids), String(block.block_id)])]
+    };
+    recalculateAllPendingTaskSessions();
+  }
+  return changed;
+}
+
 function openTaskDialog(task = null) {
   editingTaskId = task?.id || null;
   taskDialogTitle.textContent = task ? "Edit task" : "New task";
   saveTaskBtn.textContent = task ? "Save changes" : "Save";
   deleteTaskBtn.classList.toggle("hidden", !task);
   document.getElementById("newTitle").value = task?.title || "";
-  document.getElementById("newDue").value = task?.due || "";
+  document.getElementById("newDue").value = task ? localizeDisplayTime(task.due || "", true) : "";
   document.getElementById("newDuration").value = task?.duration || "";
-  document.getElementById("newPriority").value = task?.priority || "中";
+  document.getElementById("newPriority").value = ({ High: "高", Medium: "中", Low: "低", high: "高", medium: "中", low: "低" }[task?.priority] || task?.priority || "中");
   document.getElementById("newStatus").value = task?.status || "queued";
   document.getElementById("newContext").value = cleanUserVisibleTaskContext(task?.context || "");
   const windowData = normalizeContextWindow(task || {});
@@ -5110,6 +5449,7 @@ function openTaskDialog(task = null) {
   document.getElementById("newOpenQuestions").value = task ? windowData.openQuestions : "";
   document.getElementById("newExpectedDifficulty").value = task?.expected_difficulty ?? "";
   document.getElementById("newParallelizable").checked = Boolean(task?.parallelizable);
+  populateTaskSessionFields(task);
   document.getElementById("parallelPermissionField")?.classList.toggle("hidden", !task);
   document.querySelectorAll('input[name="taskModality"]').forEach((input) => {
     input.checked = (task?.resource_modality || []).includes(input.value);
@@ -5204,6 +5544,25 @@ document.getElementById("autoScheduleBtn").addEventListener("click", async () =>
   render();
 });
 
+function pendingPlanSoftRisks(plan) {
+  if (!plan || plan.soft_risk_override?.accepted) return [];
+  const risks = [];
+  const schedulingPattern = /deadline|demand|consecutive|rhythm|energy|focus|break|buffer|fatigue|overload|recovery/i;
+  const warnings = [
+    ...valueList(plan.ai_analysis?.warnings),
+    ...valueList(plan.ai_analysis?.unverified_model_warnings),
+    ...valueList(plan.ai_task_analysis?.warnings)
+  ];
+  warnings.forEach((warning) => {
+    const text = typeof warning === "string" ? warning : (warning?.message || warning?.reason || "");
+    if (text && schedulingPattern.test(text) && !risks.includes(text)) risks.push(text);
+  });
+  const selected = valueList(plan.candidates).find((candidate) => String(candidate.id || candidate.candidate_id) === String(plan.selected_candidate_id));
+  const deadlineRisk = Number(selected?.metrics?.deadline_risk_minutes ?? selected?.deadline_risk_minutes ?? 0);
+  if (deadlineRisk > 0) risks.push(`${deadlineRisk} minutes are scheduled close to a deadline.`);
+  return risks.slice(0, 4);
+}
+
 confirmScheduleBtn.addEventListener("click", async () => {
   if (confirmScheduleBtn.dataset.mode === "confirmed") {
     await requestTentativeSchedule("Generate an adjustment proposal from the confirmed calendar and current Weekly Context.");
@@ -5212,6 +5571,13 @@ confirmScheduleBtn.addEventListener("click", async () => {
   }
   if (scheduleConfirmationInFlight) return;
   if (!pendingSchedulePlan?.plan_patch?.length) return;
+  const softRisks = pendingPlanSoftRisks(pendingSchedulePlan);
+  if (softRisks.length && !pendingSoftRiskConfirmation) {
+    softRiskList.innerHTML = softRisks.map((risk) => `<li>${escapeHtml(risk)}</li>`).join("");
+    if (!softRiskDialog.open) softRiskDialog.showModal();
+    return;
+  }
+  pendingSoftRiskConfirmation = false;
   scheduleConfirmationInFlight = true;
   confirmScheduleBtn.disabled = true;
   delete pendingSchedulePlan.confirmation_error;
@@ -5273,17 +5639,32 @@ confirmScheduleBtn.addEventListener("click", async () => {
       })
     });
     if (backendConfirmation.requires_rationale) {
-      pendingRationaleSubmission = {
+      const automaticRationale = {
         edit_episode_id: backendConfirmation.edit_episode_id,
         final_plan_hash: backendConfirmation.final_plan_hash,
-        canonical_diff: backendConfirmation.canonical_diff
+        reason_codes: [],
+        raw_user_response: "",
+        generalizability: "not_sure",
+        affected_task_ids: pendingTaskIds,
+        response_status: "skipped",
+        request_id: `rationale-${backendConfirmation.final_plan_hash}-automatic-skip`,
+        source: { channel: "single_plan_confirmation", source: "automatic_optional_research_skip" }
       };
-      const summary = backendConfirmation.canonical_diff?.summary || {};
-      document.getElementById("planRationaleDiff").textContent = `You changed ${Number(summary.moved || 0)} time block(s), resized ${Number(summary.resized || 0)}, added ${Number(summary.added || 0)}, and removed ${Number(summary.removed || 0)}.`;
-      if (!planRationaleDialog.open) planRationaleDialog.showModal();
-      setBackendStatus("Your changes are ready. The research question is optional.", true);
-      render();
-      return;
+      backendConfirmation = await api("/api/schedules/confirm", {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: currentUserId(), plan_id: pendingSchedulePlan.plan_id,
+          plan_revision: pendingSchedulePlan.plan_revision,
+          week_id: pendingSchedulePlan.week_id || weekStartLabel(),
+          request_id: pendingSchedulePlan.request_id,
+          plan_patch: pendingSchedulePlan.plan_patch,
+          unscheduled_tasks: pendingSchedulePlan.unscheduled_tasks || [],
+          ai_task_analysis: pendingSchedulePlan.ai_task_analysis || {},
+          decision: pendingSchedulePlan,
+          rationale: automaticRationale
+        })
+      });
+      if (backendConfirmation.requires_rationale) throw new Error("The optional research response could not be recorded.");
     }
     tasks = valueList(backendConfirmation.tasks).map(normalizeBackendTask);
   }
@@ -5543,6 +5924,26 @@ document.getElementById("backToPlanEditBtn")?.addEventListener("click", () => {
   setBackendStatus("Continue editing the draft. Your changes have not entered the calendar.", true);
 });
 
+document.getElementById("modifySoftRiskPlanBtn")?.addEventListener("click", () => {
+  pendingSoftRiskConfirmation = false;
+  softRiskDialog?.close("modify");
+  showProductToast("The draft stays editable.");
+});
+
+document.getElementById("keepSoftRiskPlanBtn")?.addEventListener("click", () => {
+  if (!pendingSchedulePlan) return;
+  pendingSchedulePlan.soft_risk_override = {
+    accepted: true,
+    risks: pendingPlanSoftRisks(pendingSchedulePlan),
+    note: softRiskNote?.value.trim() || "",
+    accepted_at: appNow().toISOString(),
+    source: "user_override"
+  };
+  pendingSoftRiskConfirmation = true;
+  softRiskDialog?.close("keep");
+  confirmScheduleBtn.click();
+});
+
 document.getElementById("addTaskBtn").addEventListener("click", () => {
   openTaskDialog();
 });
@@ -5727,6 +6128,17 @@ workspaceNavBtn.addEventListener("click", () => {
 
 profileHomeBtn.addEventListener("click", () => {
   showProfileHomeView();
+});
+
+assistantNavBtn?.addEventListener("click", () => {
+  showWorkspaceView();
+  workspaceNavBtn.classList.remove("active");
+  assistantNavBtn.classList.add("active");
+  previousRightRailMode = rightRailMode === "agent" ? (previousRightRailMode || "plan") : rightRailMode;
+  rightRailMode = "agent";
+  chatDrawer.open = true;
+  syncRightRailMode();
+  chatInput?.focus();
 });
 
 closeTaskDialogBtn.addEventListener("click", () => {
@@ -6067,13 +6479,14 @@ function splitPauseContextNote(note) {
 function selectedPauseResumeDate(choice) {
   const value = new Date(appNow());
   if (choice === "in_10") value.setMinutes(value.getMinutes() + 10);
-  else if (choice === "in_30") value.setMinutes(value.getMinutes() + 30);
+  else if (choice === "later_today") value.setMinutes(value.getMinutes() + 120);
   else if (choice === "choose") {
     const [hours, minutes] = String(document.getElementById("pauseResumeTime").value || "").split(":").map(Number);
     if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
     value.setHours(hours, minutes, 0, 0);
     if (value <= appNow()) value.setDate(value.getDate() + 1);
-  } else return null;
+  } else if (choice === "not_sure") return null;
+  else return null;
   value.setMinutes(Math.ceil(value.getMinutes() / 15) * 15, 0, 0);
   return value;
 }
@@ -6430,6 +6843,8 @@ taskForm.addEventListener("submit", async (event) => {
     const index = tasks.findIndex((task) => task.id === editingTaskId);
     if (index >= 0) {
       const previous = tasks[index];
+      const sessionChanged = applyTaskSessionFields(editingTaskId);
+      if (sessionChanged === false) return;
       const updated = normalizeBackendTask(taskPayloadFromDialog(editingTaskId, previous));
       const scheduleChanged = ["title", "due", "duration", "priority", "expected_difficulty", "status"]
         .some((field) => String(previous[field] ?? "") !== String(updated[field] ?? ""));
@@ -6441,6 +6856,8 @@ taskForm.addEventListener("submit", async (event) => {
       if (scheduleChanged && !["completed", "terminated", "blocked", "paused"].includes(updated.status)) {
         pendingSchedulePlan = null;
         await requestTentativeSchedule(`“${updated.title}” changed. Regenerate one complete draft plan and keep every hard constraint valid.`);
+      } else if (sessionChanged) {
+        showProductToast("Session updated in the draft. The full plan will be revalidated before confirmation.");
       }
     }
   } else {
@@ -6477,7 +6894,7 @@ openProfileWizardBtn.addEventListener("click", () => {
 profileWizard.addEventListener("submit", (event) => {
   event.preventDefault();
   syncStructuredContextFields();
-  wizardError.textContent = "Generating your proposed weekly plan…";
+  wizardError.textContent = "Building your first plan…";
   saveWizardBtn.disabled = true;
   saveWizardBtn.textContent = "Generating…";
   saveWizardProfile(true).catch((error) => {
@@ -6486,7 +6903,7 @@ profileWizard.addEventListener("submit", (event) => {
     console.error(error);
   }).finally(() => {
     saveWizardBtn.disabled = false;
-    saveWizardBtn.textContent = "Generate weekly plan";
+    saveWizardBtn.textContent = "Build my first plan";
   });
 });
 profileWizard.addEventListener("input", saveOnboardingDraft);
@@ -6595,6 +7012,60 @@ weekRolloverForm?.addEventListener("submit", (event) => {
 });
 startFreshWeekBtn?.addEventListener("click", () => {
   applyWeekRollover(false).catch((error) => setBackendStatus(error.message, false));
+});
+
+backToWorkspaceBtn?.addEventListener("click", () => {
+  focusWorkspaceDismissedSessionId = focusSessionKey(currentExecutionState?.session);
+  renderFocusExperience();
+});
+focusStartBtn?.addEventListener("click", () => {
+  if ("Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
+  startCurrentExecution();
+});
+focusPauseBtn?.addEventListener("click", pauseCurrentExecution);
+focusBreakBtn?.addEventListener("click", openBreakPicker);
+focusSwitchBtn?.addEventListener("click", openSwitchTaskPicker);
+focusFinishBtn?.addEventListener("click", finishCurrentExecution);
+focusFinishCompanionBtn?.addEventListener("click", async () => {
+  const companion = tasks.find((task) => String(task.id) === String(focusCompanionTaskId));
+  if (!companion) return;
+  const companionSession = executionSessionForTask(companion);
+  if (backendOnline && companionSession?.execution_session_id && ["running", "paused"].includes(companionSession.status)) {
+    await api("/api/execution-sessions/end", { method: "POST", body: JSON.stringify({ user_id: currentUserId(), execution_session_id: companionSession.execution_session_id, request_id: `parallel-finish-${companionSession.execution_session_id}-${Date.now()}` }) });
+  }
+  activeId = companion.id;
+  prepareFeedbackDialog(companion, "complete", companionSession, true);
+});
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) document.title = "HumanOS";
+  renderFocusExperience();
+});
+sessionPet?.addEventListener("click", (event) => {
+  if (event.target.closest("[data-pet-action]")) return;
+  if (sessionPet.dataset.petMode === "idle") {
+    previousRightRailMode = rightRailMode === "agent" ? (previousRightRailMode || "plan") : rightRailMode;
+    rightRailMode = "agent";
+    chatDrawer.open = true;
+    syncRightRailMode();
+    chatInput?.focus();
+    return;
+  }
+  focusWorkspaceDismissedSessionId = null;
+  renderFocusExperience();
+});
+sessionPet?.querySelectorAll("[data-pet-action]").forEach((action) => action.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const type = action.dataset.petAction;
+  if (type === "break") openBreakPicker();
+  if (type === "switch") openSwitchTaskPicker();
+  if (type === "finish") finishCurrentExecution();
+}));
+breakForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const value = event.submitter?.value;
+  const minutes = value === "custom" ? Number(customBreakMinutes?.value || 10) : Number(value || 10);
+  breakDialog.close("started");
+  beginExecutionBreak(minutes);
 });
 
 loginModeBtn.addEventListener("click", () => setAuthMode("login"));

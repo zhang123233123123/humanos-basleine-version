@@ -254,9 +254,25 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
         js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
         self.assertIn("When would you like to continue?", html)
         self.assertIn("In 10 min", html)
-        self.assertIn("Let HumanOS reschedule", html)
+        self.assertIn("Later today", html)
+        self.assertIn("Not sure yet", html)
         self.assertNotIn("pauseAdjustedMinutes", html)
         self.assertNotIn("pauseCalendarAction", html)
+
+    def test_29_break_metadata_is_persisted_in_execution_timeline(self):
+        session = self.start()
+        base = datetime(2026, 8, 7, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+        ends_at = (base + timedelta(minutes=10)).isoformat()
+        paused = self.store.pause_execution_session("u", {
+            "execution_session_id": session["execution_session_id"],
+            "paused_at": base.isoformat(),
+            "pause_kind": "break",
+            "break_duration_minutes": 10,
+            "break_ends_at": ends_at,
+            "request_id": "break-timeline",
+        })
+        event = paused["timeline"][-1]
+        self.assertEqual(("break", 10, ends_at), (event["type"], event["duration_minutes"], event["ends_at"]))
 
     def test_31_pause_resume_timeline_and_feedback_do_not_double_count(self):
         session = self.start()

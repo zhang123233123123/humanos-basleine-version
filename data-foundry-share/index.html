@@ -186,7 +186,7 @@ input[type="checkbox"], input[type="radio"] { width: 16px; accent-color: var(--g
 .constraint-preview strong { color: var(--text); font-weight: 650; }
 .today-checkin > p { margin: -4px 0 13px; font-size: 12px; color: var(--muted); }
 
-.app { min-height: 100vh; }
+.app { min-height: 100vh; padding-bottom: 96px; }
 .topbar {
   position: sticky;
   top: 0;
@@ -195,14 +195,42 @@ input[type="checkbox"], input[type="radio"] { width: 16px; accent-color: var(--g
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  min-height: 72px;
-  padding: 14px clamp(18px, 3vw, 40px);
+  min-height: 64px;
+  padding: 10px clamp(18px, 3vw, 40px);
   background: rgba(255, 255, 255, .92);
   border-bottom: 1px solid var(--line);
   backdrop-filter: blur(15px);
 }
-.topbar h1 { margin: 0; color: var(--green-dark); font-size: 24px; }
+.topbar-brand { display: flex; align-items: center; gap: 11px; }
+.brand-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 12px; color: white; background: linear-gradient(145deg, #1d4264, #137f75); box-shadow: 0 8px 18px rgba(25, 77, 100, .18); font-size: 17px; font-weight: 850; }
+.topbar h1 { margin: 0; color: var(--green-dark); font-size: 21px; line-height: 1.05; }
+.topbar-brand small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; letter-spacing: .025em; }
 .top-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.floating-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid rgba(184, 202, 216, .72);
+  border-radius: 22px;
+  background: rgba(250, 252, 253, .84);
+  box-shadow: 0 18px 44px rgba(25, 48, 72, .18), inset 0 1px 0 rgba(255,255,255,.95);
+  backdrop-filter: blur(22px) saturate(155%);
+  transform: translateX(-50%);
+}
+.dock-action { position: relative; display: grid; place-items: center; width: 54px; height: 54px; padding: 0; border: 0; border-radius: 17px; color: #536a7e; background: transparent; box-shadow: none; transition: transform .18s ease, color .18s ease, background .18s ease; }
+.dock-action svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.dock-action > span { position: absolute; left: 50%; bottom: calc(100% + 10px); width: max-content; max-width: 150px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: rgba(255,255,255,.97); box-shadow: 0 8px 24px rgba(25,48,72,.12); font-size: 11px; font-weight: 700; opacity: 0; pointer-events: none; transform: translate(-50%, 5px); transition: opacity .15s ease, transform .15s ease; }
+.dock-action:hover, .dock-action:focus-visible { color: var(--blue-dark); background: rgba(225, 238, 249, .82); transform: translateY(-2px); }
+.dock-action:hover > span, .dock-action:focus-visible > span { opacity: 1; transform: translate(-50%, 0); }
+.dock-action.active { color: white; background: linear-gradient(145deg, #246fbd, #14877b); box-shadow: 0 8px 20px rgba(28, 107, 151, .25); }
+.dock-assistant { color: #0e806f; background: rgba(221, 244, 239, .8); }
+.dock-divider { width: 1px; height: 30px; margin: 0 3px; background: var(--line); }
+.dock-logout:hover, .dock-logout:focus-visible { color: #ad4a50; background: #fff0f1; }
 .status-pill, .today-badge { display: inline-flex; align-items: center; width: fit-content; padding: 6px 10px; border-radius: 999px; color: var(--green-dark); background: var(--green-soft); font-size: 12px; font-weight: 750; }
 .panel-statuses { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .chat-panel .panel-head { align-items: flex-start; flex-wrap: wrap; }
@@ -508,10 +536,16 @@ fieldset label { display: flex; align-items: center; gap: 6px; }
   .remove-weekly-task { grid-column: 2; justify-self: end; }
   .preview-calendar { min-height: 380px; overflow-x: auto; grid-template-columns: repeat(7, minmax(92px, 1fr)); }
   .span-2 { grid-column: auto; }
-  .topbar { position: static; align-items: flex-start; }
+  .topbar { position: sticky; align-items: center; }
   .top-actions { justify-content: flex-end; }
   #userBadge { display: none; }
+  .topbar-brand small { display: none; }
+  .app { padding-bottom: 86px; }
   .app-view { padding: 14px 10px 28px; }
+  .floating-dock { bottom: 10px; width: calc(100% - 20px); justify-content: space-around; gap: 1px; padding: 6px; border-radius: 20px; }
+  .dock-action { width: 48px; height: 48px; border-radius: 15px; }
+  .dock-action > span { display: none; }
+  .dock-divider { margin: 0; }
   .left-rail { grid-template-columns: 1fr; }
   .form-grid.two-col { grid-template-columns: 1fr; }
   .calendar { margin: 0 10px; }
@@ -1093,6 +1127,116 @@ dialog::backdrop { background: rgba(29, 42, 58, .28); backdrop-filter: blur(7px)
   .qa-time-controller > summary { align-items: flex-start; gap: 6px; flex-direction: column; }
 }
 
+/* 2026 UX flow: assistant / calendar / plan review */
+.workspace {
+  grid-template-columns: minmax(260px, 300px) minmax(620px, 1fr) minmax(300px, 360px);
+  gap: 14px;
+}
+.left-rail { order: 1; align-content: start; }
+.workbench { order: 2; }
+.right-planning-rail { order: 3; display: grid; align-content: start; gap: 12px; min-width: 0; }
+.left-rail > :not(.rail-purpose):not(.chat-drawer) { display: none !important; }
+.rail-purpose { padding: 4px 4px 0; }
+.rail-purpose h2 { margin: 3px 0 4px; font-size: 18px; }
+.right-planning-rail #planDecisionTrace { display: none !important; }
+.rail-purpose p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.chat-drawer { display: block; position: sticky; top: 86px; }
+.chat-drawer > summary { display: none; }
+.chat-drawer > :not(summary) { display: block !important; }
+.chat-thread { height: min(47vh, 430px); }
+.right-planning-rail .plan-review-panel,
+.right-planning-rail .execution-rail { position: sticky; top: 86px; max-height: calc(100vh - 102px); }
+.workspace-task-list { display: grid; gap: 8px; padding: 0 16px 12px; }
+.workspace-task-list:empty { display: none; }
+.workspace-task-row { display: grid; gap: 5px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.78); }
+.workspace-task-row header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.workspace-task-row h3 { margin: 0; color: var(--ink); font-size: 12px; line-height: 1.3; }
+.workspace-task-row p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.workspace-task-row .task-row-actions { display: flex; gap: 6px; }
+.workspace-task-row button { min-height: 28px; padding: 0 8px; font-size: 9px; }
+.optional-label { color: var(--muted); font-size: 10px; font-weight: 600; }
+.planning-failure-options { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
+
+/* Focus is a single stateful surface, not another rail panel. */
+.focus-screen { position: fixed; inset: 0; z-index: 2200; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at 15% 10%,#e7f6f2 0,transparent 34%),linear-gradient(145deg,#f7fbfa,#eaf2f8); }
+.focus-screen.hidden { display: none; }
+.focus-shell { width: min(1080px,100%); min-height: min(720px,calc(100vh - 48px)); padding: 28px; border: 1px solid rgba(18,97,88,.16); border-radius: 28px; background: rgba(255,255,255,.88); box-shadow: 0 34px 90px rgba(25,55,70,.18); backdrop-filter: blur(18px); }
+.focus-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.focus-head h1 { margin: 5px 0; color: var(--ink); font-size: clamp(28px,4vw,48px); }
+.focus-head p { margin: 0; color: var(--muted); }
+.focus-layout { display: grid; grid-template-columns: minmax(0,1fr) 280px; gap: 28px; margin-top: 48px; }
+.focus-main { display: grid; justify-items: center; align-content: start; gap: 24px; padding: 40px; border-radius: 24px; background: linear-gradient(145deg,#17304d,#0e7165); color: white; }
+.focus-countdown { font-size: clamp(76px,12vw,150px); line-height: .9; font-variant-numeric: tabular-nums; letter-spacing: -.06em; }
+.focus-parallel-companion { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 3px 14px; width: min(520px,100%); padding: 13px 15px; border: 1px solid rgba(255,255,255,.22); border-radius: 15px; background: rgba(255,255,255,.09); }
+.focus-parallel-companion.hidden { display: none; }
+.focus-parallel-companion > span,.focus-parallel-companion > small { color: rgba(255,255,255,.72); font-size: 10px; }
+.focus-parallel-companion > strong { grid-column: 1; font-size: 15px; }
+.focus-parallel-companion > button { grid-column: 2; grid-row: 1 / 4; }
+.focus-facts { display: flex; gap: 12px; }
+.focus-facts span { display: grid; min-width: 140px; gap: 4px; padding: 12px 16px; border: 1px solid rgba(255,255,255,.2); border-radius: 14px; background: rgba(255,255,255,.08); }
+.focus-facts small { color: rgba(255,255,255,.7); }
+.focus-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.focus-main .ghost { color: white; border-color: rgba(255,255,255,.34); background: rgba(255,255,255,.08); }
+.focus-main .primary { color: #12304b; background: white; }
+.focus-next { padding: 18px; border: 1px solid var(--line); border-radius: 18px; background: rgba(255,255,255,.62); }
+.focus-next-item { display: grid; gap: 3px; margin-top: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.focus-next-item time { color: var(--blue); font-size: 10px; }
+.focus-next-item strong { font-size: 12px; }
+
+.session-pet { position: fixed; z-index: 1800; right: 18px; bottom: 18px; display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; gap: 10px; width: min(300px,calc(100vw - 36px)); padding: 12px 14px; border: 1px solid rgba(30,112,100,.25); border-radius: 20px; color: var(--ink); background: rgba(255,255,255,.94); box-shadow: 0 18px 46px rgba(21,55,68,.2); text-align: left; }
+.session-pet.hidden { display: none; }
+.pet-face { position: relative; display: block; width: 54px; height: 58px; flex: 0 0 54px; filter: drop-shadow(0 7px 8px rgba(20,55,80,.22)); transform-origin: 50% 100%; }
+.pet-antenna { position: absolute; z-index: 1; left: 26px; top: 0; width: 3px; height: 10px; border-radius: 4px; background: #18314d; }
+.pet-antenna::before { content: ""; position: absolute; left: -3px; top: -3px; width: 9px; height: 9px; border: 2px solid #fff; border-radius: 50%; background: #20ad9a; box-shadow: 0 0 0 1px #18314d; }
+.pet-head { position: absolute; z-index: 3; left: 3px; top: 9px; width: 48px; height: 34px; border: 3px solid #18314d; border-radius: 15px 15px 13px 13px; background: linear-gradient(145deg,#398bd6,#176dbb 55%,#145b9d); box-shadow: inset 0 -5px 9px rgba(14,48,78,.2); }
+.pet-head::before { content: ""; position: absolute; inset: 5px 6px 7px; border-radius: 9px; background: #132d49; box-shadow: inset 0 2px 4px rgba(255,255,255,.08); }
+.pet-head > i { position: absolute; z-index: 2; top: 14px; width: 6px; height: 4px; border-radius: 5px; background: #71ead5; box-shadow: 0 0 6px rgba(113,234,213,.8); }
+.pet-head > i:first-child { left: 14px; }
+.pet-head > i:nth-child(2) { right: 14px; }
+.pet-head > b { position: absolute; z-index: 2; left: 19px; bottom: 8px; width: 10px; height: 4px; border-bottom: 2px solid #71ead5; border-radius: 0 0 8px 8px; }
+.pet-body { position: absolute; z-index: 2; left: 11px; bottom: 0; width: 32px; height: 21px; border: 3px solid #18314d; border-radius: 9px 9px 12px 12px; background: linear-gradient(145deg,#267fcd,#0e806f); }
+.pet-body::before,.pet-body::after { content: ""; position: absolute; top: 4px; width: 8px; height: 12px; border: 3px solid #18314d; border-radius: 7px; background: #2b83ce; }
+.pet-body::before { left: -9px; transform: rotate(14deg); }
+.pet-body::after { right: -9px; transform: rotate(-14deg); }
+.pet-body > i { position: absolute; left: 10px; top: 5px; width: 7px; height: 7px; border: 2px solid rgba(255,255,255,.9); border-radius: 50%; background: #20ad9a; }
+.session-pet.pet-idle .pet-face { animation: pet-idle-bob 3.2s ease-in-out infinite; }
+.session-pet:not(.pet-idle) .pet-head > i { animation: pet-eye-pulse 1.8s ease-in-out infinite; }
+@keyframes pet-idle-bob { 0%,100% { transform: translateY(0) rotate(-1deg); } 50% { transform: translateY(-5px) rotate(1deg); } }
+@keyframes pet-eye-pulse { 0%,45%,100% { transform: scaleY(1); } 48%,52% { transform: scaleY(.15); } }
+.session-pet > span:nth-child(2) { display: grid; min-width: 0; }
+.session-pet strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.session-pet small { color: var(--muted); font-size: 9px; }
+.pet-quick-actions { position: absolute; right: 8px; bottom: calc(100% + 7px); display: flex; gap: 5px; opacity: 0; pointer-events: none; transform: translateY(6px); transition: .18s ease; }
+.session-pet:hover .pet-quick-actions { opacity: 1; pointer-events: auto; transform: none; }
+.session-pet.pet-idle .pet-quick-actions { display: none; }
+.pet-quick-actions i { padding: 7px 9px; border-radius: 999px; color: white; background: #17304d; font-size: 9px; font-style: normal; }
+.break-options,.switch-task-options { display: grid; gap: 8px; }
+.break-options { grid-template-columns: repeat(3,1fr); }
+.break-options label { grid-column: 1 / 3; }
+.switch-task-option { display: grid; gap: 3px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: white; text-align: left; }
+.switch-task-option small { color: var(--muted); }
+
+@media (max-width: 1320px) {
+  .workspace { grid-template-columns: 270px minmax(0,1fr) 330px; }
+}
+@media (max-width: 1080px) {
+  .workspace { grid-template-columns: minmax(0,1fr) minmax(320px,380px); }
+  .left-rail { grid-column: 1 / -1; position: static; grid-template-columns: 1fr; }
+  .left-rail .rail-purpose { display: none; }
+  .chat-drawer { position: static; }
+  .workbench { grid-column: 1; }
+  .right-planning-rail { grid-column: 2; }
+}
+@media (max-width: 760px) {
+  .workspace { grid-template-columns: 1fr; }
+  .left-rail,.workbench,.right-planning-rail { grid-column: 1; }
+  .right-planning-rail .plan-review-panel,.right-planning-rail .execution-rail { position: static; max-height: none; }
+  .focus-layout { grid-template-columns: 1fr; margin-top: 22px; }
+  .focus-next { display: none; }
+  .focus-main { padding: 28px 16px; }
+  .planning-failure-options { grid-template-columns: 1fr; }
+}
+
 .plan-review-actions button:disabled {
   cursor: not-allowed;
   border-color: #d5dee7;
@@ -1101,6 +1245,13 @@ dialog::backdrop { background: rgba(29, 42, 58, .28); backdrop-filter: blur(7px)
   box-shadow: none;
   opacity: 1;
 }
+
+.soft-risk-dialog { max-width: 600px; }
+.soft-risk-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.soft-risk-list li { padding: 10px 12px; border: 1px solid #d7e1ea; border-radius: 10px; color: var(--ink); background: #f6f9fb; line-height: 1.45; }
+.planned-session-fields { display: grid; gap: 10px; padding: 13px; border: 1px solid var(--line); border-radius: 13px; background: #f6f9fb; }
+.planned-session-fields.hidden { display: none; }
+.planned-session-fields small { color: var(--muted); }
 
 </style>
 </head>
@@ -1201,24 +1352,21 @@ dialog::backdrop { background: rgba(29, 42, 58, .28); backdrop-filter: blur(7px)
             <h2>Planning background <span class="research-only-badge">Research only</span></h2>
             <p>This helps us describe participants' planning experience. It never changes task priority or scheduling.</p>
           </div>
-          <fieldset class="planning-tool-options" id="wizardPlanningTools">
-            <legend>Which tools do you currently use?</legend>
-            <label><input type="checkbox" value="paper_planner"> Paper planner</label>
-            <label><input type="checkbox" value="calendar_app"> Calendar app</label>
-            <label><input type="checkbox" value="task_manager"> Task manager</label>
-            <label><input type="checkbox" value="notes_workspace"> Notes / workspace</label>
-            <label><input type="checkbox" value="ai_assistant"> AI assistant</label>
-            <label><input type="checkbox" value="none"> None</label>
+          <fieldset class="planning-tool-options planning-failure-options" id="wizardPlanningTools">
+            <legend>What usually makes a good plan difficult to follow?</legend>
+            <label><input type="checkbox" value="task_unclear"> Tasks are not clear enough</label>
+            <label><input type="checkbox" value="fatigue_or_anxiety"> I feel too tired or anxious</label>
+            <label><input type="checkbox" value="external_interruptions"> External events interrupt me</label>
+            <label><input type="checkbox" value="hard_to_resume"> It is hard to return after switching</label>
+            <label><input type="checkbox" value="underestimate_time"> I underestimate how long work takes</label>
+            <label><input type="checkbox" value="priority_changes"> Priorities change unexpectedly</label>
             <label><input type="checkbox" value="other"> Other</label>
           </fieldset>
-          <div class="wizard-grid">
-            <label>Primary planning tool
-              <select id="wizardPrimaryPlanningTool"><option value="">Not selected</option><option value="paper_planner">Paper planner</option><option value="calendar_app">Calendar app</option><option value="task_manager">Task manager</option><option value="notes_workspace">Notes / workspace</option><option value="ai_assistant">AI assistant</option><option value="none">None</option><option value="other">Other</option></select>
-            </label>
-            <label>How often do you plan?
-              <select id="wizardPlanningFrequency"><option value="">Not selected</option><option value="rarely">Rarely</option><option value="few_times_month">A few times a month</option><option value="weekly">Weekly</option><option value="daily">Daily</option></select>
-            </label>
-          </div>
+          <label>Tell us about a recent plan that looked good but was difficult to follow <span class="optional-label">Optional</span>
+            <textarea id="wizardRecentPlanExample" rows="3" placeholder="A short example is enough."></textarea>
+          </label>
+          <select id="wizardPrimaryPlanningTool" class="hidden" aria-hidden="true"><option value=""></option></select>
+          <select id="wizardPlanningFrequency" class="hidden" aria-hidden="true"><option value=""></option></select>
         </section>
         <div class="wizard-actions"><button class="primary" id="wizardNextBtn" type="button">Continue</button></div>
       </div>
@@ -1249,7 +1397,7 @@ dialog::backdrop { background: rgba(29, 42, 58, .28); backdrop-filter: blur(7px)
       <div class="wizard-page hidden" data-wizard-page="context">
         <section class="weekly-entry context-only-entry">
           <div class="weekly-block compact-weekly-context">
-            <div class="weekly-block-head"><div><p>Define the time HumanOS may use and the time it should protect. You will add tasks on the next page.</p></div></div>
+            <div class="weekly-block-head"><div><h2>Let’s plan your next week.</h2><p>Define the time HumanOS may use and the time it should protect. You will add tasks on the next page.</p></div></div>
             <div class="structured-context-editor">
               <section class="structured-context-section span-2">
                 <div class="structured-context-head"><div><strong>Time HumanOS may use for tasks</strong><small>AI-proposed work sessions must stay inside these times</small></div><button class="ghost compact-add" id="addAvailableWindowBtn" type="button">＋ Time range</button></div>
@@ -1321,7 +1469,7 @@ dialog::backdrop { background: rgba(29, 42, 58, .28); backdrop-filter: blur(7px)
         </div>
         <div class="wizard-actions split-actions">
           <button class="ghost" id="wizardBackBtn" type="button">Back</button>
-          <button class="primary" id="saveWizardBtn" type="submit">Generate weekly plan</button>
+          <button class="primary" id="saveWizardBtn" type="submit">Build my first plan</button>
         </div>
       </div>
       <p class="auth-error" id="wizardError"></p>
@@ -1330,21 +1478,43 @@ dialog::backdrop { background: rgba(29, 42, 58, .28); backdrop-filter: blur(7px)
 
   <main class="app hidden" id="appRoot">
     <header class="topbar">
-      <div>
-        <h1>HumanOS</h1>
+      <div class="topbar-brand">
+        <span class="brand-mark" aria-hidden="true">H</span>
+        <div><h1>HumanOS</h1><small>Adaptive weekly planning</small></div>
       </div>
       <div class="top-actions">
         <span class="status-pill" id="userBadge">Signed out</span>
-        <button class="ghost" id="workspaceNavBtn" type="button">Schedule</button>
-        <button class="ghost" id="profileHomeBtn" type="button">Profile</button>
-        <button class="ghost" id="logoutBtn" type="button">Log out</button>
-        <button class="primary" id="addTaskBtn" type="button">New task</button>
       </div>
     </header>
+
+    <nav class="floating-dock" aria-label="Main navigation">
+      <button class="dock-action active" id="workspaceNavBtn" type="button" aria-label="Schedule" data-tooltip="Schedule">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"></rect><path d="M8 3v4M16 3v4M3 10h18"></path><path d="M8 14h3M14 14h2M8 18h2"></path></svg>
+        <span>Schedule</span>
+      </button>
+      <button class="dock-action" id="addTaskBtn" type="button" aria-label="New task" data-tooltip="New task">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+        <span>New task</span>
+      </button>
+      <button class="dock-action dock-assistant" id="assistantNavBtn" type="button" aria-label="Ask HumanOS" data-tooltip="Ask HumanOS">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.5 4.2L18 9l-4.5 1.8L12 15l-1.5-4.2L6 9l4.5-1.8L12 3z"></path><path d="M19 15l.7 2.1L22 18l-2.3.9L19 21l-.7-2.1L16 18l2.3-.9L19 15z"></path></svg>
+        <span>Ask HumanOS</span>
+      </button>
+      <button class="dock-action" id="profileHomeBtn" type="button" aria-label="Profile" data-tooltip="Profile">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4.5 21a7.5 7.5 0 0 1 15 0"></path></svg>
+        <span>Profile</span>
+      </button>
+      <span class="dock-divider" aria-hidden="true"></span>
+      <button class="dock-action dock-logout" id="logoutBtn" type="button" aria-label="Log out" data-tooltip="Log out">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 5H5v14h5M14 8l4 4-4 4M9 12h9"></path></svg>
+        <span>Log out</span>
+      </button>
+    </nav>
 
     <section class="app-view" id="workspaceView">
     <section class="workspace">
       <aside class="left-rail review-rail">
+        <div class="rail-purpose"><span class="review-eyebrow">AI assistant</span><h2>Ask HumanOS</h2><p>Add or change work, report a blocker, or ask why something was scheduled.</p></div>
         <section class="execution-rail hidden" id="executionRail" aria-label="Plan execution">
           <header class="execution-rail-head">
             <strong id="executionTodayLabel">Today</strong>
@@ -1370,9 +1540,9 @@ dialog::backdrop { background: rgba(29, 42, 58, .28); backdrop-filter: blur(7px)
         <section class="panel plan-review-panel" id="planReviewPanel">
           <div class="panel-head review-panel-head" id="planReviewHead">
             <div>
-              <span class="review-eyebrow">Before anything enters your calendar</span>
-              <h2 id="planReviewTitle">Review the AI plan</h2>
-              <p id="planReviewDescription">Review the draft as a whole. Dashed blocks are editable and not yet in your calendar.</p>
+              <span class="review-eyebrow">Draft plan</span>
+              <h2 id="planReviewTitle">Your proposed week</h2>
+              <p id="planReviewDescription">Edit a task here or move its dashed block on the calendar. Confirm the whole plan once.</p>
             </div>
             <span class="review-count" id="planReviewCount">No plan yet</span>
           </div>
@@ -1387,16 +1557,18 @@ dialog::backdrop { background: rgba(29, 42, 58, .28); backdrop-filter: blur(7px)
             <p>Generate a plan, adjust anything that needs changing, then add it to the calendar once.</p>
           </div>
 
+          <section class="workspace-task-list" id="workspaceTaskList" aria-label="Tasks in this plan"></section>
+
           <div class="pending-schedule hidden" id="pendingSchedule">
             <div>
               <div id="pendingScheduleText" class="pending-plan-content"></div>
-              <label class="compact-field">Plan confidence (optional)
+              <label class="compact-field hidden">Plan confidence (optional)
                 <select id="planConfidenceInput"><option value="high">Confident</option><option value="medium" selected>Somewhat confident</option><option value="low">Not very confident</option></select>
               </label>
             </div>
             <div class="button-row review-final-actions" id="planReviewActions">
               <button class="ghost" id="rejectScheduleBtn" type="button">Cancel plan</button>
-              <button class="primary" id="confirmScheduleBtn" type="button" disabled>Add plan to calendar</button>
+              <button class="primary" id="confirmScheduleBtn" type="button" disabled>Confirm plan</button>
             </div>
           </div>
 
@@ -1406,7 +1578,7 @@ dialog::backdrop { background: rgba(29, 42, 58, .28); backdrop-filter: blur(7px)
           </section>
         </section>
 
-        <details class="panel chat-panel chat-drawer" id="chatDrawer">
+        <details class="panel chat-panel chat-drawer" id="chatDrawer" open>
           <summary>Ask HumanOS</summary>
           <div class="panel-head">
             <div>
@@ -1486,6 +1658,7 @@ dialog::backdrop { background: rgba(29, 42, 58, .28); backdrop-filter: blur(7px)
             </section>
         </section>
       </section>
+      <aside class="right-planning-rail" id="rightPlanningRail" aria-label="Plan review and task list"></aside>
     </section>
 
     </section>
@@ -1513,11 +1686,12 @@ dialog::backdrop { background: rgba(29, 42, 58, .28); backdrop-filter: blur(7px)
               <h3>Planning background <span class="research-only-badge">Research only</span></h3>
               <p>This information is never used to schedule your work.</p>
               <fieldset class="planning-tool-options" id="profilePlanningTools">
-                <legend>Tools used</legend>
-                <label><input type="checkbox" value="paper_planner"> Paper planner</label><label><input type="checkbox" value="calendar_app"> Calendar app</label><label><input type="checkbox" value="task_manager"> Task manager</label><label><input type="checkbox" value="notes_workspace"> Notes / workspace</label><label><input type="checkbox" value="ai_assistant"> AI assistant</label><label><input type="checkbox" value="none"> None</label><label><input type="checkbox" value="other"> Other</label>
+                <legend>What usually makes a plan difficult to follow?</legend>
+                <label><input type="checkbox" value="task_unclear"> Tasks are not clear enough</label><label><input type="checkbox" value="fatigue_or_anxiety"> Too tired or anxious</label><label><input type="checkbox" value="external_interruptions"> External interruptions</label><label><input type="checkbox" value="hard_to_resume"> Hard to return after switching</label><label><input type="checkbox" value="underestimate_time"> Underestimate time</label><label><input type="checkbox" value="priority_changes"> Priorities change</label><label><input type="checkbox" value="other"> Other</label>
               </fieldset>
-              <label>Primary tool<select id="profilePrimaryPlanningTool"><option value="">Not selected</option><option value="paper_planner">Paper planner</option><option value="calendar_app">Calendar app</option><option value="task_manager">Task manager</option><option value="notes_workspace">Notes / workspace</option><option value="ai_assistant">AI assistant</option><option value="none">None</option><option value="other">Other</option></select></label>
-              <label>Planning frequency<select id="profilePlanningFrequency"><option value="">Not selected</option><option value="rarely">Rarely</option><option value="few_times_month">A few times a month</option><option value="weekly">Weekly</option><option value="daily">Daily</option></select></label>
+              <label>Recent example <span class="optional-label">Optional</span><textarea id="profileRecentPlanExample" rows="3" placeholder="A plan that looked good but was difficult to follow"></textarea></label>
+              <select id="profilePrimaryPlanningTool" class="hidden" aria-hidden="true"><option value=""></option></select>
+              <select id="profilePlanningFrequency" class="hidden" aria-hidden="true"><option value=""></option></select>
             </div>
             <div class="button-row">
               <button class="primary" id="saveProfileBtn" type="button">Save preferences</button>
@@ -1537,6 +1711,51 @@ dialog::backdrop { background: rgba(29, 42, 58, .28); backdrop-filter: blur(7px)
       </section>
     </section>
   </main>
+
+  <section class="focus-screen hidden" id="focusScreen" aria-live="polite">
+    <div class="focus-shell">
+      <header class="focus-head"><div><span class="review-eyebrow" id="focusModeLabel">Focus ready</span><h1 id="focusTaskTitle">Current task</h1><p id="focusSessionGoal">Start when you are ready.</p></div><button class="ghost" id="backToWorkspaceBtn" type="button">Back to workspace</button></header>
+      <div class="focus-layout">
+        <main class="focus-main">
+          <strong class="focus-countdown" id="focusCountdown">45:00</strong>
+          <section id="focusParallelCompanion" class="focus-parallel-companion hidden">
+            <span>Parallel companion</span><strong id="focusCompanionTitle">Companion activity</strong><small id="focusCompanionStatus">Shares this timer · tracked separately</small>
+            <button class="ghost" id="focusFinishCompanionBtn" type="button">Finish companion</button>
+          </section>
+          <div class="focus-facts"><span><small>Elapsed</small><b id="focusElapsed">0 min</b></span><span><small>Remaining work</small><b id="focusRemainingWork">0 min</b></span></div>
+          <div class="focus-actions">
+            <button class="primary" id="focusStartBtn" type="button">Start</button>
+            <button class="ghost" id="focusPauseBtn" type="button">Pause</button>
+            <button class="ghost" id="focusBreakBtn" type="button">Break</button>
+            <button class="ghost" id="focusSwitchBtn" type="button">Switch task</button>
+            <button class="ghost" id="focusFinishBtn" type="button">Finish</button>
+          </div>
+        </main>
+        <aside class="focus-next"><span class="review-eyebrow">Coming up</span><div id="focusNextSessions"></div></aside>
+      </div>
+    </div>
+  </section>
+
+  <button class="session-pet hidden" id="sessionPet" type="button" aria-label="Return to active focus session">
+    <span class="pet-face" aria-hidden="true"><span class="pet-antenna"></span><span class="pet-head"><i></i><i></i><b></b></span><span class="pet-body"><i></i></span></span><span><strong id="sessionPetTask">Ask HumanOS</strong><small id="sessionPetStatus">Ready when you are</small></span>
+    <span class="pet-quick-actions"><i data-pet-action="break">Break</i><i data-pet-action="switch">Switch</i><i data-pet-action="finish">Finish</i></span>
+  </button>
+
+  <dialog id="breakDialog">
+    <form method="dialog" class="dialog-card compact-dialog" id="breakForm">
+      <div class="dialog-head"><div><span class="review-eyebrow">Short break</span><h2>How long do you need?</h2></div></div>
+      <div class="break-options"><button type="submit" value="5">5 min</button><button type="submit" value="10">10 min</button><button type="submit" value="15">15 min</button><label>Custom <input id="customBreakMinutes" type="number" min="1" max="120" value="10"> min</label><button type="submit" value="custom">Start break</button></div>
+      <p>A normal break does not require a reason.</p>
+    </form>
+  </dialog>
+
+  <dialog id="switchTaskDialog">
+    <form method="dialog" class="dialog-card" id="switchTaskForm">
+      <div class="dialog-head"><div><span class="review-eyebrow">Switch task</span><h2>Choose a better fit for right now</h2><p>Your current task will stay paused with its progress intact.</p></div></div>
+      <div class="switch-task-options" id="switchTaskOptions"></div>
+      <div class="dialog-actions"><button class="ghost" value="cancel">Cancel</button></div>
+    </form>
+  </dialog>
 
   <dialog id="dailyCheckInDialog" class="daily-checkin-dialog">
     <form class="dialog-card daily-checkin-card" id="dailyCheckInForm">
@@ -1624,6 +1843,16 @@ dialog::backdrop { background: rgba(29, 42, 58, .28); backdrop-filter: blur(7px)
           <option value="completed">Completed</option>
         </select>
       </label>
+      <section id="plannedSessionFields" class="planned-session-fields hidden">
+        <span class="review-eyebrow">Planned session</span>
+        <label>Session<select id="plannedSessionChoice"></select></label>
+        <div class="form-grid three-col">
+          <label>Day<select id="plannedSessionDay"><option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option><option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option></select></label>
+          <label>Start<input id="plannedSessionStart" type="time" step="900"></label>
+          <label>End<input id="plannedSessionEnd" type="time" step="900"></label>
+        </div>
+        <small>Session times use a 15-minute grid. HumanOS validates the whole draft after you save.</small>
+      </section>
       <label>Task context
         <textarea id="newContext" rows="4" placeholder="Scope, materials, or completion criteria (optional)"></textarea>
       </label>
@@ -1707,9 +1936,9 @@ dialog::backdrop { background: rgba(29, 42, 58, .28); backdrop-filter: blur(7px)
         <label>When would you like to continue?
           <select id="pauseResumeChoice">
             <option value="in_10" selected>In 10 min</option>
-            <option value="in_30">In 30 min</option>
+            <option value="later_today">Later today</option>
             <option value="choose">Choose a time</option>
-            <option value="reschedule">Let HumanOS reschedule</option>
+            <option value="not_sure">Not sure yet</option>
           </select>
         </label>
         <label id="pauseResumeTimeField" class="hidden">Resume time
@@ -1774,6 +2003,15 @@ dialog::backdrop { background: rgba(29, 42, 58, .28); backdrop-filter: blur(7px)
       <label>Anything else? <textarea id="planRationaleText" rows="3" placeholder="Optional"></textarea></label>
       <label>Does this preference apply beyond this week?<select id="planRationaleScope"><option value="only_this_week">Only this week</option><option value="usually_true">Usually true for me</option><option value="not_sure">Not sure</option></select></label>
       <div class="dialog-actions"><button class="ghost" id="backToPlanEditBtn" type="button">Back to edit</button><button class="ghost" id="skipPlanRationaleBtn" type="button">Skip</button><button class="primary" type="submit">Save and add plan</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="softRiskDialog" class="soft-risk-dialog">
+    <form method="dialog" class="dialog-card compact-dialog">
+      <div class="dialog-head"><div><span class="review-eyebrow">One planning trade-off</span><h2>Would you like to keep this draft?</h2><p>These are preferences, not calendar conflicts. You can still add the plan.</p></div></div>
+      <ul id="softRiskList" class="soft-risk-list"></ul>
+      <label>Optional note <textarea id="softRiskNote" rows="2" placeholder="Why this plan still works for you"></textarea></label>
+      <div class="dialog-actions"><button class="ghost" id="modifySoftRiskPlanBtn" type="button">Modify plan</button><button class="primary" id="keepSoftRiskPlanBtn" type="button">Keep anyway</button></div>
     </form>
   </dialog>
 
@@ -1900,6 +2138,7 @@ let confirmedSchedulePlan = null;
 let scheduleRequestInFlight = null;
 let scheduleConfirmationInFlight = false;
 let pendingRationaleSubmission = null;
+let pendingSoftRiskConfirmation = false;
 let qaRationalePreview = false;
 let qaScenarioManifest = null;
 let qaActiveScenarioId = null;
@@ -1911,6 +2150,8 @@ let rightRailMode = "plan";
 let previousRightRailMode = "plan";
 let pendingReviewKey = "";
 let pendingTaskPreview = [];
+let focusWorkspaceDismissedSessionId = null;
+let activeBreak = null;
 const promptedSlots = new Set(JSON.parse(localStorage.getItem("humanosSyy7PromptedSlots") || "[]"));
 function createDefaultProfile() {
   return {
@@ -1920,7 +2161,7 @@ function createDefaultProfile() {
     control_preference: "ai_proposed_user_editable",
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     weekly_context: {},
-    research_context: { planning_tools: [], primary_planning_tool: null, planning_tool_use_frequency: null, source: "user_self_report", captured_at: null, revision: 0 },
+    research_context: { planning_failure_reasons: [], recent_plan_example: null, source: "user_self_report", captured_at: null, revision: 0 },
     learned_patterns: []
   };
 }
@@ -1973,6 +2214,7 @@ const profileControl = document.getElementById("profileControl");
 const profilePlanningTools = document.getElementById("profilePlanningTools");
 const profilePrimaryPlanningTool = document.getElementById("profilePrimaryPlanningTool");
 const profilePlanningFrequency = document.getElementById("profilePlanningFrequency");
+const profileRecentPlanExample = document.getElementById("profileRecentPlanExample");
 const openProfileWizardBtn = document.getElementById("openProfileWizardBtn");
 const authScreen = document.getElementById("authScreen");
 const authForm = document.getElementById("authForm");
@@ -1989,6 +2231,7 @@ const userBadge = document.getElementById("userBadge");
 const logoutBtn = document.getElementById("logoutBtn");
 const workspaceNavBtn = document.getElementById("workspaceNavBtn");
 const profileHomeBtn = document.getElementById("profileHomeBtn");
+const assistantNavBtn = document.getElementById("assistantNavBtn");
 const workspaceView = document.getElementById("workspaceView");
 const profileHomeView = document.getElementById("profileHomeView");
 const dayViewBtn = document.getElementById("dayViewBtn");
@@ -2026,6 +2269,9 @@ const executionEditPlanBtn = document.getElementById("executionEditPlanBtn");
 const viewFullDayBtn = document.getElementById("viewFullDayBtn");
 const planRationaleDialog = document.getElementById("planRationaleDialog");
 const planRationaleForm = document.getElementById("planRationaleForm");
+const softRiskDialog = document.getElementById("softRiskDialog");
+const softRiskList = document.getElementById("softRiskList");
+const softRiskNote = document.getElementById("softRiskNote");
 const selectedTaskDetails = document.getElementById("selectedTaskDetails");
 const closeTaskDetailsBtn = document.getElementById("closeTaskDetailsBtn");
 const chatDrawer = document.getElementById("chatDrawer");
@@ -2046,6 +2292,7 @@ const wizardRole = document.getElementById("wizardRole");
 const wizardPlanningTools = document.getElementById("wizardPlanningTools");
 const wizardPrimaryPlanningTool = document.getElementById("wizardPrimaryPlanningTool");
 const wizardPlanningFrequency = document.getElementById("wizardPlanningFrequency");
+const wizardRecentPlanExample = document.getElementById("wizardRecentPlanExample");
 const wizardDeepWork = document.getElementById("wizardDeepWork");
 const wizardAvailableWindows = document.getElementById("wizardAvailableWindows");
 const wizardLowEnergy = document.getElementById("wizardLowEnergy");
@@ -2104,9 +2351,47 @@ const weekRolloverForm = document.getElementById("weekRolloverForm");
 const weekRolloverTasks = document.getElementById("weekRolloverTasks");
 const weekRolloverSummary = document.getElementById("weekRolloverSummary");
 const startFreshWeekBtn = document.getElementById("startFreshWeekBtn");
+const rightPlanningRail = document.getElementById("rightPlanningRail");
+const workspaceTaskList = document.getElementById("workspaceTaskList");
+const focusScreen = document.getElementById("focusScreen");
+const focusModeLabel = document.getElementById("focusModeLabel");
+const focusTaskTitle = document.getElementById("focusTaskTitle");
+const focusSessionGoal = document.getElementById("focusSessionGoal");
+const focusCountdown = document.getElementById("focusCountdown");
+const focusElapsed = document.getElementById("focusElapsed");
+const focusRemainingWork = document.getElementById("focusRemainingWork");
+const focusStartBtn = document.getElementById("focusStartBtn");
+const focusPauseBtn = document.getElementById("focusPauseBtn");
+const focusBreakBtn = document.getElementById("focusBreakBtn");
+const focusSwitchBtn = document.getElementById("focusSwitchBtn");
+const focusFinishBtn = document.getElementById("focusFinishBtn");
+const focusNextSessions = document.getElementById("focusNextSessions");
+const focusParallelCompanion = document.getElementById("focusParallelCompanion");
+const focusCompanionTitle = document.getElementById("focusCompanionTitle");
+const focusCompanionStatus = document.getElementById("focusCompanionStatus");
+const focusFinishCompanionBtn = document.getElementById("focusFinishCompanionBtn");
+const backToWorkspaceBtn = document.getElementById("backToWorkspaceBtn");
+const sessionPet = document.getElementById("sessionPet");
+const sessionPetTask = document.getElementById("sessionPetTask");
+const sessionPetStatus = document.getElementById("sessionPetStatus");
+const breakDialog = document.getElementById("breakDialog");
+const breakForm = document.getElementById("breakForm");
+const customBreakMinutes = document.getElementById("customBreakMinutes");
+const switchTaskDialog = document.getElementById("switchTaskDialog");
+const switchTaskOptions = document.getElementById("switchTaskOptions");
 let pendingWeekRollover = null;
+let focusCompanionTaskId = null;
+const notifiedReadySessions = new Set();
 let weeklyTaskRowCounter = 0;
 let structuredContextRowCounter = 0;
+
+// Keep the existing panels and their event wiring, but place them in the new
+// three-column workspace: assistant / calendar / current planning state.
+document.querySelector(".left-rail")?.appendChild(chatDrawer);
+if (rightPlanningRail) {
+  rightPlanningRail.appendChild(executionRail);
+  rightPlanningRail.appendChild(planReviewPanel);
+}
 
 function save() {
   localStorage.setItem("humanosSyy7MotionTasks", JSON.stringify(tasks));
@@ -2201,13 +2486,12 @@ function selectTask(taskId, mode = "manual") {
 }
 
 function syncRightRailMode() {
-  const showingAgent = rightRailMode === "agent";
   const showingTask = rightRailMode === "task" && hasSelectedTask();
   const confirmed = Boolean(confirmedSchedulePlan?.plan_patch?.length && !pendingSchedulePlan?.plan_patch?.length);
-  const executionRunning = currentExecutionState?.mode === "now" || currentExecutionState?.mode === "paused";
-  executionRail?.classList.toggle("hidden", !confirmed || ((showingAgent || showingTask) && !executionRunning));
-  executionRail?.classList.toggle("compact-now", confirmed && (showingTask || showingAgent) && executionRunning);
-  planReviewPanel?.classList.toggle("hidden", showingAgent || (confirmed && !showingTask));
+  const executionRunning = ["now", "paused", "break"].includes(currentExecutionState?.mode);
+  executionRail?.classList.toggle("hidden", !confirmed || (showingTask && !executionRunning));
+  executionRail?.classList.toggle("compact-now", confirmed && showingTask && executionRunning);
+  planReviewPanel?.classList.toggle("hidden", confirmed && !showingTask);
   const addTaskAction = document.getElementById("addTaskBtn");
   const draftIsOpen = Boolean(pendingSchedulePlan?.plan_patch?.length);
   addTaskAction?.classList.toggle("primary", !draftIsOpen);
@@ -2215,8 +2499,7 @@ function syncRightRailMode() {
   [planReviewHead, planDecisionTrace, planReviewEmpty, pendingSchedule].forEach((element) => {
     element?.classList.toggle("rail-mode-hidden", showingTask);
   });
-  selectedTaskDetails?.classList.toggle("hidden", !showingTask || showingAgent);
-  if (!showingAgent && chatDrawer?.open) chatDrawer.open = false;
+  selectedTaskDetails?.classList.toggle("hidden", !showingTask);
 }
 
 function hasSelectedTask() {
@@ -2641,7 +2924,7 @@ function setWizardStep(step) {
   const meta = {
     profile: ["Start with what stays true", "A few stable preferences help HumanOS make a useful first plan."],
     rhythm: ["Describe your working rhythm", "These are scheduling preferences, not predictions about every day."],
-    context: ["When can HumanOS schedule work, and what time should it avoid?", "Add available time and the activities HumanOS should protect or place flexibly."],
+    context: ["Let’s plan your next week.", "Add available time and the activities HumanOS should protect or place flexibly."],
     tasks: ["Add this week's work", "HumanOS proposes sessions only inside the times you just provided."]
   }[step] || ["Set up HumanOS", "Review each page before continuing."];
   document.querySelectorAll("[data-wizard-page]").forEach((page) => {
@@ -2766,9 +3049,8 @@ function setCheckedValues(container, values) {
 
 function researchContextFromWizard() {
   return {
-    planning_tools: checkedValues(wizardPlanningTools),
-    primary_planning_tool: wizardPrimaryPlanningTool?.value || null,
-    planning_tool_use_frequency: wizardPlanningFrequency?.value || null,
+    planning_failure_reasons: checkedValues(wizardPlanningTools),
+    recent_plan_example: wizardRecentPlanExample?.value.trim() || null,
     source: "user_self_report"
   };
 }
@@ -2849,9 +3131,8 @@ function restoreOnboardingDraft() {
   wizardFocus.value = draft.focus || wizardFocus.value;
   wizardEnergy.value = draft.energy || wizardEnergy.value;
   wizardStress.value = draft.stress || wizardStress.value;
-  setCheckedValues(wizardPlanningTools, draft.research_context?.planning_tools);
-  wizardPrimaryPlanningTool.value = draft.research_context?.primary_planning_tool || "";
-  wizardPlanningFrequency.value = draft.research_context?.planning_tool_use_frequency || "";
+  setCheckedValues(wizardPlanningTools, draft.research_context?.planning_failure_reasons || draft.research_context?.planning_tools);
+  if (wizardRecentPlanExample) wizardRecentPlanExample.value = draft.research_context?.recent_plan_example || "";
   availableWindowRows.innerHTML = "";
   valueList(draft.available_windows).forEach((item) => addAvailableWindowRow(item));
   fixedEventRows.innerHTML = "";
@@ -3023,6 +3304,7 @@ function showWorkspaceView() {
   profileHomeView.classList.add("hidden");
   workspaceNavBtn.classList.add("active");
   profileHomeBtn.classList.remove("active");
+  assistantNavBtn?.classList.remove("active");
 }
 
 function showProfileHomeView() {
@@ -3030,6 +3312,7 @@ function showProfileHomeView() {
   profileHomeView.classList.remove("hidden");
   workspaceNavBtn.classList.remove("active");
   profileHomeBtn.classList.add("active");
+  assistantNavBtn?.classList.remove("active");
   renderProfileSummary();
 }
 
@@ -4197,9 +4480,8 @@ function syncProfileForm() {
   profileDeepWork.value = currentProfile.deep_work_window || "09:00-11:30";
   profileControl.value = "ai_proposed_user_editable";
   const research = currentProfile.research_context || {};
-  setCheckedValues(profilePlanningTools, research.planning_tools);
-  profilePrimaryPlanningTool.value = research.primary_planning_tool || "";
-  profilePlanningFrequency.value = research.planning_tool_use_frequency || "";
+  setCheckedValues(profilePlanningTools, research.planning_failure_reasons || research.planning_tools);
+  if (profileRecentPlanExample) profileRecentPlanExample.value = research.recent_plan_example || "";
 }
 
 function syncWizardForm() {
@@ -4221,9 +4503,8 @@ function syncWizardForm() {
   wizardEveningEnergy.value = String(rhythm.evening_energy || 5);
   wizardLearningMode.value = preferences.learning_mode || "reading_writing";
   const research = currentProfile.research_context || {};
-  setCheckedValues(wizardPlanningTools, research.planning_tools);
-  wizardPrimaryPlanningTool.value = research.primary_planning_tool || "";
-  wizardPlanningFrequency.value = research.planning_tool_use_frequency || "";
+  setCheckedValues(wizardPlanningTools, research.planning_failure_reasons || research.planning_tools);
+  if (wizardRecentPlanExample) wizardRecentPlanExample.value = research.recent_plan_example || "";
   wizardNearDeadlines.value = "";
   wizardFixedEvents.value = (weekly.fixed_events || []).join("，");
   wizardTemporaryConstraints.value = (weekly.temporary_constraints || []).join("，");
@@ -4290,9 +4571,67 @@ function renderProfileSummary() {
     </div>
     <div class="summary-row research-summary-row">
       <span>Planning background · research only</span>
-      <strong>${valueList(research.planning_tools).map((value) => ({ paper_planner: "Paper planner", calendar_app: "Calendar app", task_manager: "Task manager", notes_workspace: "Notes / workspace", ai_assistant: "AI assistant", none: "None", other: "Other" }[value] || value)).join(" / ") || "Not provided"}</strong>
+      <strong>${valueList(research.planning_failure_reasons || research.planning_tools).map((value) => ({ task_unclear: "Unclear tasks", fatigue_or_anxiety: "Fatigue or anxiety", external_interruptions: "External interruptions", hard_to_resume: "Hard to resume", underestimate_time: "Underestimated time", priority_changes: "Changing priorities", other: "Other" }[value] || value)).join(" / ") || "Not provided"}</strong>
     </div>
   `;
+}
+
+function workspacePlanBlocks() {
+  if (pendingSchedulePlan?.plan_patch?.length) return valueList(pendingSchedulePlan.plan_patch);
+  if (confirmedSchedulePlan?.plan_patch?.length) return valueList(confirmedSchedulePlan.plan_patch);
+  return tasks.flatMap((task) => taskSlotSessions(task).map((session) => ({ ...session, task_id: task.id })));
+}
+
+function workspaceSessionLabel(block) {
+  const labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  return `${labels[Number(block.day_index)] || "Day"} ${formatHour(block.start)}–${formatHour(block.end)}`;
+}
+
+function renderWorkspaceTaskList() {
+  if (!workspaceTaskList) return;
+  const blocks = workspacePlanBlocks().filter((block) => block?.task_id);
+  const taskIds = [...new Set(blocks.map((block) => String(block.task_id)))];
+  const planTasks = taskIds.map((id) => tasks.find((task) => String(task.id) === id)).filter(Boolean);
+  if (!planTasks.length) {
+    workspaceTaskList.innerHTML = "";
+    return;
+  }
+  workspaceTaskList.innerHTML = planTasks.map((task) => {
+    const sessions = blocks.filter((block) => String(block.task_id) === String(task.id)).sort((a, b) => Number(a.day_index) - Number(b.day_index) || Number(a.start) - Number(b.start));
+    return `<article class="workspace-task-row">
+      <header><h3>${escapeHtml(task.title)}</h3><span>${pendingSchedulePlan ? "Draft" : "Confirmed"}</span></header>
+      <p><b>Deadline</b> ${escapeHtml(localizeDisplayTime(task.due || "Not set"))}</p>
+      <p><b>Planned</b> ${sessions.map(workspaceSessionLabel).join(" · ")}</p>
+      <div class="task-row-actions"><button class="ghost" type="button" data-workspace-edit="${escapeHtml(task.id)}">Edit</button><button class="ghost" type="button" data-workspace-cancel="${escapeHtml(task.id)}">Cancel</button></div>
+    </article>`;
+  }).join("");
+  workspaceTaskList.querySelectorAll("[data-workspace-edit]").forEach((button) => button.addEventListener("click", () => {
+    const task = tasks.find((item) => String(item.id) === String(button.dataset.workspaceEdit));
+    if (task) openTaskDialog(task);
+  }));
+  workspaceTaskList.querySelectorAll("[data-workspace-cancel]").forEach((button) => button.addEventListener("click", () => cancelTaskFromPlan(button.dataset.workspaceCancel)));
+}
+
+async function cancelTaskFromPlan(taskId) {
+  const task = tasks.find((item) => String(item.id) === String(taskId));
+  if (!task) return;
+  task.removed_from_week = true;
+  task.status = "terminated";
+  task.slot = null;
+  if (pendingSchedulePlan?.plan_patch) {
+    pendingSchedulePlan.plan_patch = pendingSchedulePlan.plan_patch.filter((block) => String(block.task_id) !== String(taskId));
+    pendingSchedulePlan.unscheduled_tasks = valueList(pendingSchedulePlan.unscheduled_tasks).filter((item) => String(item.task_id) !== String(taskId));
+    recalculateAllPendingTaskSessions();
+  }
+  try {
+    await patchBackendTask(task);
+    showProductToast(`${task.title} was removed from this week's plan.`);
+  } catch (error) {
+    task.removed_from_week = false;
+    task.status = "queued";
+    showProductToast("The task could not be removed. Try again.");
+  }
+  render();
 }
 
 function commaList(value) {
@@ -4418,9 +4757,8 @@ async function saveProfileToBackend() {
     control_preference: "ai_proposed_user_editable",
     research_context: {
       ...(currentProfile.research_context || {}),
-      planning_tools: checkedValues(profilePlanningTools),
-      primary_planning_tool: profilePrimaryPlanningTool.value || null,
-      planning_tool_use_frequency: profilePlanningFrequency.value || null,
+      planning_failure_reasons: checkedValues(profilePlanningTools),
+      recent_plan_example: profileRecentPlanExample?.value.trim() || null,
       source: "user_self_report"
     }
   };
@@ -6075,7 +6413,9 @@ function render() {
   weekViewBtn.classList.toggle("active", calendarView === "week");
   renderProfileSummary();
   renderPendingSchedule();
+  renderWorkspaceTaskList();
   renderNowCard();
+  renderFocusExperience();
   renderChat();
   renderCalendar();
   renderActiveTask();
@@ -6299,8 +6639,192 @@ function renderNowCard() {
   }));
   const needsClockTick = effectiveMode === "now" || Number(sharedTestClock?.time_scale || 0) > 0;
   const clockTickMs = Number(sharedTestClock?.time_scale || 0) > 0 ? 1000 : 30000;
-  if (needsClockTick && !executionClockTimer) executionClockTimer = window.setInterval(renderNowCard, clockTickMs);
+  if (needsClockTick && !executionClockTimer) executionClockTimer = window.setInterval(() => { renderNowCard(); renderFocusExperience(); }, clockTickMs);
   if (!needsClockTick && executionClockTimer) { clearInterval(executionClockTimer); executionClockTimer = null; }
+}
+
+function executionActiveSeconds(session) {
+  let seconds = Math.max(0, Number(session?.accumulated_active_minutes || 0) * 60);
+  if (session?.status === "running") {
+    const segmentStart = session.resumed_at || session.actual_start_at;
+    if (segmentStart) seconds += Math.max(0, Math.floor((appNowMs() - new Date(segmentStart).getTime()) / 1000));
+  }
+  return Math.floor(seconds);
+}
+
+function focusTimeLabel(seconds) {
+  const safe = Math.max(0, Math.floor(Number(seconds || 0)));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const secs = safe % 60;
+  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}` : `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
+function focusSessionKey(session) {
+  return String(session?.execution_session_id || session?.id || `${session?.task_id || "task"}-${session?.planned_start_at || "session"}`);
+}
+
+function renderFocusExperience() {
+  if (!focusScreen || !sessionPet) return;
+  let state = currentExecutionState;
+  const lastTimelineEvent = valueList(state?.session?.timeline).slice(-1)[0];
+  if (state?.mode === "paused" && lastTimelineEvent?.type === "break" && lastTimelineEvent?.ends_at && new Date(lastTimelineEvent.ends_at).getTime() > appNowMs()) {
+    activeBreak = {
+      execution_session_id: state.session.execution_session_id,
+      duration_minutes: Number(lastTimelineEvent.duration_minutes || 0),
+      started_at: lastTimelineEvent.at,
+      ends_at: lastTimelineEvent.ends_at
+    };
+    state = { ...state, mode: "break" };
+    currentExecutionState = state;
+  }
+  const session = state?.session;
+  const task = state?.task || tasks.find((item) => String(item.id) === String(session?.task_id));
+  const mode = state?.mode;
+  if (!session || !task || !["ready_to_start", "now", "paused", "break"].includes(mode)) {
+    focusScreen.classList.add("hidden");
+    const showIdlePet = Boolean(currentUser && appRoot && !appRoot.classList.contains("hidden") && workspaceView && !workspaceView.classList.contains("hidden"));
+    sessionPet.classList.toggle("hidden", !showIdlePet);
+    sessionPet.classList.toggle("pet-idle", showIdlePet);
+    sessionPet.dataset.petMode = showIdlePet ? "idle" : "";
+    if (showIdlePet) {
+      sessionPetTask.textContent = "Ask HumanOS";
+      sessionPetStatus.textContent = "Ready when you are";
+    }
+    return;
+  }
+  sessionPet.classList.remove("pet-idle");
+  sessionPet.dataset.petMode = "session";
+  const sessionKey = focusSessionKey(session);
+  if (mode === "ready_to_start" && document.hidden && !notifiedReadySessions.has(sessionKey)) {
+    notifiedReadySessions.add(sessionKey);
+    if ("Notification" in window && Notification.permission === "granted") {
+      try { new Notification("HumanOS · Session ready", { body: `${task.title} is ready to start.` }); }
+      catch { document.title = `Session ready · ${task.title}`; }
+    } else {
+      document.title = `Session ready · ${task.title}`;
+    }
+  }
+  const shouldShowFocus = focusWorkspaceDismissedSessionId !== sessionKey;
+  focusScreen.classList.toggle("hidden", !shouldShowFocus);
+  sessionPet.classList.toggle("hidden", shouldShowFocus);
+
+  const activeSeconds = executionActiveSeconds(session);
+  const plannedSeconds = Math.max(60, Number(session.planned_work_minutes || 0) * 60);
+  const breakSeconds = mode === "break" && activeBreak?.ends_at ? Math.max(0, Math.floor((new Date(activeBreak.ends_at).getTime() - appNowMs()) / 1000)) : null;
+  const remainingSeconds = breakSeconds === null ? Math.max(plannedSeconds - activeSeconds, 0) : breakSeconds;
+  const taskRemaining = taskWorkRemainingMinutes(task);
+  const context = normalizeContextWindow(task);
+  const goal = context.nextStep || context.progress || task.context || "Continue with the next clear step.";
+  const modeText = mode === "now" ? "Focusing" : mode === "paused" ? "Paused" : mode === "break" ? "On break" : "Focus ready";
+
+  focusModeLabel.textContent = modeText;
+  focusTaskTitle.textContent = task.title;
+  focusSessionGoal.textContent = goal;
+  focusCountdown.textContent = focusTimeLabel(remainingSeconds);
+  focusElapsed.textContent = `${Math.floor(activeSeconds / 60)} min`;
+  focusRemainingWork.textContent = `${taskRemaining} min`;
+  focusStartBtn.textContent = mode === "paused" ? "Resume" : mode === "break" ? "End break and resume" : "Start";
+  focusStartBtn.classList.toggle("hidden", mode === "now");
+  focusPauseBtn.classList.toggle("hidden", mode !== "now");
+  focusBreakBtn.classList.toggle("hidden", !["now", "paused"].includes(mode));
+  focusFinishBtn.classList.toggle("hidden", mode === "ready_to_start");
+
+  const parallelSession = parallelGroupForTask(task);
+  const companionId = valueList(parallelSession?.parallel_task_ids).map(String).find((id) => id !== String(task.id));
+  const companionTask = companionId ? tasks.find((item) => String(item.id) === companionId) : null;
+  focusCompanionTaskId = companionTask?.id || null;
+  focusParallelCompanion?.classList.toggle("hidden", !companionTask);
+  if (companionTask) {
+    focusCompanionTitle.textContent = companionTask.title;
+    focusCompanionStatus.textContent = `${taskWorkRemainingMinutes(companionTask)} min remaining · tracked separately`;
+  }
+
+  const todayIndex = (appNow().getDay() + 6) % 7;
+  const nowHour = currentHourFloat();
+  const nextBlocks = visibleCalendarBlocks().filter((block) => block.task_id && String(block.task_id) !== String(task.id) && String(block.task_id) !== String(companionTask?.id || "") && (!parallelSession || block.parallel_group_id !== parallelSession.parallel_group_id) && (Number(block.day_index) > todayIndex || (Number(block.day_index) === todayIndex && Number(block.end) > nowHour))).sort((a, b) => Number(a.day_index) - Number(b.day_index) || Number(a.start) - Number(b.start)).slice(0, 3);
+  focusNextSessions.innerHTML = nextBlocks.length ? nextBlocks.map((block) => `<div class="focus-next-item"><time>${escapeHtml(workspaceSessionLabel(block))}</time><strong>${escapeHtml(executionBlockTitle(block))}</strong></div>`).join("") : '<p>No more sessions are planned after this one.</p>';
+
+  sessionPetTask.textContent = companionTask ? `${task.title} + ${companionTask.title}` : task.title;
+  sessionPetStatus.textContent = `${modeText} · ${focusTimeLabel(remainingSeconds)} left`;
+}
+
+function openBreakPicker() {
+  if (!currentExecutionState?.session || !breakDialog) return;
+  if (!breakDialog.open) breakDialog.showModal();
+}
+
+async function beginExecutionBreak(minutes) {
+  const session = currentExecutionState?.session;
+  if (!session || executionActionInFlight) return;
+  const duration = Math.max(1, Math.min(120, Number(minutes || 10)));
+  const startedAt = appNow();
+  const endsAt = new Date(startedAt.getTime() + duration * 60000);
+  executionActionInFlight = true;
+  try {
+    let pausedSession = session;
+    if (backendOnline && session.status === "running") {
+      const response = await api("/api/execution-sessions/pause", { method: "POST", body: JSON.stringify({ user_id: currentUserId(), execution_session_id: session.execution_session_id, pause_kind: "break", break_duration_minutes: duration, break_ends_at: endsAt.toISOString(), request_id: `break-${session.execution_session_id}-${Date.now()}` }) });
+      pausedSession = response.execution_session;
+    }
+    activeBreak = { execution_session_id: session.execution_session_id, duration_minutes: duration, started_at: startedAt.toISOString(), ends_at: endsAt.toISOString() };
+    currentExecutionState = { ...currentExecutionState, mode: "break", session: pausedSession };
+    if (backendOnline) await api("/api/state-transitions", { method: "POST", body: JSON.stringify({ user_id: currentUserId(), task_id: session.task_id, before_state: { execution_session_id: session.execution_session_id, status: session.status }, action: { type: "break", duration_minutes: duration }, predicted_state: { resume_at: activeBreak.ends_at }, actual_state: { break_started_at: activeBreak.started_at }, outcome: { pending_resume: true } }) });
+    showProductToast(`${duration}-minute break started.`);
+    render();
+  } finally { executionActionInFlight = false; }
+}
+
+function switchCandidateScore(task) {
+  const difficulty = Number(task.expected_difficulty || task.task_demand?.expected_difficulty || 4);
+  const remaining = taskWorkRemainingMinutes(task);
+  const currentFocus = Number(focusInput?.value || 4);
+  return (currentFocus <= 3 ? difficulty * 20 : -difficulty * 8) + Math.min(remaining, 90);
+}
+
+function openSwitchTaskPicker() {
+  const currentTaskId = currentExecutionState?.session?.task_id;
+  const candidates = tasks.filter((task) => String(task.id) !== String(currentTaskId) && !task.removed_from_week && !["completed", "terminated"].includes(task.status)).sort((a, b) => switchCandidateScore(a) - switchCandidateScore(b)).slice(0, 6);
+  switchTaskOptions.innerHTML = candidates.length ? candidates.map((task) => `<button class="switch-task-option" type="button" data-switch-task="${escapeHtml(task.id)}"><strong>${escapeHtml(task.title)}</strong><small>${taskWorkRemainingMinutes(task)} min remaining · ${escapeHtml(localizeDisplayTime(task.due || "No deadline"))}</small></button>`).join("") : '<p>No other ready task is available right now.</p>';
+  switchTaskOptions.querySelectorAll("[data-switch-task]").forEach((button) => button.addEventListener("click", () => switchExecutionTask(button.dataset.switchTask)));
+  if (!switchTaskDialog.open) switchTaskDialog.showModal();
+}
+
+async function switchExecutionTask(nextTaskId) {
+  const currentSession = currentExecutionState?.session;
+  const currentTask = tasks.find((task) => String(task.id) === String(currentSession?.task_id));
+  const nextTask = tasks.find((task) => String(task.id) === String(nextTaskId));
+  if (!currentSession || !nextTask || executionActionInFlight) return;
+  executionActionInFlight = true;
+  try {
+    if (backendOnline && currentSession.status === "running") {
+      const paused = await api("/api/execution-sessions/pause", { method: "POST", body: JSON.stringify({ user_id: currentUserId(), execution_session_id: currentSession.execution_session_id, request_id: `switch-pause-${currentSession.execution_session_id}-${Date.now()}` }) });
+      currentExecutionState = { ...currentExecutionState, session: paused.execution_session };
+    }
+    if (currentTask) {
+      currentTask.status = "paused";
+      currentTask.contextWindow = { ...normalizeContextWindow(currentTask), interruption: { ...(normalizeContextWindow(currentTask).interruption || {}), stopped_at: appNow().toISOString(), reason: "task_switch", next_task_id: nextTask.id } };
+      await patchBackendTask(currentTask);
+    }
+    let nextSession = null;
+    if (backendOnline) {
+      const ensured = await api("/api/execution-sessions/ensure", { method: "POST", body: JSON.stringify({ user_id: currentUserId(), task_id: nextTask.id }) });
+      nextSession = ensured.execution_session;
+      await api("/api/state-transitions", { method: "POST", body: JSON.stringify({ user_id: currentUserId(), task_id: currentTask?.id, before_state: { active_task_id: currentTask?.id }, action: { type: "switch_task", next_task_id: nextTask.id }, predicted_state: { active_task_id: nextTask.id }, actual_state: { original_task_status: "paused" }, outcome: { awaiting_start: true } }) });
+    }
+    if (!nextSession) {
+      const block = workspacePlanBlocks().find((item) => String(item.task_id) === String(nextTask.id));
+      nextSession = { execution_session_id: `local-${nextTask.id}-${Date.now()}`, task_id: nextTask.id, status: "ready", planned_work_minutes: Number(block?.planned_work_minutes || block?.session_minutes || Math.min(taskWorkRemainingMinutes(nextTask), 45)), planned_start_at: appNow().toISOString(), planned_end_at: new Date(appNowMs() + 45 * 60000).toISOString(), accumulated_active_minutes: 0 };
+    }
+    currentExecutionState = { mode: "ready_to_start", session: nextSession, task: nextTask };
+    focusWorkspaceDismissedSessionId = null;
+    activeId = nextTask.id;
+    switchTaskDialog.close();
+    showProductToast(`${currentTask?.title || "Current task"} is paused. ${nextTask.title} is ready.`);
+    render();
+  } catch (error) {
+    showProductToast("HumanOS could not switch tasks. Try again.");
+  } finally { executionActionInFlight = false; }
 }
 
 async function startCurrentExecution() {
@@ -6308,9 +6832,10 @@ async function startCurrentExecution() {
   if (!backendOnline || !session || executionActionInFlight) return;
   executionActionInFlight = true;
   try {
-    const action = currentExecutionState?.mode === "paused" ? "resume" : "start";
+    const action = ["paused", "break"].includes(currentExecutionState?.mode) ? "resume" : "start";
     const response = await api("/api/execution-sessions/start", { method: "POST", body: JSON.stringify({ user_id: currentUserId(), execution_session_id: session.execution_session_id, request_id: `${action}-${session.execution_session_id}-${Date.now()}` }) });
     currentExecutionState = { ...currentExecutionState, mode: "now", session: response.execution_session };
+    activeBreak = null;
     const task = tasks.find((item) => String(item.id) === String(session.task_id));
     if (task) task.status = "running";
     showProductToast(`${action === "resume" ? "Resumed" : "Started"} · ${response.execution_session.session_remaining_minutes} min remaining.`);
@@ -6579,7 +7104,10 @@ function renderPendingSchedule() {
     return;
   }
   planReviewActions?.classList.remove("hidden");
-  planConfidenceInput.closest("label")?.classList.remove("hidden");
+  // The weekly plan is confirmed once as a whole. Confidence remains part of
+  // the data contract for backwards compatibility, but is no longer another
+  // visible decision in the streamlined review flow.
+  planConfidenceInput.closest("label")?.classList.add("hidden");
   rejectScheduleBtn.dataset.mode = "pending";
   rejectScheduleBtn.textContent = "Cancel plan";
   confirmScheduleBtn.dataset.mode = "pending";
@@ -6720,8 +7248,8 @@ function renderPendingSchedule() {
   confirmScheduleBtn.disabled = !hasDraftTasks || mandatoryDecisions.length > 0;
   confirmScheduleBtn.textContent = pendingSchedulePlan.local_adjustment?.scope === "today_after_pause"
     ? "Update today"
-    : "Add plan to calendar";
-  planConfidenceInput.closest("label")?.classList.toggle("hidden", mandatoryDecisions.length > 0);
+    : "Confirm plan";
+  planConfidenceInput.closest("label")?.classList.add("hidden");
   conflictLegend?.classList.toggle("hidden", mandatoryDecisions.length === 0);
   parallelLegend?.classList.toggle("hidden", !valueList(pendingSchedulePlan.plan_patch).some((block) => block.parallel_group_id && block.parallel_user_confirmed));
   const uncertainItems = pendingSchedulePlan.constraint_summary?.uncertain_constraints || [];
@@ -6886,15 +7414,64 @@ function cleanUserVisibleTaskContext(value) {
     .trim();
 }
 
+function populateTaskSessionFields(task) {
+  const section = document.getElementById("plannedSessionFields");
+  const choice = document.getElementById("plannedSessionChoice");
+  const blocks = valueList(pendingSchedulePlan?.plan_patch).filter((block) => String(block.task_id) === String(task?.id));
+  section?.classList.toggle("hidden", !blocks.length);
+  if (!blocks.length) return;
+  choice.innerHTML = blocks.map((block, index) => `<option value="${escapeHtml(block.block_id || String(index))}">Session ${index + 1} · ${escapeHtml(workspaceSessionLabel(block))}</option>`).join("");
+  const showBlock = () => {
+    const block = blocks.find((item, index) => String(item.block_id || index) === choice.value) || blocks[0];
+    document.getElementById("plannedSessionDay").value = String(block.day_index);
+    document.getElementById("plannedSessionStart").value = formatHour(block.start);
+    document.getElementById("plannedSessionEnd").value = formatHour(block.end);
+  };
+  choice.onchange = showBlock;
+  showBlock();
+}
+
+function applyTaskSessionFields(taskId) {
+  const section = document.getElementById("plannedSessionFields");
+  if (!pendingSchedulePlan?.plan_patch?.length || section?.classList.contains("hidden")) return null;
+  const choice = document.getElementById("plannedSessionChoice");
+  const matching = pendingSchedulePlan.plan_patch.filter((item) => String(item.task_id) === String(taskId));
+  const block = matching.find((item, index) => String(item.block_id || index) === choice.value);
+  if (!block) return null;
+  const startInput = document.getElementById("plannedSessionStart");
+  const endInput = document.getElementById("plannedSessionEnd");
+  const start = parseClockToken(startInput.value);
+  const end = parseClockToken(endInput.value);
+  const onGrid = (value) => Number.isFinite(value) && Math.abs(value * 4 - Math.round(value * 4)) < 0.001;
+  if (!onGrid(start) || !onGrid(end) || end <= start) {
+    endInput.setCustomValidity("Choose an end time after the start, using 15-minute steps.");
+    endInput.reportValidity();
+    return false;
+  }
+  endInput.setCustomValidity("");
+  const day = Number(document.getElementById("plannedSessionDay").value);
+  const changed = day !== Number(block.day_index) || start !== Number(block.start) || end !== Number(block.end);
+  if (changed) {
+    Object.assign(block, { day_index: day, start, end, session_minutes: Math.round((end - start) * 60), draft_changed: true });
+    pendingSchedulePlan.local_adjustment = {
+      ...(pendingSchedulePlan.local_adjustment || {}),
+      scope: "manual_session_edit",
+      changed_block_ids: [...new Set([...valueList(pendingSchedulePlan.local_adjustment?.changed_block_ids), String(block.block_id)])]
+    };
+    recalculateAllPendingTaskSessions();
+  }
+  return changed;
+}
+
 function openTaskDialog(task = null) {
   editingTaskId = task?.id || null;
   taskDialogTitle.textContent = task ? "Edit task" : "New task";
   saveTaskBtn.textContent = task ? "Save changes" : "Save";
   deleteTaskBtn.classList.toggle("hidden", !task);
   document.getElementById("newTitle").value = task?.title || "";
-  document.getElementById("newDue").value = task?.due || "";
+  document.getElementById("newDue").value = task ? localizeDisplayTime(task.due || "", true) : "";
   document.getElementById("newDuration").value = task?.duration || "";
-  document.getElementById("newPriority").value = task?.priority || "中";
+  document.getElementById("newPriority").value = ({ High: "高", Medium: "中", Low: "低", high: "高", medium: "中", low: "低" }[task?.priority] || task?.priority || "中");
   document.getElementById("newStatus").value = task?.status || "queued";
   document.getElementById("newContext").value = cleanUserVisibleTaskContext(task?.context || "");
   const windowData = normalizeContextWindow(task || {});
@@ -6903,6 +7480,7 @@ function openTaskDialog(task = null) {
   document.getElementById("newOpenQuestions").value = task ? windowData.openQuestions : "";
   document.getElementById("newExpectedDifficulty").value = task?.expected_difficulty ?? "";
   document.getElementById("newParallelizable").checked = Boolean(task?.parallelizable);
+  populateTaskSessionFields(task);
   document.getElementById("parallelPermissionField")?.classList.toggle("hidden", !task);
   document.querySelectorAll('input[name="taskModality"]').forEach((input) => {
     input.checked = (task?.resource_modality || []).includes(input.value);
@@ -6997,6 +7575,25 @@ document.getElementById("autoScheduleBtn").addEventListener("click", async () =>
   render();
 });
 
+function pendingPlanSoftRisks(plan) {
+  if (!plan || plan.soft_risk_override?.accepted) return [];
+  const risks = [];
+  const schedulingPattern = /deadline|demand|consecutive|rhythm|energy|focus|break|buffer|fatigue|overload|recovery/i;
+  const warnings = [
+    ...valueList(plan.ai_analysis?.warnings),
+    ...valueList(plan.ai_analysis?.unverified_model_warnings),
+    ...valueList(plan.ai_task_analysis?.warnings)
+  ];
+  warnings.forEach((warning) => {
+    const text = typeof warning === "string" ? warning : (warning?.message || warning?.reason || "");
+    if (text && schedulingPattern.test(text) && !risks.includes(text)) risks.push(text);
+  });
+  const selected = valueList(plan.candidates).find((candidate) => String(candidate.id || candidate.candidate_id) === String(plan.selected_candidate_id));
+  const deadlineRisk = Number(selected?.metrics?.deadline_risk_minutes ?? selected?.deadline_risk_minutes ?? 0);
+  if (deadlineRisk > 0) risks.push(`${deadlineRisk} minutes are scheduled close to a deadline.`);
+  return risks.slice(0, 4);
+}
+
 confirmScheduleBtn.addEventListener("click", async () => {
   if (confirmScheduleBtn.dataset.mode === "confirmed") {
     await requestTentativeSchedule("Generate an adjustment proposal from the confirmed calendar and current Weekly Context.");
@@ -7005,6 +7602,13 @@ confirmScheduleBtn.addEventListener("click", async () => {
   }
   if (scheduleConfirmationInFlight) return;
   if (!pendingSchedulePlan?.plan_patch?.length) return;
+  const softRisks = pendingPlanSoftRisks(pendingSchedulePlan);
+  if (softRisks.length && !pendingSoftRiskConfirmation) {
+    softRiskList.innerHTML = softRisks.map((risk) => `<li>${escapeHtml(risk)}</li>`).join("");
+    if (!softRiskDialog.open) softRiskDialog.showModal();
+    return;
+  }
+  pendingSoftRiskConfirmation = false;
   scheduleConfirmationInFlight = true;
   confirmScheduleBtn.disabled = true;
   delete pendingSchedulePlan.confirmation_error;
@@ -7066,17 +7670,32 @@ confirmScheduleBtn.addEventListener("click", async () => {
       })
     });
     if (backendConfirmation.requires_rationale) {
-      pendingRationaleSubmission = {
+      const automaticRationale = {
         edit_episode_id: backendConfirmation.edit_episode_id,
         final_plan_hash: backendConfirmation.final_plan_hash,
-        canonical_diff: backendConfirmation.canonical_diff
+        reason_codes: [],
+        raw_user_response: "",
+        generalizability: "not_sure",
+        affected_task_ids: pendingTaskIds,
+        response_status: "skipped",
+        request_id: `rationale-${backendConfirmation.final_plan_hash}-automatic-skip`,
+        source: { channel: "single_plan_confirmation", source: "automatic_optional_research_skip" }
       };
-      const summary = backendConfirmation.canonical_diff?.summary || {};
-      document.getElementById("planRationaleDiff").textContent = `You changed ${Number(summary.moved || 0)} time block(s), resized ${Number(summary.resized || 0)}, added ${Number(summary.added || 0)}, and removed ${Number(summary.removed || 0)}.`;
-      if (!planRationaleDialog.open) planRationaleDialog.showModal();
-      setBackendStatus("Your changes are ready. The research question is optional.", true);
-      render();
-      return;
+      backendConfirmation = await api("/api/schedules/confirm", {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: currentUserId(), plan_id: pendingSchedulePlan.plan_id,
+          plan_revision: pendingSchedulePlan.plan_revision,
+          week_id: pendingSchedulePlan.week_id || weekStartLabel(),
+          request_id: pendingSchedulePlan.request_id,
+          plan_patch: pendingSchedulePlan.plan_patch,
+          unscheduled_tasks: pendingSchedulePlan.unscheduled_tasks || [],
+          ai_task_analysis: pendingSchedulePlan.ai_task_analysis || {},
+          decision: pendingSchedulePlan,
+          rationale: automaticRationale
+        })
+      });
+      if (backendConfirmation.requires_rationale) throw new Error("The optional research response could not be recorded.");
     }
     tasks = valueList(backendConfirmation.tasks).map(normalizeBackendTask);
   }
@@ -7336,6 +7955,26 @@ document.getElementById("backToPlanEditBtn")?.addEventListener("click", () => {
   setBackendStatus("Continue editing the draft. Your changes have not entered the calendar.", true);
 });
 
+document.getElementById("modifySoftRiskPlanBtn")?.addEventListener("click", () => {
+  pendingSoftRiskConfirmation = false;
+  softRiskDialog?.close("modify");
+  showProductToast("The draft stays editable.");
+});
+
+document.getElementById("keepSoftRiskPlanBtn")?.addEventListener("click", () => {
+  if (!pendingSchedulePlan) return;
+  pendingSchedulePlan.soft_risk_override = {
+    accepted: true,
+    risks: pendingPlanSoftRisks(pendingSchedulePlan),
+    note: softRiskNote?.value.trim() || "",
+    accepted_at: appNow().toISOString(),
+    source: "user_override"
+  };
+  pendingSoftRiskConfirmation = true;
+  softRiskDialog?.close("keep");
+  confirmScheduleBtn.click();
+});
+
 document.getElementById("addTaskBtn").addEventListener("click", () => {
   openTaskDialog();
 });
@@ -7520,6 +8159,17 @@ workspaceNavBtn.addEventListener("click", () => {
 
 profileHomeBtn.addEventListener("click", () => {
   showProfileHomeView();
+});
+
+assistantNavBtn?.addEventListener("click", () => {
+  showWorkspaceView();
+  workspaceNavBtn.classList.remove("active");
+  assistantNavBtn.classList.add("active");
+  previousRightRailMode = rightRailMode === "agent" ? (previousRightRailMode || "plan") : rightRailMode;
+  rightRailMode = "agent";
+  chatDrawer.open = true;
+  syncRightRailMode();
+  chatInput?.focus();
 });
 
 closeTaskDialogBtn.addEventListener("click", () => {
@@ -7860,13 +8510,14 @@ function splitPauseContextNote(note) {
 function selectedPauseResumeDate(choice) {
   const value = new Date(appNow());
   if (choice === "in_10") value.setMinutes(value.getMinutes() + 10);
-  else if (choice === "in_30") value.setMinutes(value.getMinutes() + 30);
+  else if (choice === "later_today") value.setMinutes(value.getMinutes() + 120);
   else if (choice === "choose") {
     const [hours, minutes] = String(document.getElementById("pauseResumeTime").value || "").split(":").map(Number);
     if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
     value.setHours(hours, minutes, 0, 0);
     if (value <= appNow()) value.setDate(value.getDate() + 1);
-  } else return null;
+  } else if (choice === "not_sure") return null;
+  else return null;
   value.setMinutes(Math.ceil(value.getMinutes() / 15) * 15, 0, 0);
   return value;
 }
@@ -8223,6 +8874,8 @@ taskForm.addEventListener("submit", async (event) => {
     const index = tasks.findIndex((task) => task.id === editingTaskId);
     if (index >= 0) {
       const previous = tasks[index];
+      const sessionChanged = applyTaskSessionFields(editingTaskId);
+      if (sessionChanged === false) return;
       const updated = normalizeBackendTask(taskPayloadFromDialog(editingTaskId, previous));
       const scheduleChanged = ["title", "due", "duration", "priority", "expected_difficulty", "status"]
         .some((field) => String(previous[field] ?? "") !== String(updated[field] ?? ""));
@@ -8234,6 +8887,8 @@ taskForm.addEventListener("submit", async (event) => {
       if (scheduleChanged && !["completed", "terminated", "blocked", "paused"].includes(updated.status)) {
         pendingSchedulePlan = null;
         await requestTentativeSchedule(`“${updated.title}” changed. Regenerate one complete draft plan and keep every hard constraint valid.`);
+      } else if (sessionChanged) {
+        showProductToast("Session updated in the draft. The full plan will be revalidated before confirmation.");
       }
     }
   } else {
@@ -8270,7 +8925,7 @@ openProfileWizardBtn.addEventListener("click", () => {
 profileWizard.addEventListener("submit", (event) => {
   event.preventDefault();
   syncStructuredContextFields();
-  wizardError.textContent = "Generating your proposed weekly plan…";
+  wizardError.textContent = "Building your first plan…";
   saveWizardBtn.disabled = true;
   saveWizardBtn.textContent = "Generating…";
   saveWizardProfile(true).catch((error) => {
@@ -8279,7 +8934,7 @@ profileWizard.addEventListener("submit", (event) => {
     console.error(error);
   }).finally(() => {
     saveWizardBtn.disabled = false;
-    saveWizardBtn.textContent = "Generate weekly plan";
+    saveWizardBtn.textContent = "Build my first plan";
   });
 });
 profileWizard.addEventListener("input", saveOnboardingDraft);
@@ -8388,6 +9043,60 @@ weekRolloverForm?.addEventListener("submit", (event) => {
 });
 startFreshWeekBtn?.addEventListener("click", () => {
   applyWeekRollover(false).catch((error) => setBackendStatus(error.message, false));
+});
+
+backToWorkspaceBtn?.addEventListener("click", () => {
+  focusWorkspaceDismissedSessionId = focusSessionKey(currentExecutionState?.session);
+  renderFocusExperience();
+});
+focusStartBtn?.addEventListener("click", () => {
+  if ("Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
+  startCurrentExecution();
+});
+focusPauseBtn?.addEventListener("click", pauseCurrentExecution);
+focusBreakBtn?.addEventListener("click", openBreakPicker);
+focusSwitchBtn?.addEventListener("click", openSwitchTaskPicker);
+focusFinishBtn?.addEventListener("click", finishCurrentExecution);
+focusFinishCompanionBtn?.addEventListener("click", async () => {
+  const companion = tasks.find((task) => String(task.id) === String(focusCompanionTaskId));
+  if (!companion) return;
+  const companionSession = executionSessionForTask(companion);
+  if (backendOnline && companionSession?.execution_session_id && ["running", "paused"].includes(companionSession.status)) {
+    await api("/api/execution-sessions/end", { method: "POST", body: JSON.stringify({ user_id: currentUserId(), execution_session_id: companionSession.execution_session_id, request_id: `parallel-finish-${companionSession.execution_session_id}-${Date.now()}` }) });
+  }
+  activeId = companion.id;
+  prepareFeedbackDialog(companion, "complete", companionSession, true);
+});
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) document.title = "HumanOS";
+  renderFocusExperience();
+});
+sessionPet?.addEventListener("click", (event) => {
+  if (event.target.closest("[data-pet-action]")) return;
+  if (sessionPet.dataset.petMode === "idle") {
+    previousRightRailMode = rightRailMode === "agent" ? (previousRightRailMode || "plan") : rightRailMode;
+    rightRailMode = "agent";
+    chatDrawer.open = true;
+    syncRightRailMode();
+    chatInput?.focus();
+    return;
+  }
+  focusWorkspaceDismissedSessionId = null;
+  renderFocusExperience();
+});
+sessionPet?.querySelectorAll("[data-pet-action]").forEach((action) => action.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const type = action.dataset.petAction;
+  if (type === "break") openBreakPicker();
+  if (type === "switch") openSwitchTaskPicker();
+  if (type === "finish") finishCurrentExecution();
+}));
+breakForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const value = event.submitter?.value;
+  const minutes = value === "custom" ? Number(customBreakMinutes?.value || 10) : Number(value || 10);
+  breakDialog.close("started");
+  beginExecutionBreak(minutes);
 });
 
 loginModeBtn.addEventListener("click", () => setAuthMode("login"));

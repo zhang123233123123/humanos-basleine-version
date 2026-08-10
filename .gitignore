@@ -12,3 +12,4 @@ venv/
 logs/
 node_modules/
 qa-local/
+product-local/
