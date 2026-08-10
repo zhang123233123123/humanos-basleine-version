@@ -131,6 +131,16 @@ class TaskInputLayerTests(unittest.TestCase):
         self.assertEqual("写作业", previews[1]["title"])
         self.assertEqual([60, 60], [item["duration"] for item in previews])
 
+    def test_chinese_analysis_list_does_not_reschedule_recent_task(self) -> None:
+        existing = self.store.create_task("user-a", {"title": "旧任务", "due": "今天 12:00", "duration": 60})
+        text = "周三18:00前分析访谈材料，预计120分钟，高优先级；周五15:00前完成研究图，预计75分钟，中优先级。"
+
+        updated = self.store.parse_time_followup_for_recent_tasks(
+            "user-a", text, {"recent_tasks": [existing]},
+        )
+
+        self.assertEqual([], updated)
+
     def test_explicit_single_task_reschedule_still_updates_recent_task(self) -> None:
         meeting = self.store.create_task("user-a", {
             "title": "组会",

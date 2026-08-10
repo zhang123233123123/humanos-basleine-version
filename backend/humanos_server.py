@@ -1769,7 +1769,7 @@ class Store:
     def contains_task_action(self, text: str) -> bool:
         return bool(
             re.search(
-                r"(复习|学习|写|读|阅读|总结|整理|完善|完成|处理|准备|提交|看|做|睡觉|睡|吃饭|吃|备战|"
+                r"(复习|学习|写|读|阅读|分析|修改|制作|创建|总结|整理|完善|完成|处理|准备|提交|看|做|睡觉|睡|吃饭|吃|备战|"
                 r"开会|会议|组会|讨论|取|拿|办|买|发|"
                 r"\b(?:add|analyze|analyse|revise|create|format|listen|finish|complete|write|read|review|study|prepare|design|eat|meet|meeting|submit|send|collect|buy|do)\b)",
                 text,
@@ -2475,7 +2475,7 @@ class Store:
         recent_tasks = (chat_context or {}).get("recent_tasks") or self.latest_task_turn_tasks(user_id)
         if not recent_tasks:
             return []
-        if len(self.english_task_segments(text)) >= 2:
+        if len(self.english_task_segments(text)) >= 2 or self.looks_like_compact_multi_task_list(text):
             return []
         has_time = re.search(r"\d{1,2}\s*(点|时)|\d{1,2}[:：]\d{2}", normalize_chinese_clock(text))
         if not has_time:
