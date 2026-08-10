@@ -3953,6 +3953,9 @@ class Store:
             if row["status"] == "running":
                 self._record_execution_request(conn, user_id, request_id, row["id"], "start", timestamp)
                 return self.execution_session_row(row)
+            from app.domain.task import require_execution_transition
+
+            require_execution_transition(str(row["status"]), "running")
             other = conn.execute("SELECT * FROM execution_sessions WHERE user_id=? AND status='running' AND id<>?", (user_id, row["id"])).fetchall()
             if len(other) >= 2:
                 raise ValueError("At most two confirmed parallel sessions may run together")
@@ -4026,6 +4029,9 @@ class Store:
             row = conn.execute("SELECT * FROM execution_sessions WHERE id=? AND user_id=?", (session_id, user_id)).fetchone()
             if not row:
                 raise KeyError(session_id)
+            from app.domain.task import require_execution_transition
+
+            require_execution_transition(str(row["status"]), "paused")
             calculated = int(row["accumulated_active_minutes"] or 0)
             if row["status"] == "running":
                 calculated += self._iso_elapsed_minutes(row["resumed_at"] or row["actual_start_at"], paused_at)
@@ -4112,6 +4118,9 @@ class Store:
             row = conn.execute("SELECT * FROM execution_sessions WHERE id=? AND user_id=?", (session_id, user_id)).fetchone()
             if not row:
                 raise KeyError(session_id)
+            from app.domain.task import require_execution_transition
+
+            require_execution_transition(str(row["status"]), "ended")
             calculated = int(row["accumulated_active_minutes"] or 0)
             if row["status"] == "running":
                 calculated += self._iso_elapsed_minutes(row["resumed_at"] or row["actual_start_at"], ended_at)
@@ -4188,7 +4197,16 @@ class Store:
             )
             if feedback["execution_session_id"]:
                 outcome = str((feedback["task_evaluation"] or {}).get("completion") or "partial")
-                session_status = "not_started" if outcome in {"not_started", "did_not_start"} else "completed"
+                from app.domain.task import feedback_session_status, require_execution_transition
+
+                session_status = feedback_session_status(outcome)
+                session_row = conn.execute(
+                    "SELECT status FROM execution_sessions WHERE id=? AND user_id=?",
+                    (feedback["execution_session_id"], user_id),
+                ).fetchone()
+                if not session_row:
+                    raise KeyError(feedback["execution_session_id"])
+                require_execution_transition(str(session_row["status"]), session_status)
                 confirmed_actual = 0 if session_status == "not_started" else max(int((feedback["task_evaluation"] or {}).get("actual_minutes") or 0), 0)
                 conn.execute(
                     "UPDATE execution_sessions SET status=?,completion_outcome=?,actual_end_at=?,accumulated_active_minutes=?,updated_at=? WHERE id=? AND user_id=?",
