@@ -30,7 +30,8 @@ try:
 except ImportError:
     try:
         from task_parser_agent import parse_tasks_with_agent
-    except ImportError:
+    except ImportError as parser_import_error:
+        print(f"PydanticAI parser import fallback: {parser_import_error}", flush=True)
         parse_tasks_with_agent = None
 
 
@@ -6124,6 +6125,7 @@ class Handler(BaseHTTPRequestHandler):
                     "ai_enabled": ai_enabled,
                     "ai_provider": "deepseek" if ai_enabled else None,
                     "ai_model": os.environ.get("DEEPSEEK_MODEL", "deepseek-chat") if ai_enabled else None,
+                    "task_parser": "pydantic_ai" if parse_tasks_with_agent else "legacy_fallback",
                     "scheduling_mode": "constraint_engine_plus_llm" if ai_enabled else "constraint_engine_only",
                     "test_mode": TEST_MODE,
                     "qa_mode": QA_MODE,
