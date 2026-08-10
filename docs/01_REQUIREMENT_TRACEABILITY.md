@@ -16,12 +16,42 @@
 
 ## 3. 全局工程原则
 
-1. 后端的 Active Plan Revision 是正式计划的唯一来源。
-2. Calendar、Focus、Up Next 和桌宠不得自行计算正式 Session 时间或状态。
-3. AI 负责理解意图和软建议；Python 负责排程计算与硬约束验证。
-4. 所有计划修改先生成 Draft/Calendar Diff，用户确认后才创建正式 revision。
-5. Task、Plan、Timeline Interval 和 Execution Session 使用稳定 ID，并保留历史关系。
-6. 普通账号只展示产品功能；Test Clock、QA Scenario 和 Developer Snapshot 仅测试账号可用。
+1. 后端只有 `Profile` 和 `Task` 两个核心聚合根。
+2. Weekly Context、Momentary State 和 Learned Pattern 都归属于 Profile。
+3. Slot、Execution Session、Context Dump 和 Execution Feedback 都归属于 Task 生命周期。
+4. Plan Revision 与 Weekly Timeline 是 Profile 和 Tasks 的版本化协调结果，不是第三个业务主体。
+5. 后端的 Active Plan Revision 是正式计划的唯一来源。
+6. Calendar、Focus、Up Next 和桌宠不得自行计算正式 Session 时间或状态。
+7. AI 负责理解意图和软建议；Python 负责排程计算与硬约束验证。
+8. 所有计划修改先生成 Draft/Calendar Diff，用户确认后才创建正式 revision。
+9. Task、Plan、Timeline Interval 和 Execution Session 使用稳定 ID，并保留历史关系。
+10. 普通账号只展示产品功能；Test Clock、QA Scenario 和 Developer Snapshot 仅测试账号可用。
+
+### 3.1 两个核心聚合的归属规则
+
+| 数据对象 | 领域归属 | 说明 |
+|---|---|---|
+| Static Profile | Profile | 用户长期稳定信息 |
+| Weekly Context | Profile | 用户在某一周的环境快照 |
+| Momentary State | Profile | 用户当前时刻的临时状态 |
+| Learned Pattern | Profile | 经过重复证据或用户确认的长期规律 |
+| Task Definition | Task | 标题、截止时间、工作量、优先级、依赖 |
+| Task Slot | Task | 当前确认 revision 中的计划位置 |
+| Execution Session | Task | 一次实际执行过程 |
+| Context Dump | Task | 暂停后的恢复上下文 |
+| Execution Feedback | Task | 一次执行的结果和剩余工作更新 |
+| Plan Revision | Coordination | Profile Snapshot 与 Tasks 的版本化排程结果 |
+| Weekly Timeline | Coordination | Plan Revision 的统一时间轴表达 |
+| Episodic Memory | Evidence | Profile 与 Task 交互产生的行为证据 |
+
+### 3.2 不允许出现的所有权关系
+
+- Profile 不直接嵌入或复制完整 Task。
+- Task 不复制 Profile，而只引用排程所使用的 Profile Snapshot/Revision。
+- Plan 不拥有 Task，也不能静默修改 Task 的 Deadline、Duration 或 Priority。
+- Execution Session 不得生成新的 Task 身份；Pause、Resume 和 Replan 始终保留原 `task_id`。
+- Memory 只能提供证据，不能因单次行为直接覆盖 Profile。
+- 前端不得绕过 Plan Revision 直接更新正式 Slot 或后续 Session。
 
 ## 4. 需求追踪矩阵
 
