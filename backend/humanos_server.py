@@ -3328,6 +3328,13 @@ class Store:
             plan_id = new_id("plan")
             stored = dict(decision)
             stored["plan_patch"] = self._decorate_plan_blocks(list(decision.get("plan_patch") or []), week_id, revision, timezone_name)
+            from app.application.build_timeline import build_weekly_timeline_snapshot
+
+            stored["weekly_timeline"] = build_weekly_timeline_snapshot(
+                week_id=week_id,
+                timezone_name=timezone_name,
+                blocks=stored["plan_patch"],
+            )
             for candidate in stored.get("candidate_plans") or []:
                 candidate["plan_patch"] = self._decorate_plan_blocks(list(candidate.get("plan_patch") or []), week_id, revision, timezone_name)
             stored.update({"plan_id": plan_id,"plan_revision": revision,"plan_status": "proposed","week_id": week_id})
