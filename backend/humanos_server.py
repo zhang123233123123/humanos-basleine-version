@@ -1180,58 +1180,14 @@ class Store:
         existing = self.get_profile(user_id)
         if existing:
             return existing
-        profile = {
-            "user_id": user_id,
-            "role": "硕士生",
-            "deep_work_window": "09:00-11:30",
-            "low_energy_window": "14:00-15:30",
-            "control_preference": "ai_proposed_user_editable",
-            "timezone": os.environ.get("HUMANOS_DEFAULT_TIMEZONE", "Asia/Shanghai"),
-            "blocker_patterns": ["task_ambiguity", "fatigue", "context_loss"],
-            "weekly_context": {
-                "week_of": today_label(os.environ.get("HUMANOS_DEFAULT_TIMEZONE", "Asia/Shanghai")),
-                "weekly_available_windows": "",
-                "fixed_events": [],
-                "context_items": [],
-                "weekly_goal": "",
-                "current_tasks": "",
-                "temporary_constraints": [],
-                "other_commitments": [],
-                "task_deadlines": [],
-                "weekly_note": "",
-                "keep_buffer": True,
-                "buffer_preference": "保留可调整时间与无任务时段",
-            },
-            "learned_patterns": [],
-            "research_context": {
-                "planning_tools": [],
-                "primary_planning_tool": None,
-                "planning_tool_use_frequency": None,
-                "source": "user_self_report",
-                "captured_at": None,
-                "revision": 0,
-            },
-            "task_preferences": {
-                "writing": "morning_deep_work",
-                "admin": "low_energy_slots",
-                "reading": "moderate_energy",
-                "onboarding_completed": False,
-                "planning_gap": "",
-                "common_blockers": [],
-                "preferred_session_minutes": 45,
-                "rest_between_tasks_minutes": 15,
-                "day_rhythm": {
-                    "morning_energy": 6,
-                    "afternoon_energy": 4,
-                    "evening_energy": 5,
-                },
-                "learning_mode": "reading_writing",
-                "current_courses": "",
-                "near_deadlines": "",
-                "short_term_goal": "",
-                "support_need": "clarify_next_action",
-            },
-        }
+        from app.domain.profile import build_default_profile
+
+        timezone_name = os.environ.get("HUMANOS_DEFAULT_TIMEZONE", "Asia/Shanghai")
+        profile = build_default_profile(
+            user_id,
+            timezone_name=timezone_name,
+            week_of=today_label(timezone_name),
+        ).model_dump()
         self.upsert_profile(profile)
         self.add_memory(
             user_id=user_id,
@@ -1277,59 +1233,17 @@ class Store:
         user_id = profile.get("user_id", "demo")
         current = self.get_profile(user_id)
         timestamp = now_ms()
-        current_research = dict((current or {}).get("research_context") or {})
-        incoming_research = profile.get("research_context")
-        research_changed = incoming_research is not None and dict(incoming_research or {}) != current_research
-        research_revision = int((current or {}).get("research_context_revision") or current_research.get("revision") or 0)
-        if research_changed:
-            research_revision += 1
-        research_context = dict(incoming_research if incoming_research is not None else current_research)
-        research_context.setdefault("planning_tools", [])
-        research_context.setdefault("primary_planning_tool", None)
-        research_context.setdefault("planning_tool_use_frequency", None)
-        research_context["source"] = "user_self_report"
-        research_context["revision"] = research_revision
-        if research_changed:
-            research_context["captured_at"] = clock_now(ZoneInfo(profile.get("timezone") or (current or {}).get("timezone") or "Asia/Shanghai")).isoformat()
-        data = {
-            "role": profile.get("role", current.get("role") if current else "研究型学生"),
-            "deep_work_window": profile.get(
-                "deep_work_window", current.get("deep_work_window") if current else "09:00-11:30"
-            ),
-            "low_energy_window": profile.get(
-                "low_energy_window", current.get("low_energy_window") if current else "14:00-15:30"
-            ),
-            "control_preference": profile.get(
-                "control_preference",
-                current.get("control_preference") if current else "ai_proposed_user_editable",
-            ),
-            "blocker_patterns": profile.get(
-                "blocker_patterns", current.get("blocker_patterns") if current else []
-            ),
-            "task_preferences": profile.get(
-                "task_preferences", current.get("task_preferences") if current else {}
-            ),
-            "weekly_context": profile.get(
-                "weekly_context", current.get("weekly_context") if current else {}
-            ),
-            "learned_patterns": profile.get(
-                "learned_patterns", current.get("learned_patterns") if current else []
-            ),
-            "timezone": profile.get(
-                "timezone", current.get("timezone") if current else "Asia/Shanghai"
-            ),
-            "active_week_id": profile.get(
-                "active_week_id", current.get("active_week_id") if current else None
-            ),
-            "active_plan_revision": profile.get(
-                "active_plan_revision", current.get("active_plan_revision") if current else None
-            ),
-            "last_daily_checkin_date": profile.get(
-                "last_daily_checkin_date", current.get("last_daily_checkin_date") if current else None
-            ),
-            "research_context": research_context,
-            "research_context_revision": research_revision,
-        }
+        from app.domain.profile import merge_profile_patch
+
+        timezone_name = profile.get("timezone") or (current or {}).get("timezone") or "Asia/Shanghai"
+        aggregate = merge_profile_patch(
+            current,
+            profile,
+            captured_at=clock_now(ZoneInfo(timezone_name)).isoformat(),
+        )
+        aggregate_data = aggregate.model_dump()
+        data = {key: value for key, value in aggregate_data.items() if key != "user_id"}
+        research_revision = aggregate.research_context_revision
         with self.connect() as conn:
             conn.execute(
                 """
