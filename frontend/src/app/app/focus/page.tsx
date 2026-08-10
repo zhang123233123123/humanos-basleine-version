@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { apiRequest } from '@/lib/client/api'
 import { requestId } from '@/lib/client/request-id'
-import type { CurrentExecution, ExecutionImpact, ExecutionSession } from '@/lib/contracts/execution-contracts'
+import type { CurrentExecution, ExecutionImpact, ExecutionResourceEnvelope, ExecutionSession } from '@/lib/contracts/execution-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 
@@ -53,11 +53,11 @@ export default function FocusPage() {
     setLoading(true)
     try {
       const [currentData, historyData] = await Promise.all([
-        apiRequest<CurrentExecution>('/api/execution-sessions/current'),
-        apiRequest<{ execution_sessions: ExecutionSession[] }>('/api/execution-sessions'),
+        apiRequest<ExecutionResourceEnvelope<{ current: CurrentExecution }>>('/api/execution-sessions/current'),
+        apiRequest<ExecutionResourceEnvelope<{ execution_sessions: ExecutionSession[] }>>('/api/execution-sessions'),
       ])
-      setCurrent(currentData)
-      setHistory(historyData.execution_sessions || [])
+      setCurrent(currentData.data.current)
+      setHistory(historyData.data.execution_sessions || [])
     } catch (error) {
       toast(error instanceof Error ? error.message : t('execution.loadFailed'))
     } finally {
@@ -113,20 +113,20 @@ export default function FocusPage() {
     setSubmitting(true)
     try {
       if (current?.mode === 'paused' && !skipImpactCheck) {
-        const analysis = await apiRequest<{ impact: ExecutionImpact }>('/api/execution-sessions/impact', {
+        const analysis = await apiRequest<ExecutionResourceEnvelope<{ impact: ExecutionImpact }>>('/api/execution-sessions/impact', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ execution_session_id: session.execution_session_id, remaining_minutes: displayRemaining, action: 'resume' }),
         })
-        if (analysis.impact.requires_plan_adjustment) {
-          setResumeImpact(analysis.impact)
+        if (analysis.data.impact.requires_plan_adjustment) {
+          setResumeImpact(analysis.data.impact)
           return
         }
       }
-      const result = await apiRequest<{ execution_session: ExecutionSession }>('/api/execution-sessions/start', {
+      const result = await apiRequest<ExecutionResourceEnvelope<{ execution_session: ExecutionSession }>>('/api/execution-sessions/start', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ execution_session_id: session.execution_session_id, request_id: requestId('start') }),
       })
-      setCurrent({ mode: 'running', session: result.execution_session, task })
+      setCurrent({ mode: 'running', session: result.data.execution_session, task })
       setResumeImpact(null)
       setNow(Date.now())
       toast(t('execution.started'))
@@ -145,12 +145,12 @@ export default function FocusPage() {
       const preferred = resumePreference === 'soon'
         ? new Date(Date.now() + 10 * 60_000).toISOString()
         : resumePreference === 'later_today' && preferredResumeAt ? new Date(preferredResumeAt).toISOString() : null
-      const result = await apiRequest<{ execution_session: ExecutionSession; pause_review: ExecutionImpact }>('/api/execution-sessions/pause', {
+      const result = await apiRequest<ExecutionResourceEnvelope<{ execution_session: ExecutionSession; pause_review: ExecutionImpact }>>('/api/execution-sessions/pause', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ execution_session_id: session.execution_session_id, actual_minutes: minutes, remaining_minutes: displayRemaining, pause_reason: pauseReason, resume_preference: resumePreference, preferred_resume_at: preferred, request_id: requestId('pause') }),
       })
-      setCurrent({ mode: 'paused', session: result.execution_session, task })
-      setResumeImpact(result.pause_review.requires_plan_adjustment ? result.pause_review : null)
+      setCurrent({ mode: 'paused', session: result.data.execution_session, task })
+      setResumeImpact(result.data.pause_review.requires_plan_adjustment ? result.data.pause_review : null)
       setPausePrompt(false)
       await loadExecution()
       setResumeImpact(null)
@@ -167,13 +167,13 @@ export default function FocusPage() {
     setSubmitting(true)
     try {
       const minutes = Math.max(Math.ceil(elapsedSeconds / 60), Number(session.actual_minutes || 0))
-      const result = await apiRequest<{ execution_session: ExecutionSession }>('/api/execution-sessions/end', {
+      const result = await apiRequest<ExecutionResourceEnvelope<{ execution_session: ExecutionSession }>>('/api/execution-sessions/end', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ execution_session_id: session.execution_session_id, actual_minutes: minutes, request_id: requestId('end') }),
       })
       setActualMinutes(minutes)
-      setRemainingMinutes(Math.max(Number(result.execution_session.session_remaining_minutes ?? plannedMinutes - minutes), 0))
-      setEndedSession(result.execution_session)
+      setRemainingMinutes(Math.max(Number(result.data.execution_session.session_remaining_minutes ?? plannedMinutes - minutes), 0))
+      setEndedSession(result.data.execution_session)
       setCurrent({ mode: 'none', session: null })
       toast(t('execution.ended'))
     } catch (error) {
@@ -217,10 +217,10 @@ export default function FocusPage() {
   const resumeDeferred = async (deferred: ExecutionSession) => {
     setSubmitting(true)
     try {
-      const analysis = await apiRequest<{ impact: ExecutionImpact }>('/api/execution-sessions/impact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ execution_session_id: deferred.execution_session_id, remaining_minutes: deferred.remaining_at_pause ?? deferred.session_remaining_minutes, action: 'resume' }) })
-      if (analysis.impact.requires_plan_adjustment) {
+      const analysis = await apiRequest<ExecutionResourceEnvelope<{ impact: ExecutionImpact }>>('/api/execution-sessions/impact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ execution_session_id: deferred.execution_session_id, remaining_minutes: deferred.remaining_at_pause ?? deferred.session_remaining_minutes, action: 'resume' }) })
+      if (analysis.data.impact.requires_plan_adjustment) {
         setCurrent({ mode: 'paused', session: deferred, task: deferred.task })
-        setResumeImpact(analysis.impact)
+        setResumeImpact(analysis.data.impact)
         return
       }
       await apiRequest('/api/execution-sessions/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ execution_session_id: deferred.execution_session_id, request_id: requestId('resume-deferred') }) })

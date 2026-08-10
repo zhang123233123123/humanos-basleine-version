@@ -8,9 +8,13 @@ export async function GET(req: Request) {
     const status = new URL(req.url).searchParams.get('status')
     const query = new URLSearchParams({ user_id: userId })
     if (status) query.set('status', status)
-    return Response.json(await humanosRequest('GET', `/api/execution-sessions?${query}`))
+    const result = await humanosRequest('GET', `/api/execution-sessions?${query}`) as { execution_sessions?: unknown[] }
+    return Response.json({
+      data: { execution_sessions: result.execution_sessions || [] },
+      resources: { self: '/api/execution-sessions', tasks: '/api/tasks', current: '/api/execution-sessions/current' },
+      meta: { resource: 'execution_sessions', aggregate_root: 'task', read_only: true },
+    })
   } catch (error) {
     return humanosErrorResponse(error)
   }
 }
-

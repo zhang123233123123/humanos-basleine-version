@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { Activity, Clock3, DatabaseBackup, FastForward, RefreshCcw, RotateCcw, ShieldAlert, SkipForward } from 'lucide-react'
 import { toast } from 'sonner'
-import type { CurrentExecution } from '@/lib/contracts/execution-contracts'
+import type { CurrentExecution, ExecutionResourceEnvelope } from '@/lib/contracts/execution-contracts'
 import type { AccountCapabilities, HumanOSHealth, QAScenario, QAScenarioManifest, QAScenarioRestore, TestClock } from '@/lib/contracts/qa-contracts'
 
 async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
@@ -38,11 +38,11 @@ export default function QAPage() {
       const [nextHealth, nextClock, nextCurrent] = await Promise.all([
         jsonRequest<HumanOSHealth>('/api/health', { cache: 'no-store' }),
         jsonRequest<TestClock>('/api/test-clock', { cache: 'no-store' }),
-        jsonRequest<CurrentExecution>('/api/execution-sessions/current', { cache: 'no-store' }),
+        jsonRequest<ExecutionResourceEnvelope<{ current: CurrentExecution }>>('/api/execution-sessions/current', { cache: 'no-store' }),
       ])
       setHealth(nextHealth)
       setClock(nextClock)
-      setCurrent(nextCurrent)
+      setCurrent(nextCurrent.data.current)
       setExactTime(datetimeLocalValue(nextClock.simulated_now))
       if (nextHealth.qa_mode) {
         const manifest = await jsonRequest<QAScenarioManifest>('/api/qa-scenarios', { cache: 'no-store' })

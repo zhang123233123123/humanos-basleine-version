@@ -57,3 +57,17 @@ export interface ExecutionImpact {
   }>
   options: string[]
 }
+
+export interface ExecutionResourceEnvelope<T> {
+  data: T
+  resources: {
+    self: string
+    tasks: string
+    current: string
+  }
+  meta: {
+    resource: 'execution_session' | 'execution_sessions' | 'execution_impact'
+    aggregate_root: 'task'
+    read_only: boolean
+  }
+}
