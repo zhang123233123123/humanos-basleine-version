@@ -3560,6 +3560,20 @@ class Store:
         plan.update({"plan_id":row["id"],"plan_revision":row["plan_revision"],"plan_status":row["plan_status"],"week_id":row["week_id"]})
         return plan
 
+    def latest_proposed_plan(self, user_id: str, week_id: str | None = None) -> dict | None:
+        profile = self.ensure_profile(user_id)
+        target_week = str(week_id or profile.get("active_week_id") or iso_week_id(timezone_name=profile.get("timezone")))
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM plans WHERE user_id=? AND week_id=? AND plan_status='proposed' ORDER BY plan_revision DESC,updated_at DESC LIMIT 1",
+                (user_id, target_week),
+            ).fetchone()
+        if not row:
+            return None
+        plan = from_json(row["plan_json"], {})
+        plan.update({"plan_id": row["id"], "plan_revision": row["plan_revision"], "plan_status": row["plan_status"], "week_id": row["week_id"]})
+        return plan
+
     def week_status(self, user_id: str, requested_week_id: str | None = None) -> dict:
         profile = self.ensure_profile(user_id)
         current_week = str(requested_week_id or iso_week_id(timezone_name=profile.get("timezone")))
@@ -6421,6 +6435,12 @@ class Handler(BaseHTTPRequestHandler):
                 user_id = query.get("user_id", ["demo"])[0]
                 week_id = query.get("week_id", [None])[0]
                 self.send_json({"plan": store.active_plan(user_id, week_id)})
+                return
+
+            if path == "/api/plans/proposed" and method == "GET":
+                user_id = query.get("user_id", ["demo"])[0]
+                week_id = query.get("week_id", [None])[0]
+                self.send_json({"plan": store.latest_proposed_plan(user_id, week_id)})
                 return
 
             if path == "/api/schedules/confirm" and method == "POST":

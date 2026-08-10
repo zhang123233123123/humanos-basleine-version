@@ -210,7 +210,19 @@ function TaskInspectorWrapper() {
       setShowBatchReason(false)
       setBatchReason('')
       await refetchEvents(currentStart, currentEnd)
-      if (failedCount === 0) router.push('/app/plan')
+      if (failedCount === 0) {
+        const proposal = await apiRequest<{ decision: PlanDecision }>('/api/schedules/decide', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ client_now: new Date().toISOString(), source: 'task_preview_confirmation' }),
+        })
+        if (proposal.decision?.unavailable || proposal.decision?.error) {
+          throw new Error(proposal.decision.error || 'The scheduling service could not generate a plan preview')
+        }
+        router.push('/app/plan?proposal=latest')
+      }
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Tasks were saved, but the schedule preview could not be generated')
     } finally {
       setIsConfirmingAll(false)
     }

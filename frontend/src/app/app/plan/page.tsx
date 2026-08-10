@@ -29,6 +29,7 @@ export default function WeeklyPlanPage() {
   const { t, locale } = useTranslation()
   const searchParams = useSearchParams()
   const adjustmentTrigger = searchParams.get('adjust') || ''
+  const proposalRequested = searchParams.get('proposal') === 'latest'
   const [stage, setStage] = useState<Stage>('setup')
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -53,11 +54,12 @@ export default function WeeklyPlanPage() {
   const loadPlanningState = useCallback(async () => {
     setLoading(true)
     try {
-      const [status, profileData, taskData, planData] = await Promise.all([
+      const [status, profileData, taskData, planData, proposalData] = await Promise.all([
         apiRequest<WeekStatus>('/api/weeks/status'),
         apiRequest<ResourceEnvelope<{ profile: Record<string, any> }>>('/api/profile'),
         apiRequest<ResourceEnvelope<{ tasks: HumanOSTask[] }>>('/api/tasks'),
         apiRequest<PlanResourceEnvelope<{ plan: PlanDecision | null }>>('/api/plans/active'),
+        apiRequest<PlanResourceEnvelope<{ plan: PlanDecision | null }>>('/api/plans/proposed'),
       ])
       const unfinishedIds = new Set((status.unfinished_task_ids || []).map(String))
       const unfinishedTasks = (taskData.data.tasks || []).filter((task) => unfinishedIds.has(String(task.id)))
@@ -75,14 +77,19 @@ export default function WeeklyPlanPage() {
       )
       setKeepBuffer(weekly.keep_buffer !== false)
       setActivePlan(planData.data.plan)
-      if (planData.data.plan?.plan_status === 'confirmed' && !adjustmentTrigger) setStage('confirmed')
-      if (adjustmentTrigger) setStage('setup')
+      if (proposalRequested && proposalData.data.plan) {
+        setDecision(proposalData.data.plan)
+        setBlocks(proposalData.data.plan.plan_patch || [])
+        setValidation(proposalData.data.plan.validation || null)
+        setStage('review')
+      } else if (planData.data.plan?.plan_status === 'confirmed' && !adjustmentTrigger) setStage('confirmed')
+      else setStage('setup')
     } catch (error) {
       toast(error instanceof Error ? error.message : t('planning.loadFailed'))
     } finally {
       setLoading(false)
     }
-  }, [adjustmentTrigger, t])
+  }, [adjustmentTrigger, proposalRequested, t])
 
   useEffect(() => {
     void loadPlanningState()
