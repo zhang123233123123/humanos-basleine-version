@@ -26,10 +26,10 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 try:
-    from .task_parser_agent import parse_tasks_with_agent
+    from .app.application.parse_task import parse_structured_tasks as parse_tasks_with_agent
 except ImportError:
     try:
-        from task_parser_agent import parse_tasks_with_agent
+        from app.application.parse_task import parse_structured_tasks as parse_tasks_with_agent
     except ImportError as parser_import_error:
         print(f"PydanticAI parser import fallback: {parser_import_error}", flush=True)
         parse_tasks_with_agent = None
