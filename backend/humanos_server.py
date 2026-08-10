@@ -5091,7 +5091,24 @@ class Store:
                 violations.append({"type": "planned_work_exceeds_remaining", "task_id": task_id, "planned": allocated, "remaining": remaining})
             elif allocated < remaining and explicit_unallocated.get(task_id) != remaining - allocated:
                 violations.append({"type": "unexplained_unallocated_work", "task_id": task_id, "planned": allocated, "remaining": remaining})
-        return {"valid": not violations, "violations": violations, "checked_by": "python_hard_constraint_validator"}
+        from app.application.validate_timeline import validate_weekly_plan_timeline
+
+        week_id = str(payload.get("week_id") or profile.get("active_week_id") or now.date().isoformat())
+        timezone_name = str(profile.get("timezone") or "Asia/Shanghai")
+        timeline_violations = validate_weekly_plan_timeline(
+            week_id=week_id,
+            timezone_name=timezone_name,
+            blocks=blocks,
+            task_kinds={task_id: schedule_task_kind(task) for task_id, task in task_map.items()},
+            minimum_rest_minutes=int(payload.get("minimum_rest_minutes") or 0),
+        )
+        violations.extend(timeline_violations)
+        return {
+            "valid": not violations,
+            "violations": violations,
+            "checked_by": "python_hard_constraint_validator",
+            "validators": ["legacy_schedule_rules", "canonical_weekly_timeline"],
+        }
 
     def decide_schedule(self, user_id: str, payload: dict) -> dict:
         from humanos_graph import run_schedule_graph
