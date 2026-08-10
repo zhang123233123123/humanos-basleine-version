@@ -8,9 +8,9 @@ export async function GET(req: Request) {
     const weekId = new URL(req.url).searchParams.get('week_id')
     const query = new URLSearchParams({ user_id: userId })
     if (weekId) query.set('week_id', weekId)
-    return Response.json(await humanosRequest('GET', `/api/plans/active?${query}`))
+    const result = await humanosRequest('GET', `/api/plans/active?${query}`) as { plan?: unknown }
+    return Response.json({ data: { plan: result.plan || null }, resources: { self: '/api/plans/active', tasks: '/api/tasks', execution_sessions: '/api/execution-sessions' }, meta: { resource: 'active_plan', read_only: true } })
   } catch (error) {
     return humanosErrorResponse(error)
   }
 }
-

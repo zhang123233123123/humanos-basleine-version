@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { apiRequest } from '@/lib/client/api'
 import type { HumanOSTask } from '@/lib/contracts/task-contracts'
-import type { PlanBlock, PlanDecision, PlanValidation, WeekStatus } from '@/lib/contracts/planning-contracts'
+import type { PlanBlock, PlanDecision, PlanResourceEnvelope, PlanValidation, WeekStatus } from '@/lib/contracts/planning-contracts'
 import type { ResourceEnvelope } from '@/lib/contracts/api-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
@@ -54,7 +54,7 @@ export default function WeeklyPlanPage() {
         apiRequest<WeekStatus>('/api/weeks/status'),
         apiRequest<ResourceEnvelope<{ profile: Record<string, any> }>>('/api/profile'),
         apiRequest<ResourceEnvelope<{ tasks: HumanOSTask[] }>>('/api/tasks'),
-        apiRequest<{ plan: PlanDecision | null }>('/api/plans/active'),
+        apiRequest<PlanResourceEnvelope<{ plan: PlanDecision | null }>>('/api/plans/active'),
       ])
       const unfinishedIds = new Set((status.unfinished_task_ids || []).map(String))
       const unfinishedTasks = (taskData.data.tasks || []).filter((task) => unfinishedIds.has(String(task.id)))
@@ -71,8 +71,8 @@ export default function WeeklyPlanPage() {
           : String(weekly.temporary_constraints || ''),
       )
       setKeepBuffer(weekly.keep_buffer !== false)
-      setActivePlan(planData.plan)
-      if (planData.plan?.plan_status === 'confirmed') setStage('confirmed')
+      setActivePlan(planData.data.plan)
+      if (planData.data.plan?.plan_status === 'confirmed') setStage('confirmed')
     } catch (error) {
       toast(error instanceof Error ? error.message : t('planning.loadFailed'))
     } finally {
@@ -231,12 +231,12 @@ export default function WeeklyPlanPage() {
         toast(t('planning.rationaleRequired'))
         return
       }
-      const activePlanResult = await apiRequest<{ plan: PlanDecision | null }>('/api/plans/active')
-      setActivePlan(activePlanResult.plan)
+      const activePlanResult = await apiRequest<PlanResourceEnvelope<{ plan: PlanDecision | null }>>('/api/plans/active')
+      setActivePlan(activePlanResult.data.plan)
       setRationaleRequired(false)
       setStage('confirmed')
       window.dispatchEvent(new CustomEvent('humanos:plan-updated', {
-        detail: { source: 'plan-confirmation', planRevision: activePlanResult.plan?.plan_revision },
+        detail: { source: 'plan-confirmation', planRevision: activePlanResult.data.plan?.plan_revision },
       }))
       toast(t('planning.confirmed'))
     } catch (error) {

@@ -6,7 +6,8 @@ export async function POST(req: Request) {
   if (!userId) return unauthorizedResponse()
   try {
     const body = await req.json()
-    return Response.json(await humanosRequest('POST', '/api/plans/revise', { ...body, user_id: userId }))
+    const result = await humanosRequest('POST', '/api/plans/revise', { ...body, user_id: userId }) as { plan?: unknown }
+    return Response.json({ data: { plan: result.plan || null }, resources: { self: '/api/plans/revise', tasks: '/api/tasks', execution_sessions: '/api/execution-sessions' }, meta: { resource: 'plan_revision', read_only: false } })
   } catch (error) {
     return humanosErrorResponse(error)
   }

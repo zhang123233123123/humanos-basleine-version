@@ -22,6 +22,7 @@ import { Plus } from 'lucide-react'
 import { apiRequest } from '@/lib/client/api'
 import { useRouter } from 'next/navigation'
 import type { ExecutionResourceEnvelope, ExecutionSession } from '@/lib/contracts/execution-contracts'
+import type { PlanDecision, PlanResourceEnvelope } from '@/lib/contracts/planning-contracts'
 import { requestId } from '@/lib/client/request-id'
 
 export interface CalendarEvent {
@@ -236,7 +237,7 @@ function TaskInspectorWrapper() {
     openQuestions?: string
   }) => {
     if (!activeEvent?.id) return
-    const result = await apiRequest<{ revision_created: boolean }>('/api/plans/adjust-task', {
+    const result = await apiRequest<PlanResourceEnvelope<{ revision_created: boolean; plan?: PlanDecision; execution_sessions: ExecutionSession[] }>>('/api/plans/adjust-task', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -257,9 +258,9 @@ function TaskInspectorWrapper() {
       }),
     })
     window.dispatchEvent(new CustomEvent('humanos:plan-updated', {
-      detail: { source: 'task-adjustment', revisionCreated: result.revision_created },
+      detail: { source: 'task-adjustment', revisionCreated: result.data.revision_created, planRevision: result.data.plan?.plan_revision, executionSessions: result.data.execution_sessions },
     }))
-    toast(result.revision_created ? t('planning.confirmed') : t('event.eventUpdated'))
+    toast(result.data.revision_created ? t('planning.confirmed') : t('event.eventUpdated'))
     await refetchEvents(currentStart, currentEnd)
   }
 
@@ -508,17 +509,17 @@ function AppContent({
     setSavingCalendarEdit(true)
     const reason = calendarEditReason.trim()
     try {
-      const active = await apiRequest<any>('/api/plans/active')
-      const basePlan = active?.plan
+      const active = await apiRequest<PlanResourceEnvelope<{ plan: PlanDecision | null }>>('/api/plans/active')
+      const basePlan = active.data.plan
       const basePatch = basePlan?.plan_patch || []
       const originalBlock = basePatch.find((block: any) => String(block.task_id) === pendingCalendarEdit.taskId)
 
       if (basePlan?.plan_id && originalBlock) {
-        const revisedResult = await apiRequest<any>('/api/plans/revise', {
+        const revisedResult = await apiRequest<PlanResourceEnvelope<{ plan: PlanDecision }>>('/api/plans/revise', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ plan_id: basePlan.plan_id, request_id: `drag-${Date.now()}` }),
         })
-        const revised = revisedResult.plan
+        const revised = revisedResult.data.plan
         const nextStart = new Date(pendingCalendarEdit.after.start || '')
         const nextEnd = new Date(pendingCalendarEdit.after.end || '')
         const mondayIndex = (nextStart.getDay() + 6) % 7

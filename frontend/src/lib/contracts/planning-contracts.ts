@@ -45,3 +45,9 @@ export interface PlanDecision {
   error?: string
   [key: string]: unknown
 }
+
+export interface PlanResourceEnvelope<T> {
+  data: T
+  resources: { self: string; tasks: string; execution_sessions: string }
+  meta: { resource: 'active_plan' | 'plan_revision'; read_only: boolean }
+}
