@@ -1896,6 +1896,13 @@ class Store:
             for part in re.split(r"(?:然后|最后|再|接着|之后|，|,|。|；|;)", clean)
             if part.strip(" ，,。；;、")
         ]
+        metadata_merged: list[str] = []
+        for part in connector_segments:
+            if re.fullmatch(r"(?:高|中|低)\s*优先级", part) and metadata_merged:
+                metadata_merged[-1] = f"{metadata_merged[-1]}，{part}"
+            else:
+                metadata_merged.append(part)
+        connector_segments = metadata_merged
         action_pattern = (
             r"(会议|开会|开.*会|组会|学习|复习|写|读|阅读|总结|整理|完善|完成|处理|准备|提交|"
             r"看|做|睡觉|睡|吃饭|吃|备战|取|拿|办|买|发|"

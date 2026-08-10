@@ -11,7 +11,7 @@ import os
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
-from pydantic_ai import Agent
+from pydantic_ai import Agent, PromptedOutput
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -77,7 +77,7 @@ def parse_tasks_with_agent(
         os.environ.get("DEEPSEEK_MODEL", "deepseek-chat"),
         provider=OpenAIProvider(base_url=base_url, api_key=api_key),
     )
-    agent = Agent(model, output_type=ParsedTaskBatch, system_prompt=SYSTEM_PROMPT)
+    agent = Agent(model, output_type=PromptedOutput(ParsedTaskBatch), system_prompt=SYSTEM_PROMPT)
     context_summary = chat_context or {}
     prompt = (
         f"Current time: {current_time}\n"
@@ -87,6 +87,7 @@ def parse_tasks_with_agent(
     )
     try:
         result = agent.run_sync(prompt)
-    except Exception:
+    except Exception as error:
+        print(f"PydanticAI task parser fallback: {type(error).__name__}: {error}", flush=True)
         return None
     return [task.model_dump() for task in result.output.tasks]
