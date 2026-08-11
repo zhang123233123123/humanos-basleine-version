@@ -112,6 +112,15 @@ def parse_due_start_hour(due: str | None) -> float | None:
 
 
 WEEKDAY_INDEX = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
+WEEKDAY_INDEX_EN = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
 
 
 def profile_now(profile: dict[str, Any] | None = None) -> datetime:
@@ -177,6 +186,9 @@ def day_index_from_due(due: str | None, reference: datetime | None = None) -> in
     match = re.search(r"(?:周|星期)([一二三四五六日天])", text)
     if match:
         return WEEKDAY_INDEX.get(match.group(1))
+    english_match = re.search(r"\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b", text, re.IGNORECASE)
+    if english_match:
+        return WEEKDAY_INDEX_EN.get(english_match.group(1).lower())
     today = current.weekday()
     offset = 2 if "后天" in text else 1 if "明天" in text else 0 if re.search(r"今天|今晚", text) else None
     if offset is None:

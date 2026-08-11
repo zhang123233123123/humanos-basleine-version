@@ -5,6 +5,38 @@ from backend.humanos_graph import build_scheduling_context, day_index_from_due, 
 
 
 class SchedulerConstraintTests(unittest.TestCase):
+    def test_english_weekday_deadline_is_schedulable(self) -> None:
+        self.assertEqual(
+            2,
+            day_index_from_due(
+                "Wednesday 18:00",
+                datetime.fromisoformat("2026-08-11T11:35:00+08:00"),
+            ),
+        )
+
+        result = scheduler_node(None)({
+            "tasks": [{
+                "id": "interviews",
+                "title": "Analyze interview transcripts",
+                "task_type": "flexible_task",
+                "due": "Wednesday 18:00",
+                "deadline_at": "2026-08-12T18:00:00+08:00",
+                "duration": 150,
+                "priority": "high",
+                "status": "queued",
+            }],
+            "profile": {
+                **self.profile(),
+                "_client_now": "2026-08-11T11:35:00+08:00",
+            },
+            "runtime_state": {"focus": 5, "energy": 4, "stress": 5},
+            "ai_task_analysis": {},
+        })
+
+        needs = result["joint_state"]["task_environment_state"]["needs_clarification"]
+        self.assertEqual([], needs)
+        self.assertTrue(result["plan_patch"])
+
     def test_missing_availability_uses_visible_default_windows(self) -> None:
         profile = self.profile()
         profile["weekly_context"]["weekly_available_windows"] = ""
