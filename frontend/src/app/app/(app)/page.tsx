@@ -720,7 +720,7 @@ function AppContent({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+    <div className="flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col overflow-hidden">
       <TaskReminder />
       {/* Top bar */}
       <div className="border-b shrink-0">
@@ -748,7 +748,7 @@ function AppContent({
         </button>
 
         {/* Calendar center */}
-        <div className="min-h-0 min-w-0 flex-1 overflow-hidden p-2">
+        <div className="h-full min-h-0 min-w-0 flex-1 overflow-hidden p-2">
           <FullCalendar
             ref={calendarRef}
             plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
