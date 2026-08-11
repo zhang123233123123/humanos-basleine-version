@@ -1623,11 +1623,13 @@ class Store:
                 expanded = "，".join(f"{part} {shared_clock}" for part in dated_clauses)
                 return self.local_parse_tasks_from_text(user_id, expanded, create_tasks=create_tasks)
         prefer_local_parser = self.looks_like_compact_multi_task_list(clean) or bool(self.english_task_segments(clean))
+        # Numbered/compact lists have deterministic per-line parsing. Do not
+        # let a model copy the first item's facts across the entire batch.
+        if prefer_local_parser:
+            return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
         if typed_tasks:
             llm_result = {"tasks": typed_tasks}
             parser_name = "pydantic_ai"
-        elif prefer_local_parser:
-            return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
         else:
             llm_result = chat_completion(task_parsing_messages(clean, chat_context))
             parser_name = "deepseek_legacy"
@@ -3380,6 +3382,8 @@ class Store:
         if not validation.get("valid"):
             violations = validation.get("violations") or []
             self.log_event(user_id, "plan_confirmation_rejected", {"violations": violations})
+            if any(isinstance(item, dict) and item.get("type") == "empty_plan_with_active_tasks" for item in violations):
+                raise ValueError("当前计划没有任何可执行时间块，不能确认。请先生成至少一个任务安排。")
             if any(item.get("type") == "unexplained_unallocated_work" for item in violations if isinstance(item, dict)):
                 raise ValueError("有任务仍有未安排的剩余时间。请将它加入计划，或明确选择“暂不安排”。")
             raise ValueError("计划未通过时间冲突与工作量约束验证，请返回调整后重试。")
@@ -5047,6 +5051,20 @@ class Store:
                     violations.append({"type": "deadline", "task_id": task_id})
             blocks.append({**block, "day_index": day, "start": start, "end": end})
             planned_work[task_id] = planned_work.get(task_id, 0) + int(block.get("planned_work_minutes") or round((end - start) * 60))
+
+        active_schedulable = [
+            task for task in task_map.values()
+            if not task.get("removed_from_week")
+            and task.get("status") not in {"completed", "terminated", "blocked", "paused"}
+            and schedule_task_kind(task) != "fixed_event"
+            and int((task.get("execution") or {}).get("remaining_duration_minutes", task.get("duration") or 0)) > 0
+        ]
+        if active_schedulable and not blocks:
+            violations.append({
+                "type": "empty_plan_with_active_tasks",
+                "task_ids": [str(task.get("id")) for task in active_schedulable],
+                "detail": "A plan with active remaining work must contain at least one scheduled block.",
+            })
 
         groups: dict[str, set[str]] = {}
         for block in blocks:

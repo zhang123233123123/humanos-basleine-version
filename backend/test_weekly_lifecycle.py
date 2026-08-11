@@ -92,6 +92,14 @@ class WeeklyLifecycleTests(unittest.TestCase):
         self.assertEqual(first["plan_id"], replay["plan_id"])
         self.assertEqual(first["plan_revision"] + 1, second["plan_revision"])
 
+    def test_empty_plan_cannot_be_confirmed_with_active_work(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            store = self.make_store(Path(temp_dir) / "empty-plan.db")
+            store.create_task("u", {"title": "Write report", "due": "2026-08-16 18:00", "duration": 60})
+            proposal = store.save_proposed_plan("u", {"plan_patch": [], "unscheduled_tasks": []}, {"week_id": "2026-08-10"})
+            with self.assertRaisesRegex(ValueError, "没有任何可执行时间块"):
+                store.confirm_plan("u", {"plan_id": proposal["plan_id"], "week_id": "2026-08-10", "plan_patch": [], "decision": proposal})
+
     def test_weekly_context_change_marks_confirmed_plan_for_update(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             store = self.make_store(Path(temp_dir) / "invalidate.db")

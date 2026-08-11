@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from unittest.mock import patch
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -98,6 +99,18 @@ class TaskInputLayerTests(unittest.TestCase):
         self.assertEqual([2, 3, 3, 4, 5, 5, 5, 5], [deadline.weekday() for deadline in deadlines])
         self.assertEqual([(18, 0), (17, 0), (18, 0), (15, 0), (13, 0), (14, 0), (18, 0), (18, 0)], [(deadline.hour, deadline.minute) for deadline in deadlines])
         self.assertTrue(all(task["timezone"] == "Asia/Shanghai" for task in tasks))
+
+    def test_numbered_list_ignores_model_wide_duration_copy(self) -> None:
+        text = """1. Analyze interview transcripts, 150 minutes, high priority, due Wednesday at 18:00.
+2. Revise the literature review, 120 minutes, high priority, due Thursday at 17:00.
+3. Prepare a supervisor update, 45 minutes, high priority, due Thursday at 18:00."""
+        bad_model_result = [
+            {"title": title, "duration_minutes": 150, "schedule_type": "flexible_task"}
+            for title in ("Analyze interview transcripts", "Revise the literature review", "Prepare a supervisor update")
+        ]
+        with patch("backend.humanos_server.parse_tasks_with_agent", return_value=bad_model_result):
+            tasks = self.store.parse_tasks_from_text("user-a", text, create_tasks=False)
+        self.assertEqual([150, 120, 45], [task["duration"] for task in tasks])
 
     def test_expanded_action_keywords_are_not_dropped(self) -> None:
         tasks = self.store.local_parse_tasks_from_text(

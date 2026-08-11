@@ -5,6 +5,13 @@ from backend.humanos_graph import build_scheduling_context, day_index_from_due, 
 
 
 class SchedulerConstraintTests(unittest.TestCase):
+    def test_missing_availability_uses_visible_default_windows(self) -> None:
+        profile = self.profile()
+        profile["weekly_context"]["weekly_available_windows"] = ""
+        context = build_scheduling_context(profile)
+        self.assertTrue(context["windows"])
+        self.assertTrue(context["availability_assumptions"])
+
     def profile(self) -> dict:
         return {
             "timezone": "Asia/Shanghai",

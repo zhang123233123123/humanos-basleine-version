@@ -269,6 +269,18 @@ def parse_available_windows(profile: dict[str, Any]) -> list[dict[str, Any]]:
     if windows:
         return windows
     raw = str(weekly.get("weekly_available_windows") or "")
+    if not raw.strip():
+        return [
+            {
+                "day_index": day,
+                "start": 8.0,
+                "end": 22.0,
+                "source": "system_default_missing_availability",
+                "inferred": True,
+                "confidence": "low",
+            }
+            for day in range(7)
+        ]
     for segment in [item.strip() for item in re.split(r"[；;\n]", raw) if item.strip()]:
         days = day_indices_from_text(segment)
         time_range = time_range_from_text(segment)
@@ -572,6 +584,9 @@ def build_scheduling_context(profile: dict[str, Any]) -> dict[str, Any]:
         "uncertain_constraints": [*uncertain, *routine_uncertain, *flexible_uncertain],
         "keep_buffer": keep_buffer,
         "rest_minutes": rest_minutes,
+        "availability_assumptions": [
+            "No availability was provided; HumanOS temporarily assumes 08:00-22:00 every day. Confirm or edit this in Settings."
+        ] if any(window.get("source") == "system_default_missing_availability" for window in parse_available_windows(profile)) else [],
     }
 
 
