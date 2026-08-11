@@ -19,5 +19,6 @@ export interface DeveloperSnapshot {
   latest_runtime_state: Record<string, unknown>
   events: Array<{ id: string; type: string; payload: Record<string, unknown>; created_at: number }>
   plan_edit_events: Array<Record<string, unknown>>
+  state_transitions: Array<Record<string, unknown>>
   diagnostics: { healthy: boolean; issue_count: number; issues: DiagnosticIssue[] }
 }

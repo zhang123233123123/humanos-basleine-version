@@ -1062,6 +1062,7 @@ class Store:
             plan_rows = conn.execute("SELECT * FROM plans WHERE user_id=? ORDER BY created_at DESC LIMIT 20", (user_id,)).fetchall()
             event_rows = conn.execute("SELECT * FROM events WHERE user_id=? ORDER BY created_at DESC LIMIT 50", (user_id,)).fetchall()
             edit_rows = conn.execute("SELECT * FROM plan_edit_events WHERE user_id=? ORDER BY server_time DESC LIMIT 50", (user_id,)).fetchall()
+            transition_rows = conn.execute("SELECT * FROM state_transitions WHERE user_id=? ORDER BY created_at DESC LIMIT 100", (user_id,)).fetchall()
         plans = []
         for row in plan_rows:
             plan = from_json(row["plan_json"], {})
@@ -1069,6 +1070,7 @@ class Store:
             plans.append(plan)
         events = [{"id": row["id"], "type": row["type"], "payload": from_json(row["payload_json"], {}), "created_at": row["created_at"]} for row in event_rows]
         plan_edits = [{key: from_json(row[key], {}) if key in {"before_json", "after_json", "validation_result_json"} else row[key] for key in row.keys()} for row in edit_rows]
+        state_transitions = [{key: from_json(row[key], {}) if key in {"before_state_json", "action_json", "predicted_state_json", "actual_state_json", "outcome_json"} else row[key] for key in row.keys()} for row in transition_rows]
         return {
             "view": {
                 "kind": "qa_aggregate_snapshot",
@@ -1076,7 +1078,7 @@ class Store:
                 "ordinary_user_visible": False,
                 "aggregate_roots": ["profile", "task"],
                 "coordination_records": ["plans", "execution_sessions"],
-                "evidence_records": ["events", "plan_edit_events"],
+                "evidence_records": ["events", "plan_edit_events", "state_transitions"],
             },
             "generated_at": self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai").isoformat(),
             "account": {"email": user_id, "account_type": "test"},
@@ -1088,6 +1090,7 @@ class Store:
             "latest_runtime_state": self.latest_runtime_state(user_id),
             "events": events,
             "plan_edit_events": plan_edits,
+            "state_transitions": state_transitions,
             "diagnostics": {"healthy": not issues, "issue_count": len(issues), "issues": issues},
         }
 
