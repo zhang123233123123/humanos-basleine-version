@@ -680,7 +680,13 @@ function AppContent({
     if (res.ok) {
       await refetchEvents(currentStart, currentEnd)
       const accepted = await res.json()
-      const turn = await waitForJob<any>(accepted.job.job_id)
+      let job: { status: string; result?: any; error?: string } = accepted.job
+      for (let attempt = 0; attempt < 180 && !['completed', 'failed'].includes(job.status); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        job = (await apiRequest<{ job: typeof job }>(`/api/background-jobs?job_id=${encodeURIComponent(accepted.job.job_id)}`)).job
+      }
+      if (job.status !== 'completed') throw new Error(job.error || 'Task parsing failed')
+      const turn = job.result
       const data = { turn }
       // If AI returned tasks, show the first one in the right inspector
       const tasks = data?.turn?.tasks
