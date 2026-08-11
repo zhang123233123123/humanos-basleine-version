@@ -813,7 +813,7 @@ def scheduler_node(_: Any):
 
         def subtract_busy(windows: list[dict[str, Any]], block: dict[str, Any], include_rest: bool = True) -> list[dict[str, Any]]:
             busy = {
-                "start": block["start"],
+                "start": max(block["start"] - (rest_minutes / 60 if include_rest else 0), 0.0),
                 "end": block["end"] + (rest_minutes / 60 if include_rest else 0),
             }
             return [

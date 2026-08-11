@@ -5,6 +5,31 @@ from backend.humanos_graph import build_scheduling_context, day_index_from_due, 
 
 
 class SchedulerConstraintTests(unittest.TestCase):
+    def test_split_sessions_keep_profile_rest_when_scheduler_fills_backwards(self) -> None:
+        profile = self.profile()
+        profile["_client_now"] = "2026-08-03T07:00:00+08:00"
+        result = scheduler_node(None)({
+            "tasks": [{
+                "id": "analysis",
+                "title": "Analyze interviews",
+                "task_type": "flexible_task",
+                "due": "周三 18:00",
+                "duration": 150,
+                "priority": "高",
+                "status": "queued",
+            }],
+            "profile": profile,
+            "runtime_state": {"focus": 5, "energy": 4, "stress": 5},
+            "ai_task_analysis": {},
+        })
+        blocks = sorted(result["plan_patch"], key=lambda block: (block["day_index"], block["start"]))
+        same_day_gaps = [
+            round((current["start"] - previous["end"]) * 60)
+            for previous, current in zip(blocks, blocks[1:])
+            if previous["day_index"] == current["day_index"]
+        ]
+        self.assertTrue(all(gap >= 15 for gap in same_day_gaps), same_day_gaps)
+
     def test_english_week_range_creates_all_available_windows(self) -> None:
         profile = self.profile()
         profile["weekly_context"]["weekly_available_windows"] = "Monday-Sunday 08:00-21:00"
