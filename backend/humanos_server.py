@@ -4004,6 +4004,24 @@ class Store:
             and len(group_task_ids) == 2
         )
 
+    def _insert_state_transition(self, conn: sqlite3.Connection, *, user_id: str, task_id: str | None, before_status: str, action_type: str, after_status: str, execution_session_id: str | None = None, action_detail: dict | None = None, outcome: dict | None = None, created_at: int | None = None) -> dict:
+        transition = {
+            "id": new_id("transition"),
+            "user_id": user_id,
+            "task_id": task_id,
+            "before_state": {"execution_status": before_status},
+            "action": {"type": action_type, "execution_session_id": execution_session_id, **(action_detail or {})},
+            "predicted_state": {"execution_status": after_status},
+            "actual_state": {"execution_status": after_status},
+            "outcome": outcome or {"persisted": True},
+            "created_at": created_at or now_ms(),
+        }
+        conn.execute(
+            "INSERT INTO state_transitions (id,user_id,task_id,before_state_json,action_json,predicted_state_json,actual_state_json,outcome_json,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (transition["id"], user_id, task_id, as_json(transition["before_state"]), as_json(transition["action"]), as_json(transition["predicted_state"]), as_json(transition["actual_state"]), as_json(transition["outcome"]), transition["created_at"]),
+        )
+        return transition
+
     def start_execution_session(self, user_id: str, payload: dict) -> dict:
         session_id = str(payload.get("execution_session_id") or "")
         block_id = str(payload.get("block_id") or "")
@@ -4038,6 +4056,7 @@ class Store:
                 (actual_start, actual_start, request_id, timestamp, row["id"], user_id),
             )
             conn.execute("UPDATE tasks SET status='running',updated_at=? WHERE id=? AND user_id=?", (timestamp, row["task_id"], user_id))
+            self._insert_state_transition(conn, user_id=user_id, task_id=row["task_id"], before_status=str(row["status"]), action_type="resume" if row["status"] == "paused" else "start", after_status="running", execution_session_id=row["id"], created_at=timestamp)
             self._record_execution_request(conn, user_id, request_id, row["id"], "start", timestamp)
             updated = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (row["id"],)).fetchone()
         return self.execution_session_row(updated)
@@ -4111,6 +4130,7 @@ class Store:
                 remaining_minutes = max(int(row["planned_work_minutes"] or 0) - active, 0)
             conn.execute("UPDATE execution_sessions SET status='paused',paused_at=?,resumed_at=NULL,accumulated_active_minutes=?,pause_reason=?,resume_preference=?,preferred_resume_at=?,remaining_at_pause=?,updated_at=? WHERE id=? AND user_id=?", (paused_at, active, pause_reason, resume_preference, preferred_resume_at, remaining_minutes, timestamp, session_id, user_id))
             conn.execute("UPDATE tasks SET status='paused',updated_at=? WHERE id=? AND user_id=?", (timestamp, row["task_id"], user_id))
+            self._insert_state_transition(conn, user_id=user_id, task_id=row["task_id"], before_status=str(row["status"]), action_type="pause", after_status="paused", execution_session_id=session_id, action_detail={"pause_reason": pause_reason, "resume_preference": resume_preference, "remaining_minutes": remaining_minutes}, created_at=timestamp)
             self._record_execution_request(conn, user_id, request_id, session_id, "pause", timestamp)
             updated = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (session_id,)).fetchone()
         return self.execution_session_row(updated)
@@ -4197,6 +4217,7 @@ class Store:
                 calculated += self._iso_elapsed_minutes(row["resumed_at"] or row["actual_start_at"], ended_at)
             active = max(calculated, actual_minutes)
             conn.execute("UPDATE execution_sessions SET status='ended',actual_end_at=?,resumed_at=NULL,accumulated_active_minutes=?,completion_outcome=NULL,updated_at=? WHERE id=? AND user_id=?", (ended_at, active, timestamp, session_id, user_id))
+            self._insert_state_transition(conn, user_id=user_id, task_id=row["task_id"], before_status=str(row["status"]), action_type="end", after_status="ended", execution_session_id=session_id, outcome={"persisted": True, "actual_minutes": active}, created_at=timestamp)
             self._record_execution_request(conn, user_id, request_id, session_id, "finish", timestamp)
             updated = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (session_id,)).fetchone()
         return self.execution_session_row(updated)
@@ -4292,6 +4313,17 @@ class Store:
                     "UPDATE execution_sessions SET status=?,completion_outcome=?,actual_end_at=?,accumulated_active_minutes=?,updated_at=? WHERE id=? AND user_id=?",
                     (session_status, outcome, clock_now(ZoneInfo(feedback_profile.get("timezone") or "Asia/Shanghai")).isoformat(), confirmed_actual, feedback["created_at"], feedback["execution_session_id"], user_id),
                 )
+                self._insert_state_transition(
+                    conn,
+                    user_id=user_id,
+                    task_id=task_id,
+                    before_status=str(session_row["status"]),
+                    action_type="submit_feedback",
+                    after_status=session_status,
+                    execution_session_id=feedback["execution_session_id"],
+                    outcome={"persisted": True, "completion": outcome, "actual_minutes": confirmed_actual},
+                    created_at=feedback["created_at"],
+                )
             conn.execute(
                 "UPDATE tasks SET execution_json=?,demand_json=?,status=?,updated_at=? WHERE id=? AND user_id=?",
                 (as_json(feedback_decision.execution), as_json(feedback_decision.task_demand), feedback_decision.task_status, feedback["created_at"], task_id, user_id),
@@ -4330,31 +4362,29 @@ class Store:
         task_id = payload.get("task_id")
         if task_id and not self.get_task(task_id, user_id):
             raise KeyError(task_id)
-        transition = {
-            "id": new_id("transition"),
-            "user_id": user_id,
-            "task_id": task_id,
-            "before_state": payload.get("before_state") or {},
-            "action": payload.get("action") or {},
-            "predicted_state": payload.get("predicted_state") or {},
-            "actual_state": payload.get("actual_state") or {},
-            "outcome": payload.get("outcome") or {},
-            "created_at": now_ms(),
-        }
+        action = dict(payload.get("action") or {})
+        action_type = str(action.get("type") or "").strip()
+        if not action_type:
+            raise ValueError("action.type is required")
+        execution_session_id = str(action.get("execution_session_id") or payload.get("execution_session_id") or "").strip() or None
         with self.connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO state_transitions (
-                  id, user_id, task_id, before_state_json, action_json,
-                  predicted_state_json, actual_state_json, outcome_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    transition["id"], user_id, transition["task_id"],
-                    as_json(transition["before_state"]), as_json(transition["action"]),
-                    as_json(transition["predicted_state"]), as_json(transition["actual_state"]),
-                    as_json(transition["outcome"]), transition["created_at"],
-                ),
+            if execution_session_id:
+                session = conn.execute("SELECT task_id FROM execution_sessions WHERE id=? AND user_id=?", (execution_session_id, user_id)).fetchone()
+                if not session:
+                    raise KeyError(execution_session_id)
+                if task_id and str(session["task_id"]) != str(task_id):
+                    raise ValueError("execution session does not belong to task")
+                task_id = session["task_id"]
+            transition = self._insert_state_transition(
+                conn,
+                user_id=user_id,
+                task_id=task_id,
+                before_status=str((payload.get("before_state") or {}).get("execution_status") or "unknown"),
+                action_type=action_type,
+                after_status=str((payload.get("actual_state") or {}).get("execution_status") or "unknown"),
+                execution_session_id=execution_session_id,
+                action_detail={key: value for key, value in action.items() if key not in {"type", "execution_session_id"}},
+                outcome=payload.get("outcome") or {},
             )
         self.log_event(user_id, "state_transition_recorded", transition)
         return transition
@@ -6414,7 +6444,7 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 user_id = payload.get("user_id", "demo")
                 store.ensure_profile(user_id)
-                self.send_json({"transition": store.record_state_transition(user_id, payload)}, status=201)
+                self.send_json({"data": {"transition": store.record_state_transition(user_id, payload)}, "resources": {"task": "/api/tasks", "execution_sessions": "/api/execution-sessions", "context_dump": "/api/context-dumps"}, "meta": {"resource": "state_transition", "aggregate_root": "task", "read_only": False}}, status=201)
                 return
 
             if path == "/api/patterns/candidates" and method == "GET":
