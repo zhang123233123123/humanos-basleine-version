@@ -1,10 +1,17 @@
 import unittest
 from datetime import datetime
 
-from backend.humanos_graph import build_scheduling_context, day_index_from_due, scheduler_node
+from backend.humanos_graph import build_scheduling_context, day_index_from_due, parse_available_windows, scheduler_node
 
 
 class SchedulerConstraintTests(unittest.TestCase):
+    def test_english_week_range_creates_all_available_windows(self) -> None:
+        profile = self.profile()
+        profile["weekly_context"]["weekly_available_windows"] = "Monday-Sunday 08:00-21:00"
+        windows = parse_available_windows(profile)
+        self.assertEqual(list(range(7)), [window["day_index"] for window in windows])
+        self.assertTrue(all(window["start"] == 8.0 and window["end"] == 21.0 for window in windows))
+
     def test_english_weekday_deadline_is_schedulable(self) -> None:
         self.assertEqual(
             2,

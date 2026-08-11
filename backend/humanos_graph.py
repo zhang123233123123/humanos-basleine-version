@@ -206,6 +206,7 @@ def segment_covers_day(segment: str, target_day: int) -> bool:
 
 def day_indices_from_text(text: str | None) -> list[int]:
     clean = str(text or "")
+    lower = clean.lower()
     indices: set[int] = set()
     if re.search(r"每天|每日", clean):
         indices.update(range(7))
@@ -213,10 +214,29 @@ def day_indices_from_text(text: str | None) -> list[int]:
         indices.update(range(5))
     if "周末" in clean:
         indices.update({5, 6})
+    if re.search(r"\b(every\s+day|daily)\b", lower):
+        indices.update(range(7))
+    if re.search(r"\b(weekdays?|workdays?)\b", lower):
+        indices.update(range(5))
+    if re.search(r"\bweekends?\b", lower):
+        indices.update({5, 6})
     for start_text, end_text in re.findall(r"周([一二三四五六日天])\s*(?:至|到|[-–—])\s*周?([一二三四五六日天])", clean):
         start, end = WEEKDAY_INDEX[start_text], WEEKDAY_INDEX[end_text]
         indices.update(range(start, end + 1))
     indices.update(WEEKDAY_INDEX[day] for day in re.findall(r"(?:周|星期)([一二三四五六日天])", clean))
+    english_days = "Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday"
+    for start_text, end_text in re.findall(
+        rf"\b({english_days})\s*(?:to|through|[-–—])\s*({english_days})\b",
+        clean,
+        re.IGNORECASE,
+    ):
+        start = WEEKDAY_INDEX_EN[start_text.lower()]
+        end = WEEKDAY_INDEX_EN[end_text.lower()]
+        indices.update(range(start, end + 1) if start <= end else list(range(start, 7)) + list(range(0, end + 1)))
+    indices.update(
+        WEEKDAY_INDEX_EN[day.lower()]
+        for day in re.findall(rf"\b({english_days})\b", clean, re.IGNORECASE)
+    )
     return sorted(indices)
 
 
