@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, BookOpenText, BrainCircuit, Check, CheckCircle2, Database, Loader2, LockKeyhole, Search, Sparkles } from 'lucide-react'
+import { ArrowLeft, BookOpenText, BrainCircuit, Check, CheckCircle2, Database, Loader2, LockKeyhole, Pencil, Search, Sparkles, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -29,16 +29,19 @@ export default function InsightsPage() {
   const [searching, setSearching] = useState(false)
   const [searched, setSearched] = useState(false)
   const [memories, setMemories] = useState<MemoryResult[]>([])
+  const [recent, setRecent] = useState<MemoryResult[]>([])
 
   const loadInsights = useCallback(async () => {
     setLoading(true)
     try {
-      const [patternData, profileData] = await Promise.all([
+      const [patternData, profileData, recentData] = await Promise.all([
         apiRequest<LearningResourceEnvelope<{ patterns: PatternCandidate[] }>>('/api/patterns/candidates'),
         apiRequest<ResourceEnvelope<{ profile: { learned_patterns?: LearnedPattern[] } }>>('/api/profile'),
+        apiRequest<LearningResourceEnvelope<{ memories: MemoryResult[] }>>('/api/memories/search?q=&top_k=6'),
       ])
       setCandidates(patternData.data.patterns || [])
       setLearned((profileData.data.profile.learned_patterns || []).filter((pattern) => pattern.user_confirmed))
+      setRecent(recentData.data.memories || [])
     } catch (error) {
       toast(error instanceof Error ? error.message : t('insights.loadFailed'))
     } finally {
@@ -71,6 +74,19 @@ export default function InsightsPage() {
     }
   }
 
+  const manage = async (action: 'dismiss' | 'forget' | 'edit', patternLabel: string) => {
+    const replacement = action === 'edit' ? window.prompt(t('insights.editPrompt'), patternLabel)?.trim() : undefined
+    if (action === 'edit' && !replacement) return
+    setPromoting(patternLabel)
+    try {
+      const result = await apiRequest<LearningResourceEnvelope<{ learned_patterns: LearnedPattern[] }>>('/api/patterns/manage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, pattern_label: patternLabel, replacement_label: replacement }) })
+      setLearned((result.data.learned_patterns || []).filter((pattern) => pattern.user_confirmed))
+      if (action === 'dismiss') setCandidates((items) => items.filter((item) => item.pattern_label !== patternLabel))
+      toast(t(`insights.${action}Saved`))
+    } catch (error) { toast(error instanceof Error ? error.message : t('insights.manageFailed')) }
+    finally { setPromoting('') }
+  }
+
   const searchMemories = async (event: FormEvent) => {
     event.preventDefault()
     if (!query.trim()) return
@@ -98,12 +114,14 @@ export default function InsightsPage() {
           <p className="mt-2 max-w-2xl text-muted-foreground">{t('insights.subtitle')}</p>
         </header>
 
+        <Card><CardHeader><CardTitle>{t('insights.recentObservations')}</CardTitle><CardDescription>{t('insights.recentDescription')}</CardDescription></CardHeader><CardContent className="grid gap-3 md:grid-cols-2">{recent.map((memory) => <article key={memory.memory_id} className="rounded-xl border bg-background/75 p-4"><p className="text-sm leading-relaxed">{memory.text}</p><p className="mt-3 text-xs text-muted-foreground">{memory.source_type} · {confirmedDate(memory.created_at)}</p><details className="mt-3 text-xs text-muted-foreground"><summary className="cursor-pointer">{t('insights.technicalDetails')}</summary><pre className="mt-2 overflow-auto whitespace-pre-wrap">{JSON.stringify({ score: memory.score, metadata: memory.metadata, evidence_role: memory.evidence_role, plan_write_allowed: memory.plan_write_allowed }, null, 2)}</pre></details></article>)}</CardContent></Card>
+
         <section className="grid gap-6 lg:grid-cols-2">
           <Card className="border-emerald-500/30 bg-emerald-500/5">
             <CardHeader><div className="mb-2 grid h-10 w-10 place-items-center rounded-xl bg-emerald-500 text-white"><CheckCircle2 className="h-5 w-5" /></div><CardTitle>{t('insights.confirmedPatterns')}</CardTitle><CardDescription>{t('insights.confirmedDescription')}</CardDescription></CardHeader>
             <CardContent className="space-y-3">
               {learned.length === 0 ? <p className="text-sm text-muted-foreground">{t('insights.noConfirmed')}</p> : learned.map((pattern) => (
-                <div key={pattern.pattern_label} className="rounded-xl border bg-background/80 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-medium">{pattern.pattern_label}</p><p className="mt-1 text-xs text-muted-foreground">{t('insights.evidenceCount')}: {pattern.evidence_count}</p></div><Check className="h-5 w-5 text-emerald-600" /></div>{pattern.confirmed_at && <p className="mt-3 text-xs text-muted-foreground">{t('insights.confirmedOn')} {confirmedDate(pattern.confirmed_at)}</p>}</div>
+                <div key={pattern.pattern_label} className="rounded-xl border bg-background/80 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-medium">{pattern.pattern_label}</p><p className="mt-1 text-xs text-muted-foreground">{t('insights.evidenceCount')}: {pattern.evidence_count}</p></div><Check className="h-5 w-5 text-emerald-600" /></div>{pattern.confirmed_at && <p className="mt-3 text-xs text-muted-foreground">{t('insights.confirmedOn')} {confirmedDate(pattern.confirmed_at)}</p>}<div className="mt-3 flex gap-2"><Button size="sm" variant="outline" onClick={() => void manage('edit', pattern.pattern_label)} disabled={promoting === pattern.pattern_label}><Pencil className="mr-1 h-3.5 w-3.5" />{t('insights.editPattern')}</Button><Button size="sm" variant="ghost" className="text-destructive" onClick={() => void manage('forget', pattern.pattern_label)} disabled={promoting === pattern.pattern_label}><Trash2 className="mr-1 h-3.5 w-3.5" />{t('insights.forgetPattern')}</Button></div></div>
               ))}
             </CardContent>
           </Card>
@@ -114,7 +132,7 @@ export default function InsightsPage() {
               {candidates.length === 0 ? <p className="text-sm text-muted-foreground">{t('insights.noCandidates')}</p> : candidates.map((candidate) => {
                 const eligible = candidate.status === 'candidate' && candidate.can_suggest_update
                 const alreadyConfirmed = learned.some((pattern) => pattern.pattern_label === candidate.pattern_label)
-                return <div key={candidate.pattern_label} className="rounded-xl border bg-background/80 p-4"><div className="flex items-start justify-between gap-4"><div><p className="font-medium">{candidate.pattern_label}</p><p className="mt-1 text-xs text-muted-foreground">{candidate.episode_count} {t('insights.episodes')} · {candidate.status}</p></div><span className={`rounded-full px-2.5 py-1 text-[11px] ${eligible ? 'bg-amber-500/15 text-amber-700' : 'bg-muted text-muted-foreground'}`}>{eligible ? t('insights.readyForReview') : t('insights.gatheringEvidence')}</span></div><div className="mt-4 flex items-center justify-between gap-3"><p className="text-xs text-muted-foreground">{eligible ? t('insights.confirmationNotice') : t('insights.moreDaysRequired')}</p><Button size="sm" disabled={!eligible || alreadyConfirmed || promoting === candidate.pattern_label} onClick={() => promote(candidate)}>{!eligible && <LockKeyhole className="mr-1 h-3.5 w-3.5" />}{alreadyConfirmed ? t('insights.confirmed') : t('insights.confirmPattern')}</Button></div></div>
+                return <div key={candidate.pattern_label} className="rounded-xl border bg-background/80 p-4"><div className="flex items-start justify-between gap-4"><div><p className="font-medium">{candidate.pattern_label}</p><p className="mt-1 text-xs text-muted-foreground">{candidate.episode_count} {t('insights.episodes')} · {candidate.status}</p></div><span className={`rounded-full px-2.5 py-1 text-[11px] ${eligible ? 'bg-amber-500/15 text-amber-700' : 'bg-muted text-muted-foreground'}`}>{eligible ? t('insights.readyForReview') : t('insights.gatheringEvidence')}</span></div><div className="mt-4 flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-muted-foreground">{eligible ? t('insights.confirmationNotice') : t('insights.moreDaysRequired')}</p><div className="flex gap-2"><Button size="sm" variant="ghost" onClick={() => void manage('dismiss', candidate.pattern_label)} disabled={promoting === candidate.pattern_label}><X className="mr-1 h-3.5 w-3.5" />{t('insights.dismissPattern')}</Button><Button size="sm" disabled={!eligible || alreadyConfirmed || promoting === candidate.pattern_label} onClick={() => promote(candidate)}>{!eligible && <LockKeyhole className="mr-1 h-3.5 w-3.5" />}{alreadyConfirmed ? t('insights.confirmed') : t('insights.confirmPattern')}</Button></div></div></div>
               })}
             </CardContent>
           </Card>

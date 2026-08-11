@@ -4505,7 +4505,8 @@ class Store:
             ],
             timezone_name=profile.get("timezone") or "Asia/Shanghai",
         )
-        return [{**item, "evidence_role": "profile_learning_evidence", "user_confirmed": False, "plan_write_allowed": False} for item in candidates]
+        dismissed = set((profile.get("research_context") or {}).get("dismissed_pattern_labels") or [])
+        return [{**item, "evidence_role": "profile_learning_evidence", "user_confirmed": False, "plan_write_allowed": False} for item in candidates if item.get("pattern_label") not in dismissed]
 
     def promote_pattern(self, user_id: str, payload: dict) -> dict:
         profile = self.ensure_profile(user_id)
@@ -4530,6 +4531,45 @@ class Store:
         updated = self.upsert_profile(profile)
         promoted = next((item for item in updated.get("learned_patterns", []) if item.get("pattern_label") == label), None)
         return {"learned_patterns": updated.get("learned_patterns", []), "promoted_pattern": promoted, "active_plan_revision": updated.get("active_plan_revision")}
+
+    def manage_pattern(self, user_id: str, payload: dict) -> dict:
+        """Apply an explicit user decision without mutating the active plan."""
+        action = str(payload.get("action") or "").strip()
+        label = str(payload.get("pattern_label") or "").strip()
+        if action == "confirm":
+            return self.promote_pattern(user_id, {**payload, "user_confirmed": True})
+        if action not in {"edit", "dismiss", "forget"} or not label:
+            raise ValueError("action and pattern_label are required")
+        profile = self.ensure_profile(user_id)
+        patterns = list(profile.get("learned_patterns") or [])
+        research = dict(profile.get("research_context") or {})
+        if action == "dismiss":
+            if not any(item.get("pattern_label") == label for item in self.pattern_candidates(user_id)):
+                raise ValueError("pattern candidate does not exist")
+            dismissed = set(research.get("dismissed_pattern_labels") or [])
+            dismissed.add(label)
+            research["dismissed_pattern_labels"] = sorted(dismissed)
+        elif action == "forget":
+            if not any(item.get("pattern_label") == label for item in patterns):
+                raise ValueError("confirmed pattern does not exist")
+            patterns = [item for item in patterns if item.get("pattern_label") != label]
+        else:
+            replacement = str(payload.get("replacement_label") or "").strip()
+            if not replacement:
+                raise ValueError("replacement_label is required")
+            found = False
+            for item in patterns:
+                if item.get("pattern_label") == label:
+                    item["pattern_label"] = replacement
+                    item["edited_at"] = now_ms()
+                    found = True
+            if not found:
+                raise ValueError("confirmed pattern does not exist")
+        profile["learned_patterns"] = patterns
+        profile["research_context"] = research
+        updated = self.upsert_profile(profile)
+        self.log_event(user_id, f"pattern_{action}", {"pattern_label": label, "replacement_label": payload.get("replacement_label"), "active_plan_unchanged": True})
+        return {"learned_patterns": updated.get("learned_patterns", []), "action": action, "active_plan_revision": updated.get("active_plan_revision")}
 
     def add_memory(
         self,
@@ -4613,7 +4653,7 @@ class Store:
         if refreshed:
             with self.connect() as conn:
                 conn.executemany("UPDATE memories SET metadata_json=?,embedding_json=? WHERE id=?", refreshed)
-        scored.sort(key=lambda item: item["score"], reverse=True)
+        scored.sort(key=(lambda item: item["score"] if query.strip() else item["created_at"]), reverse=True)
         return scored[:top_k]
 
     def analyze_schedule_inputs(self, state: dict) -> dict:
@@ -6577,6 +6617,14 @@ class Handler(BaseHTTPRequestHandler):
                 user_id = payload.get("user_id", "demo")
                 store.ensure_profile(user_id)
                 result = store.promote_pattern(user_id, payload)
+                self.send_json({"data": result, "resources": {"profile": "/api/profile", "candidates": "/api/patterns/candidates"}, "meta": {"resource": "learned_pattern", "aggregate_root": "profile", "read_only": False, "active_plan_unchanged": True, "plan_write_allowed": False}})
+                return
+
+            if path == "/api/patterns/manage" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                store.ensure_profile(user_id)
+                result = store.manage_pattern(user_id, payload)
                 self.send_json({"data": result, "resources": {"profile": "/api/profile", "candidates": "/api/patterns/candidates"}, "meta": {"resource": "learned_pattern", "aggregate_root": "profile", "read_only": False, "active_plan_unchanged": True, "plan_write_allowed": False}})
                 return
 

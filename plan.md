@@ -394,7 +394,7 @@ feat(feedback): persist execution outcomes and remaining work
 feat(weekly): implement daily check-in and week rollover
 ```
 
-## Step 11：实现 Insights、Memory 与 Pattern 提升
+## Step 11：实现 Insights、Memory 与 Pattern 提升（已完成）
 
 ### 目标
 
