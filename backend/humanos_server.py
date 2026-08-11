@@ -5340,14 +5340,77 @@ class Store:
         }
 
     def decide_schedule(self, user_id: str, payload: dict) -> dict:
-        from humanos_graph import run_schedule_graph
+        from app.application.deterministic_scheduler import build_deterministic_plan
 
         request_id = str(payload.get("request_id") or "").strip()
         cache_key = f"{user_id}:{request_id}" if request_id else ""
         with self.schedule_request_lock:
             if cache_key and cache_key in self.schedule_request_cache:
                 return json.loads(json.dumps(self.schedule_request_cache[cache_key]))
-            decision = run_schedule_graph(self, user_id, payload)
+            profile = self.ensure_profile(user_id)
+            all_tasks = payload.get("tasks") or self.list_tasks(user_id)
+            week_id = str(payload.get("week_id") or profile.get("active_week_id") or (profile.get("weekly_context") or {}).get("week_id") or "")
+            tasks = [
+                task for task in all_tasks
+                if not task.get("removed_from_week")
+                and (not week_id or not task.get("week_id") or str(task.get("week_id")) == week_id)
+            ]
+            runtime_state = payload.get("runtime_state") or self.latest_runtime_state(user_id)
+            query = payload.get("query") or self.build_schedule_query(tasks, runtime_state)
+            memories = self.search_memories(user_id, query, top_k=4)
+            analysis_state = {
+                "user_id": user_id,
+                "payload": payload,
+                "profile": profile,
+                "tasks": tasks,
+                "runtime_state": runtime_state,
+                "query": query,
+                "memories": memories,
+            }
+            analysis = self.analyze_schedule_inputs(analysis_state)
+            existing_plan = self.latest_proposed_plan(user_id, week_id) or self.active_plan(user_id, week_id)
+            decision = build_deterministic_plan(
+                profile=profile,
+                tasks=tasks,
+                analysis=analysis,
+                existing_plan=existing_plan,
+                payload=payload,
+            )
+            review_payload = {
+                "profile_rules": decision.get("scheduler"),
+                "sessions": [
+                    {
+                        key: block.get(key)
+                        for key in ("task_id", "day_index", "start", "end", "planned_work_minutes")
+                    }
+                    for block in decision.get("plan_patch", [])
+                ],
+                "unscheduled_tasks": decision.get("unscheduled_tasks", []),
+                "task_demands": analysis.get("task_demands", []),
+                "dependencies": analysis.get("dependencies", []),
+            }
+            ai_soft_review = chat_completion([
+                {
+                    "role": "system",
+                    "content": (
+                        "Review this Python-generated weekly schedule for soft risks only. "
+                        "Do not propose or change exact times. Return JSON with keys status, "
+                        "risks, strengths, and user_message. Consider cognitive load, context "
+                        "switching, buffer, deadline pressure, and profile rhythm. Python remains "
+                        "the final authority for hard constraints."
+                    ),
+                },
+                {"role": "user", "content": as_json(review_payload)},
+            ], temperature=0.1)
+            decision["ai_soft_review"] = ai_soft_review if isinstance(ai_soft_review, dict) else {
+                "status": "unavailable",
+                "risks": [],
+                "strengths": [],
+                "user_message": "The deterministic schedule is available; AI soft-risk review was unavailable.",
+            }
+            validation = self.validate_confirmed_schedule(user_id, {**decision, "user_id": user_id})
+            decision["validation"] = validation
+            decision["ai_soft_review"]["hard_constraints_authority"] = "python"
             if request_id:
                 decision["request_id"] = request_id
             # A generated schedule is a draft Plan.  It does not write formal
