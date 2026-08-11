@@ -3,6 +3,7 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { MessageCircleQuestion, Sparkles, X } from 'lucide-react'
 import { useRef } from 'react'
+import Image from 'next/image'
 import { Chat } from '@/components/chat'
 import { Button } from '@/components/ui/button'
 import { useChat } from '@/hooks/use-chat'
@@ -20,7 +21,8 @@ export function GlobalAssistant() {
         drag
         dragMomentum={false}
         dragElastic={0.08}
-        whileDrag={{ scale: 1.04, cursor: 'grabbing' }}
+        whileHover={{ scale: 1.03, y: -2 }}
+        whileDrag={{ scale: 1.08, y: -4, cursor: 'grabbing' }}
         onPointerDown={() => { dragging.current = false }}
         onDragStart={() => { dragging.current = true }}
         onDragEnd={() => { window.setTimeout(() => { dragging.current = false }, 0) }}
@@ -29,11 +31,14 @@ export function GlobalAssistant() {
         <Button
           type="button"
           onClick={() => { if (!dragging.current) setChatOpen('Hello!') }}
-          className="h-12 rounded-full px-4 shadow-lg shadow-primary/20"
+          className="group relative h-16 w-16 overflow-visible rounded-[22px] border border-[#d8c7a5] bg-[#f7f1e5] p-1 shadow-[0_12px_32px_rgba(24,63,47,0.22)] hover:border-[#b99a60] hover:bg-[#fffaf0] dark:border-[#436454] dark:bg-[#15271f] dark:hover:bg-[#1b3328]"
           aria-label={locale === 'zh' ? '打开日程顾问，可拖动位置' : 'Open draggable Calendar Advisor'}
         >
-          <Sparkles className="mr-2 h-4 w-4" />
-          <span>{locale === 'zh' ? '日程顾问' : 'Calendar Advisor'}</span>
+          <span className="pointer-events-none absolute inset-1 rounded-[18px] bg-[radial-gradient(circle_at_35%_20%,rgba(255,255,255,0.95),rgba(238,227,205,0.55)_52%,rgba(25,67,49,0.08))] dark:bg-[radial-gradient(circle_at_35%_20%,rgba(255,255,255,0.12),rgba(26,55,42,0.3)_58%,rgba(0,0,0,0.18))]" />
+          <Image src="/assets/calendar-advisor.png" alt="" width={56} height={56} priority className="pointer-events-none relative z-10 h-14 w-14 object-contain drop-shadow-[0_4px_5px_rgba(20,48,37,0.24)]" />
+          <span className="pointer-events-none absolute right-full top-1/2 mr-3 -translate-y-1/2 whitespace-nowrap rounded-full border border-[#d8c7a5] bg-[#fffaf0]/95 px-3 py-1.5 text-xs font-semibold text-[#183f2f] opacity-0 shadow-md backdrop-blur transition-opacity group-hover:opacity-100 dark:border-[#436454] dark:bg-[#15271f]/95 dark:text-[#f5efe2]">
+            {locale === 'zh' ? '日程顾问 · 可拖动' : 'Calendar Advisor · Drag me'}
+          </span>
         </Button>
       </motion.div>
 
