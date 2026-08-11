@@ -49,18 +49,26 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
   const [nextStep, setNextStep] = useState('')
   const [openQuestions, setOpenQuestions] = useState('')
 
+  const sourceId = task?.id
+  const sourceTitle = task?.title || ''
+  const sourcePriority = task?.priority || 'medium'
+  const sourceStatus = task?.status || 'queued'
+  const sourceContext = task?.context || task?.description || ''
+  const sourceProgress = task?.progress || ''
+  const sourceNextStep = task?.nextStep || ''
+  const sourceOpenQuestions = task?.openQuestions || ''
+
   // Sync local state when task changes
   useEffect(() => {
-    if (task) {
-      setTitle(task.title || '')
-      setPriority(task.priority || 'medium')
-      setStatus(task.status || 'queued')
-      setContext(task.context || task.description || '')
-      setProgress(task.progress || '')
-      setNextStep(task.nextStep || '')
-      setOpenQuestions(task.openQuestions || '')
-    }
-  }, [task?.id, task?.start, task?.end])  // re-sync when task identity changes
+    if (!sourceId) return
+    setTitle(sourceTitle)
+    setPriority(sourcePriority)
+    setStatus(sourceStatus)
+    setContext(sourceContext)
+    setProgress(sourceProgress)
+    setNextStep(sourceNextStep)
+    setOpenQuestions(sourceOpenQuestions)
+  }, [sourceId, sourceTitle, sourcePriority, sourceStatus, sourceContext, sourceProgress, sourceNextStep, sourceOpenQuestions])
 
   // Build current editable task object
   const buildTask = useCallback((): TaskDetail => {
