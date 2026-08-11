@@ -3797,17 +3797,33 @@ class Store:
         task = self.get_task(task_id, user_id)
         if not task:
             raise KeyError(task_id)
+        raw_questions = payload.get("open_questions") or []
+        open_questions = [str(item).strip() for item in raw_questions if str(item).strip()] if isinstance(raw_questions, list) else [line.strip() for line in str(raw_questions).splitlines() if line.strip()]
         dump = {
             "id": dump_id,
             "user_id": user_id,
             "task_id": task_id,
             "progress": payload.get("progress", ""),
-            "open_questions": payload.get("open_questions", []),
+            "open_questions": open_questions,
             "next_action": payload.get("next_action", ""),
             "stop_reason": payload.get("stop_reason", "unknown"),
             "materials": payload.get("materials", []),
             "created_at": now_ms(),
         }
+        checkpoints = [
+            {"label": "Pause reason", "text": dump["stop_reason"]},
+            {"label": "Current progress", "text": dump["progress"] or "Not provided"},
+            {"label": "Next action", "text": dump["next_action"] or "Confirm one small next step before resuming."},
+        ]
+        execution = dict(task.get("execution") or {})
+        payload_remaining = payload.get("remaining_duration_minutes")
+        execution["remaining_duration_minutes"] = int(task.get("duration", 60) if payload_remaining is None and execution.get("remaining_duration_minutes") is None else execution.get("remaining_duration_minutes") if payload_remaining is None else payload_remaining)
+        payload_progress = payload.get("progress_percent")
+        execution["progress_percent"] = int(execution.get("progress_percent", 0) if payload_progress is None else payload_progress)
+        execution["last_stop_reason"] = dump["stop_reason"]
+        next_status = "blocked" if dump["stop_reason"] == "blocked" else "paused"
+        context_window = dict(task.get("contextWindow") or {})
+        context_window.update({"progress": dump["progress"], "nextStep": dump["next_action"], "openQuestions": "; ".join(dump["open_questions"])})
         with self.connect() as conn:
             conn.execute(
                 """
@@ -3829,39 +3845,13 @@ class Store:
                     dump["created_at"],
                 ),
             )
-        checkpoints = [
-            {"label": "Pause reason", "text": dump["stop_reason"]},
-            {"label": "Current progress", "text": dump["progress"] or "Not provided"},
-            {"label": "Next action", "text": dump["next_action"] or "Confirm one small next step before resuming."},
-        ]
-        execution = task.get("execution") or {}
-        payload_remaining = payload.get("remaining_duration_minutes")
-        execution["remaining_duration_minutes"] = int(
-            task.get("duration", 60)
-            if payload_remaining is None and execution.get("remaining_duration_minutes") is None
-            else execution.get("remaining_duration_minutes") if payload_remaining is None
-            else payload_remaining
-        )
-        payload_progress = payload.get("progress_percent")
-        execution["progress_percent"] = int(
-            execution.get("progress_percent", 0) if payload_progress is None else payload_progress
-        )
-        execution["last_stop_reason"] = dump["stop_reason"]
-        next_status = "blocked" if dump["stop_reason"] == "blocked" else "paused"
-        self.patch_task(
-            task_id,
-            {
-                "status": next_status,
-                "checkpoints": checkpoints,
-                "execution": execution,
-                "contextWindow": {
-                    "progress": dump["progress"],
-                    "nextStep": dump["next_action"],
-                    "openQuestions": "; ".join(dump["open_questions"]),
-                },
-                },
-                user_id,
+            conn.execute(
+                "UPDATE tasks SET status=?,checkpoints_json=?,execution_json=?,context_window_json=?,updated_at=? WHERE id=? AND user_id=?",
+                (next_status, as_json(checkpoints), as_json(execution), as_json(context_window), dump["created_at"], task_id, user_id),
             )
+            conn.execute("UPDATE plans SET plan_status='needs_update',updated_at=? WHERE user_id=? AND week_id=? AND plan_status='confirmed'", (dump["created_at"], user_id, task.get("week_id")))
+            conn.execute("UPDATE profiles SET active_plan_revision=NULL,updated_at=? WHERE user_id=?", (dump["created_at"], user_id))
+            self._insert_state_transition(conn, user_id=user_id, task_id=task_id, before_status=str(task.get("status") or "unknown"), action_type="capture_context", after_status=next_status, action_detail={"context_dump_id": dump_id, "stop_reason": dump["stop_reason"]}, outcome={"persisted": True, "remaining_minutes": execution["remaining_duration_minutes"]}, created_at=dump["created_at"])
         memory_text = (
             f"Context dump for task {task_id}. Progress: {dump['progress']}. "
             f"Open questions: {', '.join(dump['open_questions'])}. "
@@ -6380,7 +6370,8 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 user_id = payload.get("user_id", "demo")
                 store.ensure_profile(user_id)
-                self.send_json({"context_dump": store.save_context_dump(user_id, payload)}, status=201)
+                context_dump = store.save_context_dump(user_id, payload)
+                self.send_json({"data": {"context_dump": context_dump, "task": store.get_task(context_dump["task_id"], user_id)}, "resources": {"task": "/api/tasks", "execution_sessions": "/api/execution-sessions", "reentry": "/api/reentry"}, "meta": {"resource": "context_dump", "aggregate_root": "task", "read_only": False}}, status=201)
                 return
 
             if path == "/api/execution-feedback" and method == "POST":
@@ -6501,7 +6492,7 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 user_id = payload.get("user_id", "demo")
                 store.ensure_profile(user_id)
-                self.send_json({"reentry": store.reentry_prompt(user_id, payload)})
+                self.send_json({"data": {"reentry": store.reentry_prompt(user_id, payload)}, "resources": {"task": "/api/tasks", "execution_sessions": "/api/execution-sessions", "context_dump": "/api/context-dumps"}, "meta": {"resource": "reentry_guidance", "aggregate_root": "task", "read_only": True, "plan_write_allowed": False}})
                 return
 
             if path == "/api/memories/search" and method == "GET":

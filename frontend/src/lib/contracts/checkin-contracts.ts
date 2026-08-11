@@ -59,3 +59,9 @@ export interface CheckInResourceEnvelope<T> {
   resources: { self: string; profile: string; active_plan: string; execution_sessions: string }
   meta: { resource: 'daily_checkin'; aggregate_root: 'profile'; read_only: boolean }
 }
+
+export interface TaskLifecycleResourceEnvelope<T> {
+  data: T
+  resources: Record<string, string>
+  meta: { resource: 'context_dump' | 'reentry_guidance'; aggregate_root: 'task'; read_only: boolean; plan_write_allowed?: false }
+}

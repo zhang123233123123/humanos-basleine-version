@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { apiRequest } from '@/lib/client/api'
-import type { CheckInResourceEnvelope, ContextDump, DailyPlanReview, ReentryResult, RuntimeState } from '@/lib/contracts/checkin-contracts'
+import type { CheckInResourceEnvelope, ContextDump, DailyPlanReview, ReentryResult, RuntimeState, TaskLifecycleResourceEnvelope } from '@/lib/contracts/checkin-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 
@@ -73,7 +73,7 @@ export default function CheckInPage() {
     }
     setSubmitting(true)
     try {
-      const result = await apiRequest<{ context_dump: ContextDump }>('/api/context-dumps', {
+      const result = await apiRequest<TaskLifecycleResourceEnvelope<{ context_dump: ContextDump }>>('/api/context-dumps', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           task_id: taskId,
@@ -88,7 +88,7 @@ export default function CheckInPage() {
       })
       setSaved(true)
       toast(t('checkin.contextSaved'))
-      return result.context_dump
+      return result.data.context_dump
     } catch (error) {
       toast(error instanceof Error ? error.message : t('checkin.contextFailed'))
       return null
@@ -104,11 +104,11 @@ export default function CheckInPage() {
         const dump = await saveInterruption()
         if (!dump) return
       }
-      const result = await apiRequest<{ reentry: ReentryResult }>('/api/reentry', {
+      const result = await apiRequest<TaskLifecycleResourceEnvelope<{ reentry: ReentryResult }>>('/api/reentry', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ task_id: taskId, runtime_state: runtimeState }),
       })
-      setReentry(result.reentry)
+      setReentry(result.data.reentry)
     } catch (error) {
       toast(error instanceof Error ? error.message : t('checkin.reentryFailed'))
     } finally {
