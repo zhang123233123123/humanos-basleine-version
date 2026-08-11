@@ -688,6 +688,14 @@ function AppContent({
       if (job.status !== 'completed') throw new Error(job.error || 'Task parsing failed')
       const turn = job.result
       const data = { turn }
+      if (turn?.schedule_decision) {
+        setActiveEvent(null)
+        setPreviewTasks([])
+        setRightOpen(true)
+        await refetchEvents(currentStart, currentEnd)
+        window.dispatchEvent(new CustomEvent('humanos:plan-revision', { detail: { source: 'async_chat_task_import' } }))
+        return data
+      }
       // If AI returned tasks, show the first one in the right inspector
       const tasks = data?.turn?.tasks
       if (tasks && tasks.length > 0) {

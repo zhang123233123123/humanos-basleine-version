@@ -1056,7 +1056,27 @@ class Store:
             conn.execute("UPDATE background_jobs SET status='running',started_at=?,updated_at=?,error=NULL WHERE id=?", (timestamp, timestamp, job_id))
         try:
             payload = from_json(row["payload_json"], {})
-            result = self.chat_turn(row["user_id"], payload) if row["kind"] == "chat_parse" else self.decide_schedule(row["user_id"], payload)
+            if row["kind"] == "chat_parse":
+                result = self.chat_turn(row["user_id"], payload)
+                previews = [task for task in (result.get("tasks") or []) if isinstance(task, dict) and task.get("is_preview")]
+                if previews and payload.get("assistant_mode") != "calendar_advisor":
+                    persisted = []
+                    for index, task in enumerate(previews):
+                        persisted.append(self.create_task(row["user_id"], {
+                            **task,
+                            "request_id": f"{job_id}:task:{index}",
+                            "status": "queued",
+                        }))
+                    decision = self.decide_schedule(row["user_id"], {
+                        "source": "async_chat_task_import",
+                        "request_id": f"{job_id}:schedule",
+                        "client_now": payload.get("current_time"),
+                    })
+                    result["tasks"] = persisted
+                    result["schedule_decision"] = decision
+                    result["reply"] = f"I saved {len(persisted)} tasks and generated a calendar draft. Review the draft once, then confirm it to publish the schedule."
+            else:
+                result = self.decide_schedule(row["user_id"], payload)
             completed = now_ms()
             with self.connect() as conn:
                 conn.execute("UPDATE background_jobs SET status='completed',result_json=?,completed_at=?,updated_at=? WHERE id=?", (as_json(result), completed, completed, job_id))
@@ -3702,7 +3722,7 @@ class Store:
                     (as_json(final_snapshot), final_hash, as_json(canonical_diff), timestamp, timestamp, episode_id, user_id),
                 )
             conn.execute(
-                "UPDATE plans SET plan_status='superseded',updated_at=? WHERE user_id=? AND week_id=? AND id<>? AND plan_status IN ('confirmed','needs_update')",
+                "UPDATE plans SET plan_status='superseded',updated_at=? WHERE user_id=? AND week_id=? AND id<>? AND plan_status IN ('confirmed','needs_update','proposed')",
                 (timestamp,user_id,week_id,plan_id),
             )
             # A confirmed revision is the single source of future calendar
