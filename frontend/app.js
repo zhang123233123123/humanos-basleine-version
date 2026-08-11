@@ -353,6 +353,88 @@ let focusCompanionTaskId = null;
 const notifiedReadySessions = new Set();
 let weeklyTaskRowCounter = 0;
 let structuredContextRowCounter = 0;
+let sessionPetDragMoved = false;
+let sessionPetSuppressClick = false;
+
+const SESSION_PET_POSITION_KEY = "humanosSyy7SessionPetPosition";
+
+function placeSessionPet(left, top, persist = false) {
+  if (!sessionPet || sessionPet.classList.contains("hidden")) return;
+  const rect = sessionPet.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const margin = 8;
+  const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+  const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+  const safeLeft = Math.min(maxLeft, Math.max(margin, Number(left) || margin));
+  const safeTop = Math.min(maxTop, Math.max(margin, Number(top) || margin));
+  sessionPet.style.left = `${safeLeft}px`;
+  sessionPet.style.top = `${safeTop}px`;
+  sessionPet.style.right = "auto";
+  sessionPet.style.bottom = "auto";
+  if (persist) {
+    const xRange = Math.max(1, window.innerWidth - rect.width - margin * 2);
+    const yRange = Math.max(1, window.innerHeight - rect.height - margin * 2);
+    localStorage.setItem(SESSION_PET_POSITION_KEY, JSON.stringify({ x: Math.max(0, Math.min(1, (safeLeft - margin) / xRange)), y: Math.max(0, Math.min(1, (safeTop - margin) / yRange)) }));
+  }
+}
+
+function restoreSessionPetPosition() {
+  if (!sessionPet || sessionPet.classList.contains("hidden")) return;
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(SESSION_PET_POSITION_KEY) || "null"); }
+  catch { saved = null; }
+  if (!saved || !Number.isFinite(Number(saved.x)) || !Number.isFinite(Number(saved.y))) return;
+  const rect = sessionPet.getBoundingClientRect();
+  const margin = 8;
+  placeSessionPet(margin + Number(saved.x) * Math.max(1, window.innerWidth - rect.width - margin * 2), margin + Number(saved.y) * Math.max(1, window.innerHeight - rect.height - margin * 2));
+}
+
+function enableSessionPetDragging() {
+  if (!sessionPet) return;
+  let drag = null;
+  sessionPet.addEventListener("pointerdown", (event) => {
+    if (event.button !== undefined && event.button !== 0) return;
+    if (event.target.closest("[data-pet-action]")) return;
+    const rect = sessionPet.getBoundingClientRect();
+    drag = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, left: rect.left, top: rect.top };
+    sessionPetDragMoved = false;
+    sessionPet.classList.add("pet-dragging");
+    sessionPet.setPointerCapture?.(event.pointerId);
+  });
+  sessionPet.addEventListener("pointermove", (event) => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (Math.hypot(dx, dy) > 5) sessionPetDragMoved = true;
+    if (!sessionPetDragMoved) return;
+    event.preventDefault();
+    placeSessionPet(drag.left + dx, drag.top + dy);
+  });
+  const finishDrag = (event) => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (sessionPetDragMoved) {
+      const rect = sessionPet.getBoundingClientRect();
+      placeSessionPet(rect.left, rect.top, true);
+      sessionPetSuppressClick = true;
+      window.setTimeout(() => { sessionPetSuppressClick = false; sessionPetDragMoved = false; }, 250);
+    }
+    sessionPet.classList.remove("pet-dragging");
+    sessionPet.releasePointerCapture?.(event.pointerId);
+    drag = null;
+  };
+  sessionPet.addEventListener("pointerup", finishDrag);
+  sessionPet.addEventListener("pointercancel", finishDrag);
+  sessionPet.addEventListener("keydown", (event) => {
+    if (!event.key.startsWith("Arrow")) return;
+    event.preventDefault();
+    const rect = sessionPet.getBoundingClientRect();
+    const step = event.shiftKey ? 32 : 12;
+    const dx = event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0;
+    const dy = event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0;
+    placeSessionPet(rect.left + dx, rect.top + dy, true);
+  });
+  window.addEventListener("resize", () => window.requestAnimationFrame(restoreSessionPetPosition));
+}
 
 // Keep the existing panels and their event wiring, but place them in the new
 // three-column workspace: assistant / calendar / current planning state.
@@ -4658,7 +4740,8 @@ function renderFocusExperience() {
     sessionPet.dataset.petMode = showIdlePet ? "idle" : "";
     if (showIdlePet) {
       sessionPetTask.textContent = "Ask HumanOS";
-      sessionPetStatus.textContent = "Ready when you are";
+      sessionPetStatus.textContent = "Drag me · Ready when you are";
+      window.requestAnimationFrame(restoreSessionPetPosition);
     }
     return;
   }
@@ -4677,6 +4760,7 @@ function renderFocusExperience() {
   const shouldShowFocus = focusWorkspaceDismissedSessionId !== sessionKey;
   focusScreen.classList.toggle("hidden", !shouldShowFocus);
   sessionPet.classList.toggle("hidden", shouldShowFocus);
+  if (!shouldShowFocus) window.requestAnimationFrame(restoreSessionPetPosition);
 
   const activeSeconds = executionActiveSeconds(session);
   const plannedSeconds = Math.max(60, Number(session.planned_work_minutes || 0) * 60);
@@ -7040,7 +7124,14 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) document.title = "HumanOS";
   renderFocusExperience();
 });
+enableSessionPetDragging();
 sessionPet?.addEventListener("click", (event) => {
+  if (sessionPetSuppressClick || sessionPetDragMoved) {
+    event.preventDefault();
+    sessionPetSuppressClick = false;
+    sessionPetDragMoved = false;
+    return;
+  }
   if (event.target.closest("[data-pet-action]")) return;
   if (sessionPet.dataset.petMode === "idle") {
     previousRightRailMode = rightRailMode === "agent" ? (previousRightRailMode || "plan") : rightRailMode;

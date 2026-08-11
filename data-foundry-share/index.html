@@ -1183,8 +1183,11 @@ dialog::backdrop { background: rgba(29, 42, 58, .28); backdrop-filter: blur(7px)
 .focus-next-item time { color: var(--blue); font-size: 10px; }
 .focus-next-item strong { font-size: 12px; }
 
-.session-pet { position: fixed; z-index: 1800; right: 18px; bottom: 18px; display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; gap: 10px; width: min(300px,calc(100vw - 36px)); padding: 12px 14px; border: 1px solid rgba(30,112,100,.25); border-radius: 20px; color: var(--ink); background: rgba(255,255,255,.94); box-shadow: 0 18px 46px rgba(21,55,68,.2); text-align: left; }
+.session-pet { position: fixed; z-index: 1800; right: 18px; bottom: 92px; display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; gap: 10px; width: min(300px,calc(100vw - 36px)); padding: 12px 14px; border: 1px solid rgba(30,112,100,.25); border-radius: 20px; color: var(--ink); background: rgba(255,255,255,.94); box-shadow: 0 18px 46px rgba(21,55,68,.2); text-align: left; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
 .session-pet.hidden { display: none; }
+.session-pet.pet-dragging { cursor: grabbing; box-shadow: 0 22px 54px rgba(21,55,68,.28); transition: none; }
+.session-pet.pet-dragging .pet-face { animation: none !important; }
+.session-pet:focus-visible { outline: 3px solid rgba(42,126,207,.34); outline-offset: 3px; }
 .pet-face { position: relative; display: block; width: 54px; height: 58px; flex: 0 0 54px; filter: drop-shadow(0 7px 8px rgba(20,55,80,.22)); transform-origin: 50% 100%; }
 .pet-antenna { position: absolute; z-index: 1; left: 26px; top: 0; width: 3px; height: 10px; border-radius: 4px; background: #18314d; }
 .pet-antenna::before { content: ""; position: absolute; left: -3px; top: -3px; width: 9px; height: 9px; border: 2px solid #fff; border-radius: 50%; background: #20ad9a; box-shadow: 0 0 0 1px #18314d; }
@@ -1736,7 +1739,7 @@ dialog::backdrop { background: rgba(29, 42, 58, .28); backdrop-filter: blur(7px)
     </div>
   </section>
 
-  <button class="session-pet hidden" id="sessionPet" type="button" aria-label="Return to active focus session">
+  <button class="session-pet hidden" id="sessionPet" type="button" aria-label="Open HumanOS assistant. Drag to move." title="Drag to move · Click to open HumanOS">
     <span class="pet-face" aria-hidden="true"><span class="pet-antenna"></span><span class="pet-head"><i></i><i></i><b></b></span><span class="pet-body"><i></i></span></span><span><strong id="sessionPetTask">Ask HumanOS</strong><small id="sessionPetStatus">Ready when you are</small></span>
     <span class="pet-quick-actions"><i data-pet-action="break">Break</i><i data-pet-action="switch">Switch</i><i data-pet-action="finish">Finish</i></span>
   </button>
@@ -2384,6 +2387,88 @@ let focusCompanionTaskId = null;
 const notifiedReadySessions = new Set();
 let weeklyTaskRowCounter = 0;
 let structuredContextRowCounter = 0;
+let sessionPetDragMoved = false;
+let sessionPetSuppressClick = false;
+
+const SESSION_PET_POSITION_KEY = "humanosSyy7SessionPetPosition";
+
+function placeSessionPet(left, top, persist = false) {
+  if (!sessionPet || sessionPet.classList.contains("hidden")) return;
+  const rect = sessionPet.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const margin = 8;
+  const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+  const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+  const safeLeft = Math.min(maxLeft, Math.max(margin, Number(left) || margin));
+  const safeTop = Math.min(maxTop, Math.max(margin, Number(top) || margin));
+  sessionPet.style.left = `${safeLeft}px`;
+  sessionPet.style.top = `${safeTop}px`;
+  sessionPet.style.right = "auto";
+  sessionPet.style.bottom = "auto";
+  if (persist) {
+    const xRange = Math.max(1, window.innerWidth - rect.width - margin * 2);
+    const yRange = Math.max(1, window.innerHeight - rect.height - margin * 2);
+    localStorage.setItem(SESSION_PET_POSITION_KEY, JSON.stringify({ x: Math.max(0, Math.min(1, (safeLeft - margin) / xRange)), y: Math.max(0, Math.min(1, (safeTop - margin) / yRange)) }));
+  }
+}
+
+function restoreSessionPetPosition() {
+  if (!sessionPet || sessionPet.classList.contains("hidden")) return;
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(SESSION_PET_POSITION_KEY) || "null"); }
+  catch { saved = null; }
+  if (!saved || !Number.isFinite(Number(saved.x)) || !Number.isFinite(Number(saved.y))) return;
+  const rect = sessionPet.getBoundingClientRect();
+  const margin = 8;
+  placeSessionPet(margin + Number(saved.x) * Math.max(1, window.innerWidth - rect.width - margin * 2), margin + Number(saved.y) * Math.max(1, window.innerHeight - rect.height - margin * 2));
+}
+
+function enableSessionPetDragging() {
+  if (!sessionPet) return;
+  let drag = null;
+  sessionPet.addEventListener("pointerdown", (event) => {
+    if (event.button !== undefined && event.button !== 0) return;
+    if (event.target.closest("[data-pet-action]")) return;
+    const rect = sessionPet.getBoundingClientRect();
+    drag = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, left: rect.left, top: rect.top };
+    sessionPetDragMoved = false;
+    sessionPet.classList.add("pet-dragging");
+    sessionPet.setPointerCapture?.(event.pointerId);
+  });
+  sessionPet.addEventListener("pointermove", (event) => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (Math.hypot(dx, dy) > 5) sessionPetDragMoved = true;
+    if (!sessionPetDragMoved) return;
+    event.preventDefault();
+    placeSessionPet(drag.left + dx, drag.top + dy);
+  });
+  const finishDrag = (event) => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (sessionPetDragMoved) {
+      const rect = sessionPet.getBoundingClientRect();
+      placeSessionPet(rect.left, rect.top, true);
+      sessionPetSuppressClick = true;
+      window.setTimeout(() => { sessionPetSuppressClick = false; sessionPetDragMoved = false; }, 250);
+    }
+    sessionPet.classList.remove("pet-dragging");
+    sessionPet.releasePointerCapture?.(event.pointerId);
+    drag = null;
+  };
+  sessionPet.addEventListener("pointerup", finishDrag);
+  sessionPet.addEventListener("pointercancel", finishDrag);
+  sessionPet.addEventListener("keydown", (event) => {
+    if (!event.key.startsWith("Arrow")) return;
+    event.preventDefault();
+    const rect = sessionPet.getBoundingClientRect();
+    const step = event.shiftKey ? 32 : 12;
+    const dx = event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0;
+    const dy = event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0;
+    placeSessionPet(rect.left + dx, rect.top + dy, true);
+  });
+  window.addEventListener("resize", () => window.requestAnimationFrame(restoreSessionPetPosition));
+}
 
 // Keep the existing panels and their event wiring, but place them in the new
 // three-column workspace: assistant / calendar / current planning state.
@@ -6689,7 +6774,8 @@ function renderFocusExperience() {
     sessionPet.dataset.petMode = showIdlePet ? "idle" : "";
     if (showIdlePet) {
       sessionPetTask.textContent = "Ask HumanOS";
-      sessionPetStatus.textContent = "Ready when you are";
+      sessionPetStatus.textContent = "Drag me · Ready when you are";
+      window.requestAnimationFrame(restoreSessionPetPosition);
     }
     return;
   }
@@ -6708,6 +6794,7 @@ function renderFocusExperience() {
   const shouldShowFocus = focusWorkspaceDismissedSessionId !== sessionKey;
   focusScreen.classList.toggle("hidden", !shouldShowFocus);
   sessionPet.classList.toggle("hidden", shouldShowFocus);
+  if (!shouldShowFocus) window.requestAnimationFrame(restoreSessionPetPosition);
 
   const activeSeconds = executionActiveSeconds(session);
   const plannedSeconds = Math.max(60, Number(session.planned_work_minutes || 0) * 60);
@@ -9071,7 +9158,14 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) document.title = "HumanOS";
   renderFocusExperience();
 });
+enableSessionPetDragging();
 sessionPet?.addEventListener("click", (event) => {
+  if (sessionPetSuppressClick || sessionPetDragMoved) {
+    event.preventDefault();
+    sessionPetSuppressClick = false;
+    sessionPetDragMoved = false;
+    return;
+  }
   if (event.target.closest("[data-pet-action]")) return;
   if (sessionPet.dataset.petMode === "idle") {
     previousRightRailMode = rightRailMode === "agent" ? (previousRightRailMode || "plan") : rightRailMode;
