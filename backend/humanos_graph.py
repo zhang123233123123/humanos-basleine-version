@@ -135,10 +135,28 @@ def absolute_date_from_due(due: str | None, reference: datetime) -> datetime | N
     text = str(due or "")
     match = re.search(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})", text)
     if match:
-        return reference.replace(year=int(match.group(1)), month=int(match.group(2)), day=int(match.group(3)))
+        try:
+            return reference.replace(year=int(match.group(1)), month=int(match.group(2)), day=int(match.group(3)))
+        except ValueError:
+            return None
+    # Compact onboarding input such as ``15/21:00`` means day 15 at 21:00,
+    # not month 15/day 21. Time parsing is handled separately.
+    match = re.search(r"(?<!\d)(\d{1,2})[/-](\d{1,2})[:：]\d{2}(?!\d)", text)
+    if match:
+        try:
+            candidate = reference.replace(day=int(match.group(1)))
+            if candidate.date() < reference.date() - timedelta(days=7):
+                next_month = (candidate.replace(day=1) + timedelta(days=32)).replace(day=1)
+                candidate = next_month.replace(day=int(match.group(1)))
+            return candidate
+        except ValueError:
+            return None
     match = re.search(r"(?<!\d)(\d{1,2})[/-](\d{1,2})(?!\d)", text) or re.search(r"(\d{1,2})月(\d{1,2})日?", text)
     if match:
-        candidate = reference.replace(month=int(match.group(1)), day=int(match.group(2)))
+        try:
+            candidate = reference.replace(month=int(match.group(1)), day=int(match.group(2)))
+        except ValueError:
+            return None
         if candidate.date() < reference.date() - timedelta(days=7):
             candidate = candidate.replace(year=candidate.year + 1)
         return candidate

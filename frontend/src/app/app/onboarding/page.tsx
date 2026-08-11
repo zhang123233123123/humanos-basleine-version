@@ -126,6 +126,7 @@ export default function OnboardingPage() {
             priority: task.priority,
             expected_difficulty: Number(task.expected_difficulty),
             dependency: task.dependency.trim(),
+            request_id: task.id,
             status: 'queued',
           })),
         }),
@@ -139,7 +140,10 @@ export default function OnboardingPage() {
       if (!stateResponse.ok) throw new Error(t('onboarding.stateFailed'))
 
       const planResponse = await fetch('/api/schedules/decide', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: 'onboarding' }) })
-      if (!planResponse.ok) throw new Error(t('onboarding.planFailed'))
+      if (!planResponse.ok) {
+        const error = await planResponse.json().catch(() => ({})) as { message?: string; error?: string }
+        throw new Error(error.message || error.error || t('onboarding.planFailed'))
+      }
       localStorage.removeItem(STORAGE_KEY)
       toast.success(t('onboarding.planReady'))
       router.push('/app/plan')

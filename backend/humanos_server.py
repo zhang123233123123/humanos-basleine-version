@@ -2951,6 +2951,10 @@ class Store:
         with self.connect() as conn:
             rows = conn.execute("SELECT * FROM tasks WHERE user_id=?", (user_id,)).fetchall()
             existing = {str(row["id"]): self.task_row(row) for row in rows}
+            existing_by_request_id = {
+                str(row["create_request_id"]): str(row["id"])
+                for row in rows if row["create_request_id"]
+            }
             old_weekly = dict(current_profile.get("weekly_context") or {})
             from app.domain.profile import sanitize_weekly_context
 
@@ -2969,6 +2973,9 @@ class Store:
 
             for draft in submitted:
                 task_id = str(draft.get("id") or "").strip()
+                request_id = str(draft.get("request_id") or "").strip()
+                if not task_id and request_id:
+                    task_id = existing_by_request_id.get(request_id, "")
                 if task_id:
                     if task_id not in existing:
                         raise ValueError(f"Unknown task_id: {task_id}")
@@ -3070,7 +3077,7 @@ class Store:
                         as_json(None),as_json(draft.get("checkpoints") or []),as_json(demand),as_json(execution),
                         as_json(draft.get("resource_modality") or []),int(bool(draft.get("parallelizable"))),
                         draft.get("expected_difficulty") or demand.get("expected_difficulty"),week_id,0,None,
-                        str(draft.get("request_id") or "").strip() or None,timestamp,timestamp,
+                        request_id or None,timestamp,timestamp,
                     ),
                 )
                 created_ids.append(task_id)
