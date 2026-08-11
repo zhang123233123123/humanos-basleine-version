@@ -1713,6 +1713,12 @@ class Store:
         expected_count = self.estimated_task_count(clean)
         profile = self.ensure_profile(user_id)
         timezone_name = str(profile.get("timezone") or "Asia/Shanghai")
+        prefer_local_parser = self.looks_like_compact_multi_task_list(clean) or bool(self.english_task_segments(clean))
+        # Numbered and compact lists already contain deterministic boundaries.
+        # Parse them locally before invoking an external model so a provider
+        # timeout cannot block the task-confirmation workflow.
+        if prefer_local_parser:
+            return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
         typed_tasks = parse_tasks_with_agent(
             clean,
             current_time=self.user_clock_now(user_id, timezone_name).isoformat(),
@@ -1735,11 +1741,6 @@ class Store:
                 shared_clock = format_clock_hour(shared_hour) if shared_hour is not None else shared_time.group(1)
                 expanded = "，".join(f"{part} {shared_clock}" for part in dated_clauses)
                 return self.local_parse_tasks_from_text(user_id, expanded, create_tasks=create_tasks)
-        prefer_local_parser = self.looks_like_compact_multi_task_list(clean) or bool(self.english_task_segments(clean))
-        # Numbered/compact lists have deterministic per-line parsing. Do not
-        # let a model copy the first item's facts across the entire batch.
-        if prefer_local_parser:
-            return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
         if typed_tasks:
             llm_result = {"tasks": typed_tasks}
             parser_name = "pydantic_ai"
@@ -2112,9 +2113,9 @@ class Store:
             raise ValueError("no task parsed")
         return tasks[0]
 
-    def extract_behavior_features(self, user_id: str, text: str, chat_context: dict | None = None) -> dict:
+    def extract_behavior_features(self, user_id: str, text: str, chat_context: dict | None = None, local_only: bool = False) -> dict:
         clean = text.strip()
-        llm_result = chat_completion(behavior_feature_messages(clean, chat_context))
+        llm_result = None if local_only else chat_completion(behavior_feature_messages(clean, chat_context))
         if not isinstance(llm_result, dict):
             blockers = []
             if any(word in clean for word in ["不知道", "不清楚", "模糊", "从哪"]):
@@ -2375,7 +2376,7 @@ class Store:
             return self.calendar_advisor_turn(user_id, text, payload)
         chat_context = self.build_chat_context(user_id, text)
         chat_context["client_context"] = payload.get("client_context") or {}
-        features = self.extract_behavior_features(user_id, text, chat_context)
+        features = self.extract_behavior_features(user_id, text, chat_context, local_only=True)
         intent = features.get("intent", "other")
         response = {
             "intent": intent,
@@ -2712,14 +2713,10 @@ class Store:
         ]
         latest_chain = self.latest_task_turn_tasks(user_id)
         recent_tasks = latest_chain or active_tasks[-5:]
-        query = " ".join(
-            [
-                text,
-                " ".join(task.get("title", "") for task in recent_tasks),
-                " ".join(turn.get("user_text", "") for turn in turns[-3:]),
-            ]
-        )
-        memories = self.search_memories(user_id, query, top_k=5)
+        # Context construction is on the interactive chat path. Semantic
+        # memory retrieval may call an external embedding service, so it must
+        # not delay task parsing or turn a provider timeout into a 502.
+        memories = []
         context = {
             "recent_turns": [
                 {
