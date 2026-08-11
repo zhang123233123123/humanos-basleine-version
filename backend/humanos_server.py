@@ -2778,6 +2778,13 @@ class Store:
         ]
         latest_chain = self.latest_task_turn_tasks(user_id)
         recent_tasks = latest_chain or active_tasks[-5:]
+        query = " ".join(
+            [
+                text,
+                " ".join(task.get("title", "") for task in recent_tasks),
+                " ".join(turn.get("user_text", "") for turn in turns[-3:]),
+            ]
+        )
         memories = self.search_memories(user_id, query, top_k=5)
         context = {
             "recent_turns": [
