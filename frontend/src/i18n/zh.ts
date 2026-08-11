@@ -184,7 +184,7 @@ const zh = {
     planningGapLabel: '最近一次"有计划但没有推进"的情况',
     planningGapPlaceholder: '例如：明明写在日历里，但到时间后不知道从哪里开始。',
     fixedTime: '固定时间', routineTime: '常规活动', flexibleTime: '灵活活动', activityName: '活动名称', addActivity: '添加已占用活动', bufferLabel: '保留缓冲时间', bufferHint: '不要把所有可用窗口全部排满。',
-    tasksLabel: '本周任务', addTask: '添加任务', taskName: '任务名称', deadline: '截止日期/时间', dependency: '依赖（可选）',
+    tasksLabel: '本周任务', tasksHint: '保存后会立即生成候选时间块，并以虚线显示在日历上。', addTask: '添加任务', taskNumber: '任务 {number}', taskName: '任务名称', deadline: '截止日期与时间', totalWork: '总工作量（分钟）', totalWorkHint: '例如 120 表示共需 120 分钟，系统会按专注时长拆分。', priority: '优先级', difficulty: '预计难度（1–10）', difficultyHint: '1 表示非常轻松，10 表示认知负荷非常高。', dependency: '依赖（可选）',
     focus: '当前专注', energy: '当前精力', stress: '当前压力', mood: '当前心情',
   },
   taskDialog: {

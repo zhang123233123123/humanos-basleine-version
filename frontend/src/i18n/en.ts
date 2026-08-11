@@ -172,7 +172,7 @@ const en = {
     planningGapLabel: 'A recent "planned but not executed" situation',
     planningGapPlaceholder: 'e.g. Scheduled in calendar, but didn\'t know where to start.',
     fixedTime: 'Fixed time', routineTime: 'Routine window', flexibleTime: 'Flexible activity', activityName: 'Activity name', addActivity: 'Add occupied activity', bufferLabel: 'Keep buffer time', bufferHint: 'Avoid filling every available window.',
-    tasksLabel: 'Tasks this week', addTask: 'Add task', taskName: 'Task name', deadline: 'Deadline/date', dependency: 'Dependency (optional)', focus: 'Current focus', energy: 'Current energy', stress: 'Current stress', mood: 'Current mood',
+    tasksLabel: 'Tasks this week', tasksHint: 'Saving creates draft time blocks immediately, shown with dashed borders on the calendar.', addTask: 'Add task', taskNumber: 'Task {number}', taskName: 'Task name', deadline: 'Deadline date and time', totalWork: 'Total work (minutes)', totalWorkHint: 'For example, 120 means 120 minutes in total; HumanOS splits it into focus sessions.', priority: 'Priority', difficulty: 'Expected difficulty (1–10)', difficultyHint: '1 means very easy; 10 means very high cognitive demand.', dependency: 'Dependency (optional)', focus: 'Current focus', energy: 'Current energy', stress: 'Current stress', mood: 'Current mood',
   },
   taskDialog: {
     addTask: 'Add Task',

@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { useTranslation } from '@/i18n/LanguageProvider'
+import { useEvents } from '@/hooks/use-events'
 
 type ContextKind = 'fixed_event' | 'recurring_routine' | 'flexible_activity'
 type ContextItem = { id: string; type: ContextKind; title: string; day: string; start: string; end: string }
@@ -145,6 +146,9 @@ export default function OnboardingPage() {
         throw new Error(error.message || error.error || t('onboarding.planFailed'))
       }
       localStorage.removeItem(STORAGE_KEY)
+      // Force the workspace to load the draft created by this onboarding run.
+      useEvents.getState().setEvents([])
+      useEvents.getState().setCachedRanges([])
       toast.success(t('onboarding.planReady'))
       router.replace('/app')
     } catch (error) { toast.error(error instanceof Error ? error.message : t('onboarding.saveFailed')) }
@@ -188,8 +192,16 @@ export default function OnboardingPage() {
 
         {step === 3 && <div className="mt-7 grid gap-6">
           <Field label={t('onboarding.goalLabel')}><textarea className="min-h-20 w-full rounded-xl border bg-background p-3 text-sm" value={weeklyGoal} onChange={(e) => setWeeklyGoal(e.target.value)} /></Field>
-          <div className="space-y-3"><div className="flex items-center justify-between"><h3 className="font-medium">{t('onboarding.tasksLabel')}</h3><Button variant="outline" size="sm" onClick={() => setTasks([...tasks, initialTask()])}><Plus className="mr-1 h-4 w-4" />{t('onboarding.addTask')}</Button></div>{tasks.map((task) => <div key={task.id} className="grid gap-2 rounded-xl border bg-[#fafaf6] p-3 md:grid-cols-[1.4fr_1fr_100px_110px_90px_1fr_40px]">
-            <Input value={task.title} onChange={(e) => patchTask(task.id, { title: e.target.value })} placeholder={t('onboarding.taskName')} /><Input value={task.due} onChange={(e) => patchTask(task.id, { due: e.target.value })} placeholder={t('onboarding.deadline')} /><Input type="number" min="15" step="15" value={task.duration} onChange={(e) => patchTask(task.id, { duration: Number(e.target.value) })} /><select className="rounded-md border bg-white px-2 text-sm" value={task.priority} onChange={(e) => patchTask(task.id, { priority: e.target.value })}><option value="high">{t('taskDialog.priorityHigh')}</option><option value="medium">{t('taskDialog.priorityMedium')}</option><option value="low">{t('taskDialog.priorityLow')}</option></select><Input type="number" min="1" max="10" value={task.expected_difficulty} onChange={(e) => patchTask(task.id, { expected_difficulty: Number(e.target.value) })} /><Input value={task.dependency} onChange={(e) => patchTask(task.id, { dependency: e.target.value })} placeholder={t('onboarding.dependency')} /><Button size="icon" variant="ghost" disabled={tasks.length === 1} onClick={() => setTasks((items) => items.filter((entry) => entry.id !== task.id))}><Trash2 className="h-4 w-4" /></Button>
+          <div className="space-y-3"><div className="flex items-center justify-between"><div><h3 className="font-medium">{t('onboarding.tasksLabel')}</h3><p className="mt-1 text-xs text-muted-foreground">{t('onboarding.tasksHint')}</p></div><Button variant="outline" size="sm" onClick={() => setTasks([...tasks, initialTask()])}><Plus className="mr-1 h-4 w-4" />{t('onboarding.addTask')}</Button></div>{tasks.map((task, index) => <div key={task.id} className="rounded-2xl border bg-[#fafaf6] p-4">
+            <div className="mb-3 flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('onboarding.taskNumber').replace('{number}', String(index + 1))}</span><Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" disabled={tasks.length === 1} onClick={() => setTasks((items) => items.filter((entry) => entry.id !== task.id))}><Trash2 className="h-4 w-4" /></Button></div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label={t('onboarding.taskName')}><Input value={task.title} onChange={(e) => patchTask(task.id, { title: e.target.value })} placeholder={t('onboarding.taskName')} /></Field>
+              <Field label={t('onboarding.deadline')}><Input type="datetime-local" value={task.due} onChange={(e) => patchTask(task.id, { due: e.target.value })} /></Field>
+              <Field label={t('onboarding.totalWork')}><div className="w-full"><Input type="number" min="15" step="15" value={task.duration} onChange={(e) => patchTask(task.id, { duration: Number(e.target.value) })} /><p className="mt-1 text-xs text-muted-foreground">{t('onboarding.totalWorkHint')}</p></div></Field>
+              <Field label={t('onboarding.priority')}><select className="h-10 w-full rounded-md border bg-white px-3 text-sm" value={task.priority} onChange={(e) => patchTask(task.id, { priority: e.target.value })}><option value="high">{t('taskDialog.priorityHigh')}</option><option value="medium">{t('taskDialog.priorityMedium')}</option><option value="low">{t('taskDialog.priorityLow')}</option></select></Field>
+              <Field label={t('onboarding.difficulty')}><div className="w-full"><Input type="number" min="1" max="10" value={task.expected_difficulty} onChange={(e) => patchTask(task.id, { expected_difficulty: Number(e.target.value) })} /><p className="mt-1 text-xs text-muted-foreground">{t('onboarding.difficultyHint')}</p></div></Field>
+              <Field label={t('onboarding.dependency')}><Input value={task.dependency} onChange={(e) => patchTask(task.id, { dependency: e.target.value })} placeholder={t('onboarding.dependency')} /></Field>
+            </div>
           </div>)}</div>
           <div className="grid gap-4 rounded-xl border p-4 md:grid-cols-4">{(['focus','energy','stress'] as const).map((key) => <Field key={key} label={t(`onboarding.${key}`)}><input type="range" min="1" max="7" value={momentary[key]} onChange={(e) => setMomentary({ ...momentary, [key]: Number(e.target.value) })} className="w-full" /><span className="text-sm">{momentary[key]}/7</span></Field>)}<Field label={t('onboarding.mood')}><Input value={momentary.mood} onChange={(e) => setMomentary({ ...momentary, mood: e.target.value })} /></Field></div>
         </div>}
