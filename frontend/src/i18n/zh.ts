@@ -209,6 +209,7 @@ const zh = {
     cancel: '取消',
   },
   workspace: {
+    saveAllTaskFacts: '保存全部任务信息', savingTaskFacts: '正在保存任务信息...', saveTaskFacts: '保存任务信息', pendingTaskFacts: '保存前请检查任务信息', completeTaskFacts: '请补充任务名称、预计时长和截止日期。', missingTaskFacts: '仍需补充', difficulty: '难度（1-10）', dependency: '依赖任务', unscheduledTask: '尚未安排时间',
     aiChat: 'AI 对话',
     calendar: '日历',
     tasks: '任务',

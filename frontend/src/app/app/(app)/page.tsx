@@ -397,10 +397,10 @@ function TaskInspectorWrapper() {
             </div>
             <Button
               className="h-9 w-full rounded-xl shadow-sm"
-              onClick={handleConfirmAllPreview}
-              disabled={isConfirmingAll || previewTasks.length === 0}
+              onClick={() => void confirmAllPreview()}
+              disabled={isConfirmingAll || previewTasks.length === 0 || previewTasks.some((task: any) => Array.isArray(task.missingFields) && task.missingFields.length > 0)}
             >
-              {isConfirmingAll ? 'Confirming...' : t('workspace.confirmAll')}
+              {isConfirmingAll ? t('workspace.savingTaskFacts') : t('workspace.saveAllTaskFacts')}
             </Button>
             {proposalError && <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950"><p>{proposalError}</p><Button className="mt-2 w-full" size="sm" variant="outline" onClick={() => void retryScheduleProposal()} disabled={proposalRetrying}>{proposalRetrying ? 'Regenerating...' : 'Regenerate plan'}</Button></div>}
           </div>
@@ -417,7 +417,7 @@ function TaskInspectorWrapper() {
               </div>
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-xs text-muted-foreground">
-                  {formatTime(task.start)} - {formatTime(task.end)}
+                  {task.due || t('workspace.unscheduledTask')}
                 </span>
                 <span className={`text-xs px-1.5 py-0.5 rounded ${priorityColor(task.priority)}`}>
                   {task.priority}
@@ -432,7 +432,7 @@ function TaskInspectorWrapper() {
                     void handleConfirmPreview(task)
                   }}
                 >
-                  {t('workspace.confirmCalendar')}
+                  {t('workspace.saveTaskFacts')}
                 </Button>
                 <Button
                   variant="outline"
@@ -449,21 +449,6 @@ function TaskInspectorWrapper() {
             </li>
           ))}
         </ul>
-        {showBatchReason && (
-          <div className="fixed inset-0 z-[100] grid place-items-center bg-black/40 p-4" onMouseDown={() => setShowBatchReason(false)}>
-            <div className="w-full max-w-md rounded-2xl border bg-background p-5 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
-              <h3 className="text-lg font-semibold">Why did you adjust these tasks?</h3>
-              <p className="mt-1 text-sm text-muted-foreground">This explanation applies only to this batch and will not become a long-term preference automatically.</p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {['Time conflict', 'Energy level', 'Priority changed', 'Availability changed', 'Duration changed'].map((reason) => (
-                  <Button key={reason} type="button" size="sm" variant={batchReason === reason ? 'default' : 'outline'} onClick={() => setBatchReason(reason)}>{reason}</Button>
-                ))}
-              </div>
-              <textarea className="mt-4 min-h-24 w-full rounded-md border bg-background p-3 text-sm" placeholder="Optional explanation" value={batchReason} onChange={(event) => setBatchReason(event.target.value)} />
-              <div className="mt-4 flex justify-end gap-2"><Button variant="outline" onClick={() => setShowBatchReason(false)}>Cancel</Button><Button onClick={() => void confirmAllPreview()} disabled={isConfirmingAll}>{batchReason.trim() ? 'Save reason and confirm all' : 'Skip reason and confirm all'}</Button></div>
-            </div>
-          </div>
-        )}
       </aside>
     )
   }
@@ -674,11 +659,6 @@ function AppContent({
       // If AI returned tasks, show the first one in the right inspector
       const tasks = data?.turn?.tasks
       if (tasks && tasks.length > 0) {
-        const now = new Date()
-        const defaultStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0, 0)
-        const currentEvents = useEvents.getState().events
-        const previewEvents: any[] = []
-
         // Helper: extract valid ISO date from task fields (server already chrono-parsed text)
         const getStart = (t: any): string | null => {
           const v = t.start_time || t.start_at || t.start
@@ -692,38 +672,6 @@ function AppContent({
           const d = new Date(v)
           return isNaN(d.getTime()) ? null : d.toISOString()
         }
-
-        tasks.forEach((task: any, index: number) => {
-          const previewId = 'preview-' + (task.id || `${Date.now()}-${index}`)
-          const previewStart = getStart(task)
-          const previewEnd = getEnd(task)
-
-          if (previewStart) previewEvents.push({
-            id: previewId,
-            title: task.title || `Task ${index + 1}`,
-            start: previewStart || defaultStart.toISOString(),
-            end: previewEnd || new Date(defaultStart.getTime() + 3600000).toISOString(),
-            allDay: task.all_day || false,
-            backgroundColor: 'var(--primary)',
-            borderColor: 'var(--primary)',
-            textColor: 'white',
-            classNames: ['preview-event'],
-            extendedProps: {
-              description: task.context || '',
-              attendees: task.attendees || [],
-              status: task.status || 'pending',
-              priority: task.priority || 'medium',
-              isPreview: true,
-              context: task.context || '',
-              progress: task.progress || '',
-              nextStep: task.next_step || '',
-              openQuestions: task.open_questions || '',
-            },
-          })
-        })
-
-        // Add all preview events to calendar
-        setEvents([...currentEvents, ...previewEvents])
 
         // Build ActiveEvent list for all tasks and show in right inspector
         const allPreviewTasks = tasks.map((task: any, index: number) => {
@@ -749,6 +697,10 @@ function AppContent({
             progress: task.progress || '',
             nextStep: task.next_step || '',
             openQuestions: task.open_questions || '',
+            missingFields: task.missing_fields || [],
+            expectedDifficulty: task.expected_difficulty ?? null,
+            dependency: task.dependency || '',
+            createRequestId: task.create_request_id || `task-import-${task.id || `${Date.now()}-${index}`}`,
           }
         })
         // New AI results must replace any previously selected task detail so

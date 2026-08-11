@@ -36,6 +36,7 @@ function readContextWindow(task: HumanOSTask): Record<string, unknown> {
 
 function normalizePayloadForBackend(body: any): Record<string, unknown> {
   const normalized = { ...body } as Record<string, unknown>
+  if (body.createRequestId && !body.create_request_id) normalized.create_request_id = body.createRequestId
 
   if (body.start !== undefined && body.start_at === undefined) normalized.start_at = toISOString(body.start)
   if (body.start && body.end) {

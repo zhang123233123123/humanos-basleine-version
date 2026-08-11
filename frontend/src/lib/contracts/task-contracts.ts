@@ -59,6 +59,10 @@ export interface HumanOSTask {
   attendees?: string[]
   all_day?: boolean
   is_preview?: boolean
+  missing_fields?: string[]
+  expected_difficulty?: number | null
+  dependency?: string | null
+  create_request_id?: string | null
   created_at?: number | string | null
   updated_at?: number | string | null
   [key: string]: unknown

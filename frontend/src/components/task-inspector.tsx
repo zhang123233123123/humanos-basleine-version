@@ -22,6 +22,10 @@ interface TaskDetail {
   end?: Date | null
   deadlineAt?: string
   due?: string
+  missingFields?: string[]
+  expectedDifficulty?: number | null
+  dependency?: string
+  createRequestId?: string
 }
 
 interface TaskInspectorProps {
@@ -48,6 +52,10 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
   const [progress, setProgress] = useState('')
   const [nextStep, setNextStep] = useState('')
   const [openQuestions, setOpenQuestions] = useState('')
+  const [duration, setDuration] = useState<number | undefined>()
+  const [due, setDue] = useState('')
+  const [expectedDifficulty, setExpectedDifficulty] = useState<number | undefined>()
+  const [dependency, setDependency] = useState('')
 
   const sourceId = task?.id
   const sourceTitle = task?.title || ''
@@ -68,6 +76,10 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
     setProgress(sourceProgress)
     setNextStep(sourceNextStep)
     setOpenQuestions(sourceOpenQuestions)
+    setDuration(task?.duration)
+    setDue(task?.due || task?.deadlineAt || '')
+    setExpectedDifficulty(task?.expectedDifficulty ?? undefined)
+    setDependency(task?.dependency || '')
   }, [sourceId, sourceTitle, sourcePriority, sourceStatus, sourceContext, sourceProgress, sourceNextStep, sourceOpenQuestions])
 
   // Build current editable task object
@@ -82,8 +94,12 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
       progress,
       nextStep,
       openQuestions,
+      duration,
+      due,
+      expectedDifficulty,
+      dependency,
     }
-  }, [task, title, priority, status, context, progress, nextStep, openQuestions])
+  }, [task, title, priority, status, context, progress, nextStep, openQuestions, duration, due, expectedDifficulty, dependency])
 
   if (!task) {
     return (
@@ -124,6 +140,10 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
 
   const handleConfirm = async () => {
     if (!onConfirm) return
+    if (!title.trim() || !duration || duration <= 0 || !due.trim()) {
+      toast(t('workspace.completeTaskFacts'))
+      return
+    }
     setConfirming(true)
     try {
       await onConfirm(buildTask())
@@ -147,8 +167,8 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
           {isExistingTask ? t('workspace.editTitle') : t('workspace.taskDetail')}
         </h2>
         <div className="mt-2 space-y-2">
-          {/* Title - editable for existing tasks, read-only for preview */}
-          {isExistingTask ? (
+          {/* Task facts remain editable until the preview is persisted. */}
+          {isExistingTask || task.isPreview ? (
             <input
               className={`${inputClass} font-medium`}
               value={title}
@@ -157,6 +177,15 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
           ) : (
             <h3 className="font-medium text-sm">{task.title}</h3>
           )}
+
+          {task.isPreview && <div className="grid grid-cols-2 gap-2">
+            <label><span className={labelClass}>{t('taskDialog.durationLabel')}</span><input className={inputClass} type="number" min="1" value={duration || ''} onChange={(event) => setDuration(Number(event.target.value) || undefined)} /></label>
+            <label><span className={labelClass}>{t('taskDialog.dueLabel')}</span><input className={inputClass} value={due} onChange={(event) => setDue(event.target.value)} /></label>
+            <label><span className={labelClass}>{t('workspace.difficulty')}</span><input className={inputClass} type="number" min="1" max="10" value={expectedDifficulty || ''} onChange={(event) => setExpectedDifficulty(Number(event.target.value) || undefined)} /></label>
+            <label><span className={labelClass}>{t('workspace.dependency')}</span><input className={inputClass} value={dependency} onChange={(event) => setDependency(event.target.value)} /></label>
+          </div>}
+
+          {task.isPreview && task.missingFields && task.missingFields.length > 0 && <div className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900">{t('workspace.missingTaskFacts')}: {task.missingFields.join(', ')}</div>}
 
           {/* Priority selector */}
           <div>
@@ -189,7 +218,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
       {/* Confirm / Reject for preview tasks */}
       {task.isPreview && onConfirm && onReject && (
         <div className="border-b border-border p-3">
-          <p className="text-xs font-semibold mb-2">{t('workspace.pendingSchedule')}</p>
+          <p className="text-xs font-semibold mb-2">{t('workspace.pendingTaskFacts')}</p>
           <div className="flex gap-2">
             <Button
               size="sm"
@@ -198,7 +227,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
               onClick={handleConfirm}
             >
               <Check className="w-3.5 h-3.5 mr-1" />
-              {t('workspace.confirmCalendar')}
+              {t('workspace.saveTaskFacts')}
             </Button>
             <Button
               variant="outline"

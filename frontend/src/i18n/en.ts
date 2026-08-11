@@ -202,6 +202,7 @@ const en = {
     cancel: 'Cancel',
   },
   workspace: {
+    saveAllTaskFacts: 'Save all task details', savingTaskFacts: 'Saving task details...', saveTaskFacts: 'Save task details', pendingTaskFacts: 'Review task details before saving', completeTaskFacts: 'Add a task name, estimated duration, and deadline.', missingTaskFacts: 'Still required', difficulty: 'Difficulty (1-10)', dependency: 'Dependency', unscheduledTask: 'Not scheduled yet',
     aiChat: 'AI Chat',
     calendar: 'Calendar',
     tasks: 'Tasks',

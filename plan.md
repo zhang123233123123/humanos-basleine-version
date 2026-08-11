@@ -163,7 +163,7 @@ fix(auth): unify frontend and backend user identity
 feat(onboarding): implement profile and weekly setup wizard
 ```
 
-## Step 3：统一 Task 输入、AI 解析与事实确认
+## Step 3：统一 Task 输入、AI 解析与事实确认（已完成）
 
 ### 目标
 
