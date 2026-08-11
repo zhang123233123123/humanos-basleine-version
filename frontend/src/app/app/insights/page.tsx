@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { apiRequest } from '@/lib/client/api'
 import type { ResourceEnvelope } from '@/lib/contracts/api-contracts'
-import type { LearnedPattern, MemoryResult, PatternCandidate } from '@/lib/contracts/insights-contracts'
+import type { LearnedPattern, LearningResourceEnvelope, MemoryResult, PatternCandidate } from '@/lib/contracts/insights-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 
@@ -34,10 +34,10 @@ export default function InsightsPage() {
     setLoading(true)
     try {
       const [patternData, profileData] = await Promise.all([
-        apiRequest<{ patterns: PatternCandidate[] }>('/api/patterns/candidates'),
+        apiRequest<LearningResourceEnvelope<{ patterns: PatternCandidate[] }>>('/api/patterns/candidates'),
         apiRequest<ResourceEnvelope<{ profile: { learned_patterns?: LearnedPattern[] } }>>('/api/profile'),
       ])
-      setCandidates(patternData.patterns || [])
+      setCandidates(patternData.data.patterns || [])
       setLearned((profileData.data.profile.learned_patterns || []).filter((pattern) => pattern.user_confirmed))
     } catch (error) {
       toast(error instanceof Error ? error.message : t('insights.loadFailed'))
@@ -54,7 +54,7 @@ export default function InsightsPage() {
     if (candidate.status !== 'candidate' || !candidate.can_suggest_update) return
     setPromoting(candidate.pattern_label)
     try {
-      const result = await apiRequest<{ learned_patterns: LearnedPattern[] }>('/api/patterns/promote', {
+      const result = await apiRequest<LearningResourceEnvelope<{ learned_patterns: LearnedPattern[] }>>('/api/patterns/promote', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           pattern_label: candidate.pattern_label,
@@ -62,7 +62,7 @@ export default function InsightsPage() {
           user_confirmed: true,
         }),
       })
-      setLearned(result.learned_patterns.filter((pattern) => pattern.user_confirmed))
+      setLearned(result.data.learned_patterns.filter((pattern) => pattern.user_confirmed))
       toast(t('insights.patternConfirmed'))
     } catch (error) {
       toast(error instanceof Error ? error.message : t('insights.promoteFailed'))
@@ -76,8 +76,8 @@ export default function InsightsPage() {
     if (!query.trim()) return
     setSearching(true)
     try {
-      const result = await apiRequest<{ memories: MemoryResult[] }>(`/api/memories/search?q=${encodeURIComponent(query.trim())}&top_k=${topK}`)
-      setMemories(result.memories || [])
+      const result = await apiRequest<LearningResourceEnvelope<{ memories: MemoryResult[] }>>(`/api/memories/search?q=${encodeURIComponent(query.trim())}&top_k=${topK}`)
+      setMemories(result.data.memories || [])
       setSearched(true)
     } catch (error) {
       toast(error instanceof Error ? error.message : t('insights.searchFailed'))

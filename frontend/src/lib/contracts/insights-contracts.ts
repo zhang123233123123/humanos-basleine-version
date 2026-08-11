@@ -22,5 +22,19 @@ export interface MemoryResult {
   metadata: Record<string, unknown>
   score: number
   created_at: string | number
+  evidence_role?: 'profile_learning_evidence'
+  plan_write_allowed?: false
 }
 
+export interface LearningResourceEnvelope<T> {
+  data: T
+  resources: Record<string, string>
+  meta: {
+    resource: 'pattern_candidates' | 'learned_pattern' | 'memory_evidence'
+    aggregate_root: 'profile'
+    read_only: boolean
+    plan_write_allowed: false
+    confirmation_required?: boolean
+    active_plan_unchanged?: boolean
+  }
+}

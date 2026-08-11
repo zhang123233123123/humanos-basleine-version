@@ -4369,27 +4369,38 @@ class Store:
             ).fetchall()
         from app.domain.profile import build_pattern_candidates
 
-        return build_pattern_candidates(
+        candidates = build_pattern_candidates(
             [
                 {"metadata": from_json(row["metadata_json"], {}), "created_at": row["created_at"]}
                 for row in rows
             ],
             timezone_name=profile.get("timezone") or "Asia/Shanghai",
         )
+        return [{**item, "evidence_role": "profile_learning_evidence", "user_confirmed": False, "plan_write_allowed": False} for item in candidates]
 
     def promote_pattern(self, user_id: str, payload: dict) -> dict:
         profile = self.ensure_profile(user_id)
         from app.domain.profile import promote_confirmed_pattern
 
+        label = str(payload.get("pattern_label") or "").strip()
+        candidate = next((item for item in self.pattern_candidates(user_id) if item.get("pattern_label") == label), None)
+        if not candidate:
+            raise ValueError("pattern candidate does not exist")
+        if candidate.get("status") != "candidate" or not candidate.get("can_suggest_update"):
+            raise ValueError("pattern candidate has not reached the evidence threshold")
+        if not bool(payload.get("user_confirmed")):
+            raise ValueError("user confirmation is required before promoting a pattern")
+
         profile["learned_patterns"] = promote_confirmed_pattern(
             list(profile.get("learned_patterns") or []),
-            pattern_label=str(payload.get("pattern_label") or ""),
-            evidence_count=int(payload.get("evidence_count") or 1),
-            user_confirmed=bool(payload.get("user_confirmed")),
+            pattern_label=label,
+            evidence_count=int(candidate.get("episode_count") or 0),
+            user_confirmed=True,
             confirmed_at=now_ms(),
         )
         updated = self.upsert_profile(profile)
-        return {"learned_patterns": updated.get("learned_patterns", [])}
+        promoted = next((item for item in updated.get("learned_patterns", []) if item.get("pattern_label") == label), None)
+        return {"learned_patterns": updated.get("learned_patterns", []), "promoted_pattern": promoted, "active_plan_revision": updated.get("active_plan_revision")}
 
     def add_memory(
         self,
@@ -4466,6 +4477,8 @@ class Store:
                     "metadata": metadata,
                     "score": round(score, 4),
                     "created_at": row["created_at"],
+                    "evidence_role": "profile_learning_evidence",
+                    "plan_write_allowed": False,
                 }
             )
         if refreshed:
@@ -6407,14 +6420,15 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/patterns/candidates" and method == "GET":
                 user_id = query.get("user_id", ["demo"])[0]
                 store.ensure_profile(user_id)
-                self.send_json({"patterns": store.pattern_candidates(user_id)})
+                self.send_json({"data": {"patterns": store.pattern_candidates(user_id)}, "resources": {"profile": "/api/profile", "memories": "/api/memories/search"}, "meta": {"resource": "pattern_candidates", "aggregate_root": "profile", "read_only": True, "confirmation_required": True, "plan_write_allowed": False}})
                 return
 
             if path == "/api/patterns/promote" and method == "POST":
                 payload = self.read_json()
                 user_id = payload.get("user_id", "demo")
                 store.ensure_profile(user_id)
-                self.send_json(store.promote_pattern(user_id, payload))
+                result = store.promote_pattern(user_id, payload)
+                self.send_json({"data": result, "resources": {"profile": "/api/profile", "candidates": "/api/patterns/candidates"}, "meta": {"resource": "learned_pattern", "aggregate_root": "profile", "read_only": False, "active_plan_unchanged": True, "plan_write_allowed": False}})
                 return
 
             if path == "/api/schedules/decide" and method == "POST":
@@ -6462,7 +6476,7 @@ class Handler(BaseHTTPRequestHandler):
                 q = query.get("q", [""])[0]
                 top_k = int(query.get("top_k", ["5"])[0])
                 store.ensure_profile(user_id)
-                self.send_json({"memories": store.search_memories(user_id, q, top_k=top_k)})
+                self.send_json({"data": {"memories": store.search_memories(user_id, q, top_k=top_k)}, "resources": {"profile": "/api/profile", "pattern_candidates": "/api/patterns/candidates"}, "meta": {"resource": "memory_evidence", "aggregate_root": "profile", "read_only": True, "plan_write_allowed": False}})
                 return
 
             self.send_json({"error": "not_found", "path": path}, status=404)
