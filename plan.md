@@ -455,11 +455,21 @@ feat(insights): expose user-controlled memory and patterns
 feat(ui): unify navigation localization and responsive layouts
 ```
 
-## Step 13：完整业务回归、迁移与生产发布
+## Step 13：完整业务回归、迁移与生产发布（已完成）
 
 ### 目标
 
 验证整个正式流程在本地和生产环境中使用同一套持久化状态和接口契约。
+
+### 发布记录（2026-08-11）
+
+- 后端：135 项测试通过，22 项按环境条件跳过。
+- 前端：lint 通过，Next.js 生产构建通过。
+- 生产备份：`/root/humanos-backups/20260811-step13-a7fcfe8`。
+- PM2：`humanos-app` 与 `humanos-backend` 均在线。
+- 生产健康：HTTPS 登录页与后端 `/api/health` 返回 200。
+- AI：DeepSeek、PydanticAI、DashScope `text-embedding-v2` 已启用。
+- QA：5 个测试账号均保留 `test` 权限，QA01 登录冒烟通过。
 
 ### 回归场景
 
