@@ -64,7 +64,9 @@ function TaskInspectorWrapper() {
       if (proposal.decision?.unavailable || proposal.decision?.error) {
         throw new Error(proposal.decision.error || 'The scheduling service could not generate a plan preview')
       }
-      router.push('/app/plan?proposal=latest')
+      window.dispatchEvent(new CustomEvent('humanos:plan-revision', {
+        detail: { source },
+      }))
     } catch (error) {
       const message = error instanceof Error ? error.message : 'The scheduling service could not generate a plan preview'
       setProposalError(message)
@@ -841,16 +843,6 @@ function AppContent({
         {/* Right Inspector */}
         {rightOpen && <TaskInspectorWrapper />}
       </div>
-
-      {/* Add Task button — focuses chat input */}
-      <Button
-        className="fixed bottom-6 right-6 rounded-full shadow-lg z-50"
-        size="lg"
-        onClick={triggerChatFocus}
-      >
-        <Plus className="w-5 h-5 mr-1" />
-        {t('workspace.addTask')}
-      </Button>
       {pendingCalendarEdit && (
         <div className="fixed inset-0 z-[100] grid place-items-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl border bg-background p-5 shadow-2xl">

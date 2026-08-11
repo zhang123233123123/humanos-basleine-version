@@ -5,6 +5,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { ReactNode } from 'react'
 import { ModalProvider } from '@/hooks/use-modal'
 import { GlobalAssistant } from '@/components/global-assistant'
+import { DraftPlanEventSync } from '@/components/draft-plan-event-sync'
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
@@ -14,6 +15,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         <div className="relative h-dvh w-full flex flex-col overflow-hidden">
           <AppNavigation />
           <FocusReadyGate />
+          <DraftPlanEventSync />
           <div className="h-full min-h-0 flex-1 overflow-hidden">{children}</div>
           <GlobalAssistant />
         </div>
