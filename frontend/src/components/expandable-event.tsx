@@ -23,6 +23,7 @@ type ExtendedProps = {
   nextStep?: string
   openQuestions?: string
   isPreview?: boolean
+  taskId?: string
 }
 
 export function ExpandableEvent(props: EventContentArg) {
@@ -43,7 +44,7 @@ export function ExpandableEvent(props: EventContentArg) {
 
   const handleDeleteEvent = async () => {
     const eventData = {
-      id: event.id,
+      id: String(event.extendedProps.taskId || event.id),
     }
 
     await apiRequest('/api/tasks', {
@@ -69,7 +70,7 @@ export function ExpandableEvent(props: EventContentArg) {
           transition={{ duration: 0.5 }}
           onClick={() =>
             setActiveEvent({
-              id: event.id,
+              id: String(event.extendedProps.taskId || event.id),
               title: event.title,
               uniqueId,
               allDay: event.allDay,

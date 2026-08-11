@@ -17,7 +17,7 @@ export async function GET(req: Request) {
     const sessions = Array.isArray(executionData?.execution_sessions) ? executionData.execution_sessions : []
     return Response.json({
       data: { events: [...projectCalendarEvents(tasks, sessions, searchParams.get('start'), searchParams.get('end')), ...projectDraftPlanEvents(proposedEnvelope?.data?.plan || proposedEnvelope?.plan || null, tasks, searchParams.get('start'), searchParams.get('end'))] },
-      resources: { tasks: '/api/tasks?view=resource', execution_sessions: '/api/execution-sessions' },
+      resources: { tasks: '/api/tasks?view=resource', execution_sessions: '/api/execution-sessions', active_plan: '/api/plans/active', proposed_plan: '/api/plans/proposed' },
       meta: { resource: 'calendar_events', read_only: true },
     })
   } catch (error) {

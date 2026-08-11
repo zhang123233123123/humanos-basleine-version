@@ -254,7 +254,7 @@ feat(planning): generate and validate weekly draft plans
 feat(workspace): align calendar review and plan confirmation flow
 ```
 
-## Step 6：计划修改、Revision 与 Session 同步
+## Step 6：计划修改、Revision 与 Session 同步（已完成）
 
 ### 目标
 

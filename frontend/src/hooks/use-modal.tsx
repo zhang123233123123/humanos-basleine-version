@@ -30,6 +30,13 @@ type ActiveEvent = {
   duration?: number
   deadlineAt?: string
   due?: string
+  taskId?: string
+  executionSessionId?: string
+  planRevision?: number
+  missingFields?: string[]
+  expectedDifficulty?: number | null
+  dependency?: string
+  createRequestId?: string
 }
 
 type ModalContextType = {

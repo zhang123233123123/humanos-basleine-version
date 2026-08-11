@@ -66,7 +66,7 @@ export function ExpandedEventModal() {
     await apiRequest('/api/tasks', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: activeEvent.id }),
+      body: JSON.stringify({ id: activeEvent.taskId || activeEvent.id }),
     })
     toast(t('event.eventDeleted'))
     setActiveEvent(null)

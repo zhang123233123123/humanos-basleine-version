@@ -89,6 +89,7 @@ export interface HumanOSMapEventInput {
     taskType?: string
     isPreview?: boolean
     planRevision?: number
+    taskId?: string
   }
 }
 

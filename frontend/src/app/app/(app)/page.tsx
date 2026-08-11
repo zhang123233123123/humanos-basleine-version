@@ -354,6 +354,10 @@ function TaskInspectorWrapper() {
           duration: activeEvent.duration,
           deadlineAt: activeEvent.deadlineAt,
           due: activeEvent.due,
+          missingFields: activeEvent.missingFields,
+          expectedDifficulty: activeEvent.expectedDifficulty,
+          dependency: activeEvent.dependency,
+          createRequestId: activeEvent.createRequestId,
           isPreview: activeEvent.isPreview,
           start: activeEvent.start,
           end: activeEvent.end,
@@ -787,7 +791,7 @@ function AppContent({
                     type="button"
                     className={`flex w-full min-w-0 items-center gap-1 overflow-hidden rounded px-1.5 py-0.5 text-left text-[11px] leading-4 ${isPreview ? 'border border-dashed border-primary/60 bg-primary/10' : 'bg-primary/15 text-primary'}`}
                     onClick={() => setActiveEvent({
-                      id: arg.event.id,
+                      id: String(arg.event.extendedProps.taskId || arg.event.id),
                       uniqueId: isPreview ? arg.event.id : `${arg.event.id}-${arg.event.start?.toISOString()}`,
                       title: arg.event.title,
                       start: arg.event.start,
@@ -803,6 +807,8 @@ function AppContent({
                       progress: arg.event.extendedProps.progress || '',
                       nextStep: arg.event.extendedProps.nextStep || '',
                       openQuestions: arg.event.extendedProps.openQuestions || '',
+                      executionSessionId: arg.event.extendedProps.executionSessionId,
+                      planRevision: arg.event.extendedProps.planRevision,
                     })}
                   >
                     {arg.timeText && <span className="shrink-0 opacity-70">{arg.timeText}</span>}

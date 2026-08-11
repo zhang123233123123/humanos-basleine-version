@@ -43,16 +43,16 @@ function estimateMinutes(task: HumanOSTask): number {
 
 function mapTaskToEvent(task: HumanOSTask, session?: Record<string, any>): HumanOSMapEventInput | null {
   const context = contextWindow(task)
-  const start = toISOString(task.start_at) || toISOString(context.startAt) || toISOString(context.start_at) || toISOString(task.start_time) || toISOString(task.start)
+  const start = toISOString(session?.planned_start_at) || toISOString(task.start_at) || toISOString(context.startAt) || toISOString(context.start_at) || toISOString(task.start_time) || toISOString(task.start)
   if (!start) return null
-  let end = toISOString(task.end_time) || toISOString(task.end)
+  let end = toISOString(session?.planned_end_at) || toISOString(task.end_time) || toISOString(task.end)
   if (!end) {
     const date = new Date(start)
     date.setMinutes(date.getMinutes() + Math.max(estimateMinutes(task), 1))
     end = date.toISOString()
   }
   return {
-    id: String(task.id || `tmp-${Date.now()}`),
+    id: String(session?.execution_session_id || task.id || `tmp-${Date.now()}`),
     title: task.title || 'Untitled',
     start,
     end,
@@ -70,6 +70,8 @@ function mapTaskToEvent(task: HumanOSTask, session?: Record<string, any>): Human
       executionSessionId: session?.execution_session_id,
       blockId: session?.block_id,
       taskType: String(task.task_type || ''),
+      taskId: String(task.id || ''),
+      planRevision: session?.plan_revision,
     },
   }
 }
@@ -89,20 +91,18 @@ export function projectCalendarEvents(
   rangeStart?: string | null,
   rangeEnd?: string | null,
 ): HumanOSMapEventInput[] {
-  const activeRank: Record<string, number> = { running: 5, paused: 4, ready: 3, ended: 2, completed: 1, superseded: 0 }
-  const sessionByTask = new Map<string, Record<string, any>>()
-  sessions.forEach((session) => {
-    const key = String(session.task_id || '')
-    const current = sessionByTask.get(key)
-    const rank = activeRank[session.status] ?? 0
-    const currentRank = activeRank[current?.status] ?? 0
-    if (!current || rank > currentRank || (rank === currentRank && Number(session.updated_at || 0) > Number(current.updated_at || 0))) {
-      sessionByTask.set(key, session)
-    }
+  const taskById = new Map(tasks.filter((task) => !task.is_preview && !task.id?.startsWith('preview-')).map((task) => [String(task.id), task]))
+  const visibleSessions = sessions.filter((session) => !['superseded', 'cancelled'].includes(String(session.status || '').toLowerCase()))
+  const sessionTaskIds = new Set(visibleSessions.map((session) => String(session.task_id || '')))
+  const sessionEvents = visibleSessions.map((session) => {
+    const task = taskById.get(String(session.task_id || ''))
+    if (!task) return null
+    return mapTaskToEvent(task, session)
   })
-  return tasks
-    .filter((task) => !task.is_preview && !task.id?.startsWith('preview-'))
-    .map((task) => mapTaskToEvent(task, sessionByTask.get(String(task.id || ''))))
+  const directTaskEvents = tasks
+    .filter((task) => !task.is_preview && !task.id?.startsWith('preview-') && !sessionTaskIds.has(String(task.id || '')))
+    .map((task) => mapTaskToEvent(task))
+  return [...sessionEvents, ...directTaskEvents]
     .filter((event): event is HumanOSMapEventInput => event !== null)
     .filter((event) => inRange(event, rangeStart, rangeEnd))
 }
@@ -125,7 +125,7 @@ export function projectDraftPlanEvents(plan: Record<string, any> | null, tasks: 
       title: block.title || task?.title || 'Untitled',
       start: start.toISOString(), end: end.toISOString(), allDay: false,
       extendedProps: {
-        description: task?.context || '', status: 'proposed', priority: normalizePriority(task?.priority), attendees: [], context: task?.context || '', progress: '', nextStep: '', openQuestions: '', blockId: block.block_id, taskType: String(task?.task_type || ''), isPreview: true, planRevision: plan.plan_revision,
+        description: task?.context || '', status: 'proposed', priority: normalizePriority(task?.priority), attendees: [], context: task?.context || '', progress: '', nextStep: '', openQuestions: '', blockId: block.block_id, taskType: String(task?.task_type || ''), taskId: String(task?.id || block.task_id || ''), isPreview: true, planRevision: plan.plan_revision,
       },
     }
   }).filter((event: HumanOSMapEventInput) => inRange(event, rangeStart, rangeEnd))
