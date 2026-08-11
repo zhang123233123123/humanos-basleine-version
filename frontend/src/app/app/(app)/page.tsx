@@ -44,21 +44,41 @@ function TaskInspectorWrapper() {
   const [isConfirmingAll, setIsConfirmingAll] = useState(false)
   const [showBatchReason, setShowBatchReason] = useState(false)
   const [batchReason, setBatchReason] = useState('')
+  const [proposalError, setProposalError] = useState('')
+  const [proposalRetrying, setProposalRetrying] = useState(false)
 
   const removeFromPreviewTasks = (uniqueId: string) => {
     setPreviewTasks((prev) => prev.filter((t) => t.uniqueId !== uniqueId))
   }
 
   const openScheduleProposal = async (source: string) => {
-    const proposal = await apiRequest<{ decision: PlanDecision }>('/api/schedules/decide', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_now: new Date().toISOString(), source }),
-    })
-    if (proposal.decision?.unavailable || proposal.decision?.error) {
-      throw new Error(proposal.decision.error || 'The scheduling service could not generate a plan preview')
+    setProposalRetrying(true)
+    setProposalError('')
+    try {
+      const proposal = await apiRequest<{ decision: PlanDecision }>('/api/schedules/decide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_now: new Date().toISOString(), source }),
+      })
+      if (proposal.decision?.unavailable || proposal.decision?.error) {
+        throw new Error(proposal.decision.error || 'The scheduling service could not generate a plan preview')
+      }
+      router.push('/app/plan?proposal=latest')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'The scheduling service could not generate a plan preview'
+      setProposalError(message)
+      throw error
+    } finally {
+      setProposalRetrying(false)
     }
-    router.push('/app/plan?proposal=latest')
+  }
+
+  const retryScheduleProposal = async () => {
+    try {
+      await openScheduleProposal('manual_schedule_retry')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Unable to regenerate the schedule preview')
+    }
   }
 
   const handleConfirm = async (task: {
@@ -346,6 +366,21 @@ function TaskInspectorWrapper() {
     )
   }
 
+  if (proposalError && previewTasks.length === 0) {
+    return (
+      <aside className="w-72 shrink-0 border-l border-border bg-background p-4">
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-950">
+          <h2 className="text-sm font-semibold">{t('planning.generateFailed')}</h2>
+          <p className="mt-2 text-xs leading-5">{proposalError}</p>
+          <p className="mt-2 text-xs leading-5">Tasks are saved. Retrying will only regenerate the schedule preview.</p>
+          <Button className="mt-4 w-full" size="sm" onClick={() => void retryScheduleProposal()} disabled={proposalRetrying}>
+            {proposalRetrying ? 'Regenerating...' : 'Regenerate plan'}
+          </Button>
+        </div>
+      </aside>
+    )
+  }
+
   // Branch 2: Preview task list
   if (previewTasks.length > 0) {
     return (
@@ -367,6 +402,7 @@ function TaskInspectorWrapper() {
             >
               {isConfirmingAll ? 'Confirming...' : t('workspace.confirmAll')}
             </Button>
+            {proposalError && <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950"><p>{proposalError}</p><Button className="mt-2 w-full" size="sm" variant="outline" onClick={() => void retryScheduleProposal()} disabled={proposalRetrying}>{proposalRetrying ? 'Regenerating...' : 'Regenerate plan'}</Button></div>}
           </div>
         </div>
         <ul className="divide-y divide-border">
