@@ -34,14 +34,12 @@ export default function InsightsPage() {
   const loadInsights = useCallback(async () => {
     setLoading(true)
     try {
-      const [patternData, profileData, recentData] = await Promise.all([
+      const [patternData, profileData] = await Promise.all([
         apiRequest<LearningResourceEnvelope<{ patterns: PatternCandidate[] }>>('/api/patterns/candidates'),
         apiRequest<ResourceEnvelope<{ profile: { learned_patterns?: LearnedPattern[] } }>>('/api/profile'),
-        apiRequest<LearningResourceEnvelope<{ memories: MemoryResult[] }>>('/api/memories/search?q=&top_k=6'),
       ])
       setCandidates(patternData.data.patterns || [])
       setLearned((profileData.data.profile.learned_patterns || []).filter((pattern) => pattern.user_confirmed))
-      setRecent(recentData.data.memories || [])
     } catch (error) {
       toast(error instanceof Error ? error.message : t('insights.loadFailed'))
     } finally {
@@ -52,6 +50,14 @@ export default function InsightsPage() {
   useEffect(() => {
     void loadInsights()
   }, [loadInsights])
+
+  useEffect(() => {
+    let active = true
+    apiRequest<LearningResourceEnvelope<{ memories: MemoryResult[] }>>('/api/memories/search?q=&top_k=6')
+      .then((result) => { if (active) setRecent(result.data.memories || []) })
+      .catch(() => { if (active) setRecent([]) })
+    return () => { active = false }
+  }, [])
 
   const promote = async (candidate: PatternCandidate) => {
     if (candidate.status !== 'candidate' || !candidate.can_suggest_update) return
