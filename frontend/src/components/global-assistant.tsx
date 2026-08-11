@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from 'framer-motion'
 import { MessageCircleQuestion, Sparkles, X } from 'lucide-react'
+import { useRef } from 'react'
 import { Chat } from '@/components/chat'
 import { Button } from '@/components/ui/button'
 import { useChat } from '@/hooks/use-chat'
@@ -11,18 +12,30 @@ export function GlobalAssistant() {
   const { chatOpen, setChatOpen } = useChat()
   const { locale } = useTranslation()
   const open = Boolean(chatOpen)
+  const dragging = useRef(false)
 
   return (
     <>
-      <Button
-        type="button"
-        onClick={() => setChatOpen('Hello!')}
-        className="fixed bottom-5 right-5 z-40 h-12 rounded-full px-4 shadow-lg shadow-primary/20"
-        aria-label={locale === 'zh' ? '打开日程顾问' : 'Open Calendar Advisor'}
+      <motion.div
+        drag
+        dragMomentum={false}
+        dragElastic={0.08}
+        whileDrag={{ scale: 1.04, cursor: 'grabbing' }}
+        onPointerDown={() => { dragging.current = false }}
+        onDragStart={() => { dragging.current = true }}
+        onDragEnd={() => { window.setTimeout(() => { dragging.current = false }, 0) }}
+        className="fixed bottom-5 right-5 z-40 touch-none cursor-grab"
       >
-        <Sparkles className="mr-2 h-4 w-4" />
-        <span>{locale === 'zh' ? '日程顾问' : 'Calendar Advisor'}</span>
-      </Button>
+        <Button
+          type="button"
+          onClick={() => { if (!dragging.current) setChatOpen('Hello!') }}
+          className="h-12 rounded-full px-4 shadow-lg shadow-primary/20"
+          aria-label={locale === 'zh' ? '打开日程顾问，可拖动位置' : 'Open draggable Calendar Advisor'}
+        >
+          <Sparkles className="mr-2 h-4 w-4" />
+          <span>{locale === 'zh' ? '日程顾问' : 'Calendar Advisor'}</span>
+        </Button>
+      </motion.div>
 
       <AnimatePresence>
         {open && (
