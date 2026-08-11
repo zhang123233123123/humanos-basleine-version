@@ -5193,6 +5193,26 @@ class Store:
         profile = self.ensure_profile(user_id)
         tasks = self.list_tasks(user_id)
         task_map = {str(task.get("id")): task for task in tasks}
+        decision_payload = payload.get("decision") or {}
+        requested_task_ids = payload.get("task_ids") or decision_payload.get("task_ids") or []
+        plan_task_ids = {
+            str(task_id)
+            for task_id in requested_task_ids
+            if task_id
+        }
+        plan_task_ids.update(
+            str(item.get("task_id"))
+            for item in (payload.get("unscheduled_tasks") or [])
+            if isinstance(item, dict) and item.get("task_id")
+        )
+        # Older clients did not send an explicit plan scope. Preserve their
+        # account-wide behavior, while current plans validate only the tasks
+        # that the proposal was generated to schedule.
+        workload_task_map = (
+            {task_id: task_map[task_id] for task_id in plan_task_ids if task_id in task_map}
+            if plan_task_ids
+            else task_map
+        )
         analysis = payload.get("ai_task_analysis") or {}
         demand_map = {str(item.get("task_id")): item for item in (analysis.get("task_demands") or []) if isinstance(item, dict)}
         profile_map = {str(item.get("task_id")): item for item in (analysis.get("task_resource_profiles") or []) if isinstance(item, dict)}
@@ -5237,7 +5257,7 @@ class Store:
             planned_work[task_id] = planned_work.get(task_id, 0) + int(block.get("planned_work_minutes") or round((end - start) * 60))
 
         active_schedulable = [
-            task for task in task_map.values()
+            task for task in workload_task_map.values()
             if not task.get("removed_from_week")
             and task.get("status") not in {"completed", "terminated", "blocked", "paused"}
             and schedule_task_kind(task) != "fixed_event"
@@ -5287,7 +5307,7 @@ class Store:
                 if before_end > after_start + 0.001:
                     violations.append({"type": "dependency_order", "before_task_id": before_id, "after_task_id": after_id})
         explicit_unallocated = {str(item.get("task_id")): int(item.get("remaining_minutes") or 0) for item in (payload.get("unscheduled_tasks") or []) if isinstance(item, dict)}
-        for task_id, task in task_map.items():
+        for task_id, task in workload_task_map.items():
             if task.get("removed_from_week") or task.get("status") in {"completed", "terminated", "blocked", "paused"} or schedule_task_kind(task) == "fixed_event":
                 continue
             remaining = int((task.get("execution") or {}).get("remaining_duration_minutes", task.get("duration") or 0))
