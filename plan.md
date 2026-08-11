@@ -310,7 +310,7 @@ fix(planning): synchronize plan revisions and execution sessions
 feat(focus): unify active session execution and timing
 ```
 
-## Step 8：完成 Pause、Context Dump、Resume 与局部重排
+## Step 8：完成 Pause、Context Dump、Resume 与局部重排（已完成）
 
 ### 目标
 
