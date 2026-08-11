@@ -76,10 +76,12 @@ export default function FocusPage() {
     }
 
     window.addEventListener('humanos:plan-updated', refreshExecution)
+    window.addEventListener('humanos:plan-revision', refreshExecution)
     window.addEventListener('focus', refreshExecution)
     document.addEventListener('visibilitychange', refreshWhenVisible)
     return () => {
       window.removeEventListener('humanos:plan-updated', refreshExecution)
+      window.removeEventListener('humanos:plan-revision', refreshExecution)
       window.removeEventListener('focus', refreshExecution)
       document.removeEventListener('visibilitychange', refreshWhenVisible)
     }
@@ -94,16 +96,18 @@ export default function FocusPage() {
   const session = current?.session || null
   const task = current?.task || session?.task || null
   const title = session?.task_title || session?.title || task?.title || t('execution.untitledTask')
-  const startedAt = timestamp(session?.actual_start_at ?? session?.started_at)
-  const persistedMinutes = Number(session?.actual_minutes || 0)
-  const elapsedSeconds = current?.mode === 'running' && startedAt
-    ? persistedMinutes * 60 + Math.max(Math.floor((now - startedAt) / 1000), 0)
-    : persistedMinutes * 60
+  const activeSegmentStartedAt = timestamp(session?.resumed_at ?? session?.actual_start_at ?? session?.started_at)
+  const persistedMinutes = Number(session?.accumulated_active_minutes ?? session?.actual_minutes ?? 0)
+  const activeSegmentSeconds = current?.mode === 'running' && activeSegmentStartedAt
+    ? Math.max(Math.floor((now - activeSegmentStartedAt) / 1000), 0)
+    : 0
+  const elapsedSeconds = persistedMinutes * 60 + activeSegmentSeconds
 
   const plannedMinutes = Number(session?.planned_work_minutes || 0)
-  const displayRemaining = session?.session_remaining_minutes == null
-    ? Math.max(plannedMinutes - Math.floor(elapsedSeconds / 60), 0)
+  const persistedRemaining = session?.session_remaining_minutes == null
+    ? Math.max(plannedMinutes - persistedMinutes, 0)
     : Number(session.session_remaining_minutes)
+  const displayRemaining = Math.max(persistedRemaining - Math.floor(activeSegmentSeconds / 60), 0)
 
   const contextWindow = (task?.contextWindow || {}) as Record<string, unknown>
   const nextStep = String(contextWindow.nextStep || contextWindow.next_step || '')
@@ -129,6 +133,7 @@ export default function FocusPage() {
       setCurrent({ mode: 'running', session: result.data.execution_session, task })
       setResumeImpact(null)
       setNow(Date.now())
+      window.dispatchEvent(new CustomEvent('humanos:execution-updated', { detail: { action: current?.mode === 'paused' ? 'resume' : 'start', executionSession: result.data.execution_session } }))
       toast(t('execution.started'))
     } catch (error) {
       toast(error instanceof Error ? error.message : t('execution.startFailed'))
@@ -152,6 +157,7 @@ export default function FocusPage() {
       setCurrent({ mode: 'paused', session: result.data.execution_session, task })
       setResumeImpact(result.data.pause_review.requires_plan_adjustment ? result.data.pause_review : null)
       setPausePrompt(false)
+      window.dispatchEvent(new CustomEvent('humanos:execution-updated', { detail: { action: 'pause', executionSession: result.data.execution_session } }))
       await loadExecution()
       setResumeImpact(null)
       toast(t('execution.paused'))
@@ -175,6 +181,7 @@ export default function FocusPage() {
       setRemainingMinutes(Math.max(Number(result.data.execution_session.session_remaining_minutes ?? plannedMinutes - minutes), 0))
       setEndedSession(result.data.execution_session)
       setCurrent({ mode: 'none', session: null })
+      window.dispatchEvent(new CustomEvent('humanos:execution-updated', { detail: { action: 'end', executionSession: result.data.execution_session } }))
       toast(t('execution.ended'))
     } catch (error) {
       toast(error instanceof Error ? error.message : t('execution.endFailed'))

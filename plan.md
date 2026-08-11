@@ -282,7 +282,7 @@ feat(workspace): align calendar review and plan confirmation flow
 fix(planning): synchronize plan revisions and execution sessions
 ```
 
-## Step 7：统一 Focus 与 Active Session 执行
+## Step 7：统一 Focus 与 Active Session 执行（已完成）
 
 ### 目标
 

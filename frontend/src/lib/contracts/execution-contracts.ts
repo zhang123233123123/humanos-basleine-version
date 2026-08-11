@@ -2,6 +2,8 @@ export type ExecutionStatus = 'ready' | 'running' | 'paused' | 'ended' | 'comple
 export type ExecutionMode = 'up_next' | 'running' | 'paused' | 'empty' | 'none' | 'idle' | string
 
 export interface ExecutionSession {
+  accumulated_active_minutes?: number | null
+  resumed_at?: string | number | null
   execution_session_id: string
   task_id: string
   block_id?: string

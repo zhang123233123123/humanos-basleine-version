@@ -308,8 +308,9 @@ function TaskInspectorWrapper() {
       const result = await apiRequest<ExecutionResourceEnvelope<{ execution_sessions: ExecutionSession[] }>>('/api/execution-sessions?status=running,paused,ready')
       let session = (result.data.execution_sessions || []).find((item) => String(item.task_id) === String(task.id))
       if (!session) {
-        const ensured = await apiRequest<ExecutionResourceEnvelope<{ execution_session: ExecutionSession }>>('/api/execution-sessions/ensure', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_id: task.id }) })
-        session = ensured.data.execution_session
+        toast(t('execution.noSessionDescription'))
+        router.push('/app/plan')
+        return
       }
       if (session && !['running', 'paused'].includes(String(session.status))) {
         await apiRequest('/api/execution-sessions/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ execution_session_id: session.execution_session_id, request_id: requestId('calendar-start') }) })
