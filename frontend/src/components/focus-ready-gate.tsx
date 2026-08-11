@@ -10,6 +10,18 @@ export function FocusReadyGate() {
   const check = useCallback(async () => {
     if (pathname !== '/app' || redirecting.current || document.visibilityState !== 'visible') return
     try {
+      const weekResponse = await fetch('/api/weeks/status', { cache: 'no-store' })
+      if (weekResponse.ok && (await weekResponse.json())?.new_week) {
+        redirecting.current = true
+        router.push('/app/plan?rollover=1')
+        return
+      }
+      const checkinResponse = await fetch('/api/state-checkins', { cache: 'no-store' })
+      if (checkinResponse.ok && (await checkinResponse.json())?.required) {
+        redirecting.current = true
+        router.push('/app/check-in?mode=daily')
+        return
+      }
       const response = await fetch('/api/execution-sessions/current', { cache: 'no-store' })
       if (!response.ok) return
       const body = await response.json()

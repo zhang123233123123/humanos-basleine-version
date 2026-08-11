@@ -365,7 +365,7 @@ feat(execution): implement contextual pause resume and replanning
 feat(feedback): persist execution outcomes and remaining work
 ```
 
-## Step 10：实现 Daily Check-in 与 Week Rollover
+## Step 10：实现 Daily Check-in 与 Week Rollover（已完成）
 
 ### 目标
 

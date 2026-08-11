@@ -3763,6 +3763,12 @@ class Store:
         return {"id": task_id, "deleted": False, "archived": True}
 
     def save_runtime_state(self, user_id: str, payload: dict) -> dict:
+        if payload.get("daily_checkin"):
+            status = self.daily_checkin_status(user_id)
+            if not status["required"]:
+                existing = self.latest_runtime_state(user_id)
+                existing["already_completed"] = True
+                return existing
         state_id = new_id("state")
         state = {
             "id": state_id,
@@ -3805,10 +3811,22 @@ class Store:
             if payload.get("daily_checkin"):
                 conn.execute(
                     "UPDATE profiles SET last_daily_checkin_date=?,updated_at=? WHERE user_id=?",
-                    (str(payload.get("local_date") or today_label()), state["created_at"], user_id),
+                    (self.daily_checkin_status(user_id)["local_date"], state["created_at"], user_id),
                 )
         self.log_event(user_id, "runtime_state_saved", state)
         return state
+
+    def daily_checkin_status(self, user_id: str) -> dict:
+        profile = self.ensure_profile(user_id)
+        current = self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai")
+        local_date = current.date().isoformat()
+        last_date = profile.get("last_daily_checkin_date")
+        return {
+            "required": last_date != local_date,
+            "local_date": local_date,
+            "last_daily_checkin_date": last_date,
+            "evaluated_at": current.isoformat(),
+        }
 
     def evaluate_daily_checkin(self, user_id: str, state: dict) -> dict:
         profile = self.ensure_profile(user_id)
@@ -6466,6 +6484,11 @@ class Handler(BaseHTTPRequestHandler):
                 runtime_state = store.save_runtime_state(user_id, payload)
                 daily_plan_review = store.evaluate_daily_checkin(user_id, runtime_state) if payload.get("daily_checkin") else None
                 self.send_json({"runtime_state": runtime_state, "daily_plan_review": daily_plan_review}, status=201)
+                return
+
+            if path == "/api/state-checkins" and method == "GET":
+                user_id = query.get("user_id", ["demo"])[0]
+                self.send_json(store.daily_checkin_status(user_id))
                 return
 
             if path == "/api/context-dumps" and method == "POST":

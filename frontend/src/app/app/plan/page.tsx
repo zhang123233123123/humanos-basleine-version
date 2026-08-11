@@ -43,6 +43,7 @@ export default function WeeklyPlanPage() {
   const [rationaleRequired, setRationaleRequired] = useState(false)
   const [rationale, setRationale] = useState('')
   const [carryIds, setCarryIds] = useState<string[]>([])
+  const [rolloverMode, setRolloverMode] = useState<'use_last' | 'fresh'>('use_last')
   const [weeklyGoal, setWeeklyGoal] = useState('')
   const [availableWindows, setAvailableWindows] = useState('')
   const [temporaryConstraints, setTemporaryConstraints] = useState('')
@@ -263,7 +264,7 @@ export default function WeeklyPlanPage() {
       await apiRequest('/api/weeks/rollover', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ week_id: weekId, use_last_week: true, carry_task_ids: carryIds }),
+        body: JSON.stringify({ week_id: weekId, use_last_week: rolloverMode === 'use_last', carry_task_ids: carryIds }),
       })
       await loadPlanningState()
       toast(t('planning.weekStarted'))
@@ -299,6 +300,8 @@ export default function WeeklyPlanPage() {
           <Card className="border-amber-500/40 bg-amber-500/5">
             <CardHeader><CardTitle className="text-lg">{t('planning.newWeek')}</CardTitle><CardDescription>{t('planning.newWeekDescription')}</CardDescription></CardHeader>
             <CardContent className="space-y-3">
+              <div className="grid gap-3 md:grid-cols-2"><button type="button" onClick={() => setRolloverMode('use_last')} className={`rounded-xl border p-4 text-left ${rolloverMode === 'use_last' ? 'border-primary bg-primary/10' : ''}`}><strong>{locale === 'zh' ? '以上周为起点' : 'Use last week as a starting point'}</strong><p className="mt-1 text-xs text-muted-foreground">{locale === 'zh' ? '保留可用时间、缓冲和重复例行事项，不复制一次性事件。' : 'Keep availability, buffers, and recurring routines without copying one-off events.'}</p></button><button type="button" onClick={() => setRolloverMode('fresh')} className={`rounded-xl border p-4 text-left ${rolloverMode === 'fresh' ? 'border-primary bg-primary/10' : ''}`}><strong>{locale === 'zh' ? '全新开始' : 'Start fresh'}</strong><p className="mt-1 text-xs text-muted-foreground">{locale === 'zh' ? '重新填写本周时间、固定事项、目标和临时约束。' : 'Re-enter availability, fixed events, goals, and temporary constraints.'}</p></button></div>
+              <p className="text-sm font-medium">{locale === 'zh' ? '选择要带入新周的未完成任务' : 'Choose unfinished tasks to carry into the new week'}</p>
               {tasks.map((task) => (
                 <label key={task.id} className="flex items-center gap-3 text-sm">
                   <input type="checkbox" checked={carryIds.includes(String(task.id))} onChange={(event) => setCarryIds((current) => event.target.checked ? [...current, String(task.id)] : current.filter((id) => id !== task.id))} />
