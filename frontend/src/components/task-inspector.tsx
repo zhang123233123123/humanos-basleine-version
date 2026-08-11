@@ -65,6 +65,10 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
   const sourceProgress = task?.progress || ''
   const sourceNextStep = task?.nextStep || ''
   const sourceOpenQuestions = task?.openQuestions || ''
+  const sourceDuration = task?.duration
+  const sourceDue = task?.due || task?.deadlineAt || ''
+  const sourceExpectedDifficulty = task?.expectedDifficulty ?? undefined
+  const sourceDependency = task?.dependency || ''
 
   // Sync local state when task changes
   useEffect(() => {
@@ -76,11 +80,11 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
     setProgress(sourceProgress)
     setNextStep(sourceNextStep)
     setOpenQuestions(sourceOpenQuestions)
-    setDuration(task?.duration)
-    setDue(task?.due || task?.deadlineAt || '')
-    setExpectedDifficulty(task?.expectedDifficulty ?? undefined)
-    setDependency(task?.dependency || '')
-  }, [sourceId, sourceTitle, sourcePriority, sourceStatus, sourceContext, sourceProgress, sourceNextStep, sourceOpenQuestions])
+    setDuration(sourceDuration)
+    setDue(sourceDue)
+    setExpectedDifficulty(sourceExpectedDifficulty)
+    setDependency(sourceDependency)
+  }, [sourceId, sourceTitle, sourcePriority, sourceStatus, sourceContext, sourceProgress, sourceNextStep, sourceOpenQuestions, sourceDuration, sourceDue, sourceExpectedDifficulty, sourceDependency])
 
   // Build current editable task object
   const buildTask = useCallback((): TaskDetail => {
