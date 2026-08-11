@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.domain.timeline import WeeklyTimeline, interval_from_block, validate_timeline
+from app.domain.timeline import WeeklyTimeline, interval_from_block, validate_timeline, week_bounds
 
 
 def validate_weekly_plan_timeline(
@@ -25,14 +25,19 @@ def validate_weekly_plan_timeline(
             block.get("parallel_group_id") and block.get("parallel_user_confirmed")
         )
         try:
+            raw_kind = task_kinds.get(task_id, "task_session")
+            timeline_kind = "task_session" if raw_kind in {"flexible_task", "recovery_task"} else raw_kind
+            normalized_block = {
+                **block,
+                "block_id": str(block.get("block_id") or f"{task_id}:{index}"),
+                "kind": timeline_kind,
+                "parallelizable": parallel_confirmed,
+            }
             intervals.append(
                 interval_from_block(
-                    block,
+                    normalized_block,
                     week_id=week_id,
                     timezone_name=timezone_name,
-                    interval_id=str(block.get("block_id") or f"{task_id}:{index}"),
-                    kind=task_kinds.get(task_id, "task_session"),
-                    parallelizable=parallel_confirmed,
                 )
             )
         except (TypeError, ValueError) as exc:
@@ -48,12 +53,15 @@ def validate_weekly_plan_timeline(
     if violations:
         return violations
 
+    week_start, week_end = week_bounds(week_id, timezone_name)
     timeline = WeeklyTimeline(
         week_id=week_id,
         timezone=timezone_name,
+        week_start_at=week_start.isoformat(),
+        week_end_at=week_end.isoformat(),
         intervals=intervals,
     )
     return [item.model_dump(mode="json") for item in validate_timeline(
         timeline,
-        minimum_rest_minutes=minimum_rest_minutes,
+        rest_between_tasks_minutes=minimum_rest_minutes,
     )]

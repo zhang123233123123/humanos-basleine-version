@@ -56,13 +56,13 @@ class WeeklyLifecycleTests(unittest.TestCase):
             created = store.reconcile_weekly_setup("u", {
                 "week_id": "2026-08-03", "profile": self.profile_patch(), "tasks": [self.task_draft()]
             })
-            task = created["active_ready_tasks"][0]
+            task = store.list_tasks("u")[0]
             updated = store.reconcile_weekly_setup("u", {
                 "week_id": "2026-08-03",
                 "profile": self.profile_patch(),
                 "tasks": [self.task_draft(id=task["id"], due="周日 20:00前完成", dependency="Review notes")],
             })
-            current = next(item for item in updated["tasks"] if item["id"] == task["id"])
+            current = next(item for item in store.list_tasks("u") if item["id"] == task["id"])
         self.assertEqual(task["id"], current["id"])
         self.assertEqual("Two interviews coded", current["contextWindow"]["progress"])
         self.assertEqual("Review notes", current["contextWindow"]["dependency"])
@@ -74,11 +74,11 @@ class WeeklyLifecycleTests(unittest.TestCase):
             created = store.reconcile_weekly_setup("u", {
                 "week_id": "2026-08-03", "profile": self.profile_patch(), "tasks": [self.task_draft()]
             })
-            task_id = created["active_ready_tasks"][0]["id"]
+            task_id = store.list_tasks("u")[0]["id"]
             result = store.reconcile_weekly_setup("u", {
                 "week_id": "2026-08-03", "profile": self.profile_patch(), "tasks": []
             })
-            archived = next(item for item in result["tasks"] if item["id"] == task_id)
+            archived = next(item for item in store.list_tasks("u") if item["id"] == task_id)
         self.assertTrue(archived["removed_from_week"])
         self.assertIsNotNone(archived["archived_at"])
 
@@ -98,7 +98,7 @@ class WeeklyLifecycleTests(unittest.TestCase):
             created = store.reconcile_weekly_setup("u", {
                 "week_id": "2026-08-03", "profile": self.profile_patch(), "tasks": [self.task_draft()]
             })
-            task = created["active_ready_tasks"][0]
+            task = store.list_tasks("u")[0]
             proposed = store.save_proposed_plan("u", {
                 "plan_patch": [{"task_id": task["id"], "day_index": 6, "start": 9.0, "end": 10.0, "session_minutes": 60}]
             }, {"week_id": "2026-08-03", "request_id": "req-confirm"})
@@ -138,16 +138,18 @@ class WeeklyLifecycleTests(unittest.TestCase):
                 "week_id": "2026-08-03", "profile": self.profile_patch([routine]),
                 "tasks": [self.task_draft(), self.task_draft(title="Write findings")],
             })
-            carry_id = first["active_ready_tasks"][0]["id"]
+            carry_id = store.list_tasks("u")[0]["id"]
             result = store.rollover_week("u", {
                 "week_id": "2026-08-10", "use_last_week": True, "carry_task_ids": [carry_id]
             })
-            carried = next(item for item in result["tasks"] if item["id"] == carry_id)
-            other = next(item for item in result["tasks"] if item["id"] != carry_id)
+            tasks = store.list_tasks("u")
+            carried = next(item for item in tasks if item["id"] == carry_id)
+            other = next(item for item in tasks if item["id"] != carry_id)
+            rollover_profile = store.ensure_profile("u")
         self.assertEqual("2026-08-10", carried["week_id"])
         self.assertFalse(carried["removed_from_week"])
         self.assertTrue(other["removed_from_week"])
-        self.assertEqual([routine], result["profile"]["weekly_context"]["context_items"])
+        self.assertEqual([routine], rollover_profile["weekly_context"]["context_items"])
 
 
 if __name__ == "__main__":

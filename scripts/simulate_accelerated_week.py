@@ -41,7 +41,7 @@ def simulate_week(db_path: Path) -> dict:
         "active_week_id": "2026-08-03",
         "weekly_context": {
             "week_id": "2026-08-03",
-            "weekly_available_windows": "Every day 08:00-18:00",
+            "weekly_available_windows": "周一至周日 08:00-18:00",
             "context_items": [{
                 "id": "lunch",
                 "type": "recurring_routine",
@@ -68,7 +68,8 @@ def simulate_week(db_path: Path) -> dict:
     for day_index, (title, duration) in enumerate(task_specs):
         task = store.create_task(user_id, {
             "title": title,
-            "due": f"Day {day_index + 1} 18:00",
+            "due": (week_start + timedelta(days=day_index, hours=18)).strftime("%Y-%m-%d %H:%M"),
+            "deadline_at": iso(week_start + timedelta(days=day_index, hours=18)),
             "duration": duration,
             "priority": "high" if day_index < 5 else "medium",
             "expected_difficulty": 5 if day_index < 5 else 3,
@@ -220,13 +221,14 @@ def simulate_week(db_path: Path) -> dict:
         and int((task.get("execution") or {}).get("remaining_duration_minutes") or 0) > 0
     ]
     carry_ids = [task["id"] for task in unfinished]
-    rollover = store.rollover_week(user_id, {
+    store.rollover_week(user_id, {
         "week_id": next_week,
         "use_last_week": True,
         "carry_task_ids": carry_ids,
     })
+    rollover_profile = store.ensure_profile(user_id)
     carried = [
-        task for task in rollover["tasks"]
+        task for task in store.list_tasks(user_id)
         if task["id"] in carry_ids and task["week_id"] == next_week and not task["removed_from_week"]
     ]
     with store.connect() as conn:
@@ -274,8 +276,8 @@ def simulate_week(db_path: Path) -> dict:
             "new_week_id": next_week,
             "carried_task_titles": [task["title"] for task in carried],
             "old_plan_superseded": store.active_plan(user_id, "2026-08-03") is None,
-            "routine_reused": len(rollover["profile"]["weekly_context"]["context_items"]) == 1,
-            "daily_checkin_reset": rollover["profile"].get("last_daily_checkin_date") is None,
+            "routine_reused": len(rollover_profile["weekly_context"]["context_items"]) == 1,
+            "daily_checkin_reset": rollover_profile.get("last_daily_checkin_date") is None,
         },
     }
 

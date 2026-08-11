@@ -44,7 +44,7 @@ class TaskAggregate(BaseModel):
     reentry_cost: str
     resource_modality: list[str] = Field(default_factory=list)
     parallelizable: bool = False
-    expected_difficulty: str | None = None
+    expected_difficulty: int | str | None = None
     week_id: str
 
     @model_validator(mode="after")

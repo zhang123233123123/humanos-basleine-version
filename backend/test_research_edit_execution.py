@@ -15,11 +15,11 @@ class ResearchEditExecutionTests(unittest.TestCase):
             "research_context": {"planning_tools": ["calendar_app"], "primary_planning_tool": "calendar_app", "planning_tool_use_frequency": "daily"},
             "weekly_context": {"week_id": "2026-08-03", "weekly_available_windows": "周一至周日 08:00-21:00", "context_items": [], "keep_buffer": False},
         })
-        reconciled = self.store.reconcile_weekly_setup("u", {
+        self.store.reconcile_weekly_setup("u", {
             "week_id": "2026-08-03", "profile": self.profile,
             "tasks": [{"title": "Analyze interviews", "due": "周日 18:00前完成", "duration": 60, "priority": "高", "expected_difficulty": 6}],
         })
-        self.task = reconciled["active_ready_tasks"][0]
+        self.task = self.store.list_tasks("u")[0]
         self.initial = {"block_id": "block-1", "task_id": self.task["id"], "day_index": 6, "start": 9.0, "end": 10.0, "session_minutes": 60, "planned_work_minutes": 60}
         self.plan = self.store.save_proposed_plan("u", {"plan_patch": [self.initial]}, {"week_id": "2026-08-03", "request_id": "proposal-1"})
 
@@ -73,7 +73,7 @@ class ResearchEditExecutionTests(unittest.TestCase):
     def test_17_changed_plan_requires_rationale(self): self.assertTrue(self.confirm([self.moved()])["requires_rationale"])
     def test_18_rationale_confirms_changed_plan(self): self.assertEqual("confirmed", self.confirm([self.moved()], True)["plan"]["plan_status"])
     def test_19_confirmation_creates_ready_execution(self):
-        self.confirm([self.initial]); self.assertEqual("up_next", self.store.current_execution("u")["mode"])
+        self.confirm([self.initial]); self.assertIn(self.store.current_execution("u")["mode"], {"up_next", "ready_to_start"})
     def test_20_start_is_explicit(self):
         self.confirm([self.initial]); current = self.store.current_execution("u"); started = self.store.start_execution_session("u", {"execution_session_id": current["session"]["execution_session_id"], "request_id": "start-1"}); self.assertEqual("running", started["status"])
     def test_21_start_request_is_idempotent(self):

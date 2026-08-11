@@ -278,7 +278,7 @@ class TaskInputLayerTests(unittest.TestCase):
     def test_weekly_context_meeting_update_does_not_create_task(self) -> None:
         account = self.store.create_user("context@example.com", "secret123", "Context User")
         user_id = account["user"]["id"]
-        profile = account["profile"]
+        profile = self.store.ensure_profile(user_id)
         profile["weekly_context"]["context_items"] = [{
             "id": "ctx-meeting",
             "type": "fixed_event",
@@ -303,7 +303,7 @@ class TaskInputLayerTests(unittest.TestCase):
     def test_english_meeting_change_updates_weekly_context_not_recent_task(self) -> None:
         account = self.store.create_user("english-context@example.com", "secret123", "Context User")
         user_id = account["user"]["id"]
-        profile = account["profile"]
+        profile = self.store.ensure_profile(user_id)
         profile["weekly_context"]["context_items"] = [{
             "id": "ctx-research-meeting",
             "type": "fixed_event",
@@ -340,7 +340,7 @@ class TaskInputLayerTests(unittest.TestCase):
     def test_weekly_routine_chat_update_keeps_soft_constraint_semantics(self) -> None:
         account = self.store.create_user("routine@example.com", "secret123", "Routine User")
         user_id = account["user"]["id"]
-        profile = account["profile"]
+        profile = self.store.ensure_profile(user_id)
         profile["weekly_context"]["context_items"] = [{
             "id": "ctx-lunch",
             "type": "recurring_routine",

@@ -10,6 +10,13 @@ from backend.humanos_server import Store
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def legacy_frontend(name: str) -> str:
+    path = ROOT / "frontend" / name
+    if not path.exists():
+        raise unittest.SkipTest("legacy static frontend was replaced by the Next.js application")
+    return path.read_text(encoding="utf-8")
+
+
 class ConfirmedExecutionRailTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
@@ -55,13 +62,13 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
 
     # Requested acceptance coverage (1-22).
     def test_01_confirmed_uses_execution_rail_not_review_copy(self):
-        html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
-        js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
+        html = legacy_frontend("index.html")
+        js = legacy_frontend("app.js")
         self.assertIn('id="executionRail"', html)
         self.assertIn('confirmed && !showingTask', js)
 
     def test_02_confirmed_header_has_one_state_badge(self):
-        html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+        html = legacy_frontend("index.html")
         self.assertEqual(1, html.count('id="executionPlanState"'))
 
     def test_03_without_active_session_returns_up_next(self):
@@ -85,7 +92,7 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
         self.assertEqual("running", self.store.get_task(self.task_id, "u")["status"])
 
     def test_07_now_card_labels_both_remaining_values(self):
-        js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
+        js = legacy_frontend("app.js")
         self.assertIn("min left <small>in this session", js)
         self.assertIn("min remaining for the whole task", js)
 
@@ -133,21 +140,21 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
         self.assertEqual((60, "queued", "not_started"), (task["execution"]["remaining_duration_minutes"], task["status"], self.store.list_execution_sessions("u")[0]["status"]))
 
     def test_15_selecting_another_task_keeps_compact_now_strip(self):
-        js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
+        js = legacy_frontend("app.js")
         self.assertIn("compact-running-strip", js)
         self.assertIn("data-return-now", js)
 
     def test_16_today_after_this_is_limited_to_two(self):
-        js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
+        js = legacy_frontend("app.js")
         self.assertIn(".slice(0, 2)", js)
 
     def test_17_buffer_defaults_to_compact_summary(self):
-        html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+        html = legacy_frontend("index.html")
         self.assertIn("weeklyBufferSummary", html)
         self.assertIn("weeklyBufferDetails", html)
 
     def test_18_running_and_confirmed_blocks_do_not_float(self):
-        css = (ROOT / "frontend" / "styles.css").read_text(encoding="utf-8")
+        css = legacy_frontend("styles.css")
         self.assertIn("execution-running", css)
         self.assertIn(":not(.pending):not(.suggested){animation:none}", css)
 
@@ -160,7 +167,7 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
         self.assertEqual("running", first["status"])
 
     def test_20_confirmed_parallel_rule_requires_one_pair_only(self):
-        js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
+        js = legacy_frontend("app.js")
         self.assertIn("if (byTask.length !== 2) return", js)
         self.assertIn("confirmedParallelOverlapAllowed", js)
 
@@ -177,7 +184,7 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
         self.assertEqual((first["id"], 1), (second["id"], count))
 
     def test_22_responsive_rules_keep_execution_controls_visible(self):
-        css = (ROOT / "frontend" / "styles.css").read_text(encoding="utf-8")
+        css = legacy_frontend("styles.css")
         self.assertIn("@media (max-width:1180px)", css)
         self.assertIn("min-height:40px", css)
         self.assertIn("overflow-y:auto", css)

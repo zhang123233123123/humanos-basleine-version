@@ -56,9 +56,9 @@ class SharedTestClockTests(unittest.TestCase):
             store.upsert_profile({
                 "user_id": "u", "timezone": "Asia/Singapore", "role": "student",
                 "active_week_id": "2026-08-03",
-                "weekly_context": {"week_id": "2026-08-03", "context_items": []},
+                "weekly_context": {"week_id": "2026-08-03", "weekly_available_windows": "周一至周日 08:00-21:00", "context_items": []},
             })
-            task = store.create_task("u", {"title": "System implementation", "due": "Friday 18:00", "duration": 45})
+            task = store.create_task("u", {"title": "System implementation", "due": "Friday 18:00", "deadline_at": "2026-08-07T18:00:00+08:00", "duration": 45})
             block = {"block_id": "clock-block", "task_id": task["id"], "day_index": 0, "start": 9, "end": 9.75, "session_minutes": 45}
             proposal = store.save_proposed_plan("u", {"plan_patch": [block]}, {"week_id": "2026-08-03", "request_id": "clock-plan"})
             store.confirm_plan("u", {"plan_id": proposal["plan_id"], "week_id": "2026-08-03", "plan_patch": [block], "decision": proposal})
@@ -103,11 +103,11 @@ class SharedTestClockTests(unittest.TestCase):
                 "user_id": "u", "timezone": "Asia/Singapore", "active_week_id": "2026-08-03",
                 "weekly_context": {
                     "week_id": "2026-08-03", "keep_buffer": False,
-                    "available_windows": [{"day_index": 0, "start": 8, "end": 18}],
+                    "weekly_available_windows": "周一至周日 08:00-21:00",
                     "context_items": [],
                 },
             })
-            task = store.create_task("u", {"id": "T1", "title": "System implementation", "due": "2026-08-07 18:00", "duration": 45, "week_id": "2026-08-03"})
+            task = store.create_task("u", {"id": "T1", "title": "System implementation", "due": "2026-08-07 18:00", "deadline_at": "2026-08-07T18:00:00+08:00", "duration": 45, "week_id": "2026-08-03"})
             first = {"block_id": "v1-block", "task_id": task["id"], "day_index": 0, "start": 9, "end": 9.75, "session_minutes": 45}
             v1 = store.save_proposed_plan("u", {"plan_patch": [first]}, {"week_id": "2026-08-03", "request_id": "v1"})
             store.confirm_plan("u", {"plan_id": v1["plan_id"], "edit_episode_id": v1["edit_episode_id"], "week_id": "2026-08-03", "plan_patch": [first], "decision": v1})
@@ -126,11 +126,11 @@ class SharedTestClockTests(unittest.TestCase):
                 "user_id": "u", "timezone": "Asia/Singapore", "active_week_id": "2026-08-03",
                 "weekly_context": {
                     "week_id": "2026-08-03", "keep_buffer": False,
-                    "available_windows": [{"day_index": 0, "start": 8, "end": 18}],
+                    "weekly_available_windows": "周一至周日 08:00-21:00",
                     "context_items": [],
                 },
             })
-            task = store.create_task("u", {"id": "T1", "title": "Carry-over work", "due": "2026-08-07 18:00", "duration": 45, "week_id": "2026-08-03"})
+            task = store.create_task("u", {"id": "T1", "title": "Carry-over work", "due": "2026-08-07 18:00", "deadline_at": "2026-08-07T18:00:00+08:00", "duration": 45, "week_id": "2026-08-03"})
             item = {"block_id": "old-week-block", "task_id": task["id"], "day_index": 0, "start": 9, "end": 9.75, "session_minutes": 45}
             plan = store.save_proposed_plan("u", {"plan_patch": [item]}, {"week_id": "2026-08-03"})
             store.confirm_plan("u", {"plan_id": plan["plan_id"], "edit_episode_id": plan["edit_episode_id"], "week_id": "2026-08-03", "plan_patch": [item], "decision": plan})

@@ -10,6 +10,13 @@ from backend.humanos_graph import day_index_from_due, scheduler_node
 from backend.humanos_server import Store, confirmed_parallel_overlap_allowed, parallel_pair_rule
 
 
+def legacy_frontend(name: str) -> str:
+    path = Path(__file__).parents[1] / "frontend" / name
+    if not path.exists():
+        raise unittest.SkipTest("legacy static frontend was replaced by the Next.js application")
+    return path.read_text(encoding="utf-8")
+
+
 class PromptAndTemporalContractTests(unittest.TestCase):
     def test_prompt_benchmark_has_required_coverage(self) -> None:
         cases = json.loads((Path(__file__).parent / "prompt_benchmark_cases.json").read_text(encoding="utf-8"))
@@ -19,15 +26,15 @@ class PromptAndTemporalContractTests(unittest.TestCase):
         self.assertEqual(len(cases), len({case["id"] for case in cases}))
 
     def test_frontend_does_not_fall_back_to_a_local_scheduler(self) -> None:
-        frontend = (Path(__file__).parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+        frontend = legacy_frontend("app.js")
         self.assertNotIn("allocateWeeklyPlan", frontend)
         self.assertIn('setEngineStatus("AI unavailable"', frontend)
         self.assertIn('setBackendStatus("AI connection unavailable. Try again."', frontend)
         self.assertIn('api("/api/schedules/decide"', frontend)
 
     def test_review_ui_hides_internal_debug_output_and_uses_single_plan_confirmation(self) -> None:
-        frontend = (Path(__file__).parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
-        html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text(encoding="utf-8")
+        frontend = legacy_frontend("app.js")
+        html = legacy_frontend("index.html")
         self.assertIn("mandatoryDecisions", frontend)
         self.assertIn("safe_default_on_plan_confirmation", frontend)
         self.assertIn("Add plan to calendar", frontend)
@@ -44,7 +51,7 @@ class PromptAndTemporalContractTests(unittest.TestCase):
 
     def test_planner_generates_internal_candidates_but_exposes_one_ai_selected_plan(self) -> None:
         backend = (Path(__file__).parents[1] / "backend" / "humanos_server.py").read_text(encoding="utf-8")
-        frontend = (Path(__file__).parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+        frontend = legacy_frontend("app.js")
         self.assertIn("Generate exactly three meaningfully different internal candidates", backend)
         self.assertIn("Apply this lexicographic priority order", backend)
         self.assertIn("Return exactly one selected_candidate_id", backend)
@@ -52,28 +59,28 @@ class PromptAndTemporalContractTests(unittest.TestCase):
         self.assertNotIn("candidate-tab", frontend)
 
     def test_flexible_activity_editor_accepts_non_quarter_hour_duration(self) -> None:
-        frontend = (Path(__file__).parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
-        html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text(encoding="utf-8")
+        frontend = legacy_frontend("app.js")
+        html = legacy_frontend("index.html")
         self.assertIn('id="contextEventDuration" type="number" min="15" step="1"', html)
         self.assertIn("Math.max(15, Math.round(Number(durationRaw)))", frontend)
 
     def test_resolved_parallel_suggestion_collapses_to_one_row(self) -> None:
-        frontend = (Path(__file__).parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
-        css = (Path(__file__).parents[1] / "frontend" / "styles.css").read_text(encoding="utf-8")
+        frontend = legacy_frontend("app.js")
+        css = legacy_frontend("styles.css")
         self.assertIn("parallel-resolution-row", frontend)
         self.assertIn("data-change-parallel", frontend)
         self.assertIn("✓ Parallel:", frontend)
         self.assertIn(".parallel-resolution-row", css)
 
     def test_agent_drawer_filters_operational_logs(self) -> None:
-        frontend = (Path(__file__).parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+        frontend = legacy_frontend("app.js")
         self.assertIn("conversationalTitles", frontend)
         self.assertIn("visibleMessages", frontend)
         self.assertNotIn('title: "Plan note"', frontend)
 
     def test_calendar_colors_are_identity_based_and_parallel_sessions_use_two_columns(self) -> None:
-        frontend = (Path(__file__).parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
-        html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text(encoding="utf-8")
+        frontend = legacy_frontend("app.js")
+        html = legacy_frontend("index.html")
         self.assertIn("function layoutParallelTimelineBlocks", frontend)
         self.assertIn("parallel_column_count === 2", frontend)
         self.assertNotIn('if (task.priority === "高") return "blue"', frontend)
@@ -82,8 +89,8 @@ class PromptAndTemporalContractTests(unittest.TestCase):
         self.assertIn(">Protected time</span>", html)
 
     def test_draft_and_decision_are_distinct_visual_states(self) -> None:
-        frontend = (Path(__file__).parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
-        styles = (Path(__file__).parents[1] / "frontend" / "styles.css").read_text(encoding="utf-8")
+        frontend = legacy_frontend("app.js")
+        styles = legacy_frontend("styles.css")
         self.assertIn('block.source === "pending" ? "Draft"', frontend)
         self.assertIn('block.constraint_conflict ? "Needs your decision"', frontend)
         self.assertIn("pending-static", frontend)
@@ -91,7 +98,7 @@ class PromptAndTemporalContractTests(unittest.TestCase):
         self.assertIn("animation: draft-session-float 2.2s ease-in-out 3", styles)
 
     def test_only_mandatory_decisions_block_the_final_action(self) -> None:
-        frontend = (Path(__file__).parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+        frontend = legacy_frontend("app.js")
         self.assertIn("confirmScheduleBtn.disabled = !hasDraftTasks || mandatoryDecisions.length > 0", frontend)
         self.assertIn('"safe_default_on_plan_confirmation"', frontend)
         self.assertIn('suggestion.change_from_status === "accepted" ? "accepted" : "rejected"', frontend)
@@ -101,8 +108,8 @@ class PromptAndTemporalContractTests(unittest.TestCase):
         self.assertIn("Reduce scope", frontend)
 
     def test_right_rail_modes_are_mutually_exclusive(self) -> None:
-        frontend = (Path(__file__).parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
-        html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text(encoding="utf-8")
+        frontend = legacy_frontend("app.js")
+        html = legacy_frontend("index.html")
         self.assertIn('const showingAgent = rightRailMode === "agent"', frontend)
         self.assertIn('const showingTask = rightRailMode === "task"', frontend)
         self.assertIn('rightRailMode = "pause"', frontend)
@@ -111,13 +118,13 @@ class PromptAndTemporalContractTests(unittest.TestCase):
         self.assertEqual(1, html.count('id="chatDrawer"'))
 
     def test_initial_state_counts_as_daily_checkin(self) -> None:
-        frontend = (Path(__file__).parents[1] / "frontend" / "app.js").read_text(encoding="utf-8")
+        frontend = legacy_frontend("app.js")
         self.assertIn("saveRuntimeStateToBackend({ daily_checkin: true })", frontend)
         self.assertIn("currentProfile.last_daily_checkin_date", frontend)
         self.assertIn("markDailyCheckInSeen();", frontend)
 
     def test_default_legend_is_small_and_context_types_are_on_demand(self) -> None:
-        html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text(encoding="utf-8")
+        html = legacy_frontend("index.html")
         legend = html.split('<div class="calendar-legend"', 1)[1].split("</div>", 1)[0]
         self.assertIn("Work", legend)
         self.assertIn("Protected time", legend)
@@ -128,7 +135,7 @@ class PromptAndTemporalContractTests(unittest.TestCase):
         self.assertNotIn("Flexible activity", legend)
 
     def test_plan_review_has_one_scroll_container_and_no_card_scroll(self) -> None:
-        styles = (Path(__file__).parents[1] / "frontend" / "styles.css").read_text(encoding="utf-8")
+        styles = legacy_frontend("styles.css")
         self.assertIn(".plan-review-panel {", styles)
         self.assertIn("overflow-y: auto", styles)
         self.assertIn(".plan-review-panel .pending-plan-content { min-height: 0; overflow: visible", styles)
