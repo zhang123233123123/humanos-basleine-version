@@ -121,42 +121,32 @@ export default function WeeklyPlanPage() {
 
   const saveSetup = async () => {
     if (!profile || !weekId) return
-    setSubmitting(true)
-    try {
-      const weeklyContext = {
-        ...(profile.weekly_context || {}),
-        week_id: weekId,
-        week_of: weekId,
-        weekly_goal: weeklyGoal,
-        weekly_available_windows: availableWindows,
-        temporary_constraints: temporaryConstraints.split('\n').map((item) => item.trim()).filter(Boolean),
-        keep_buffer: keepBuffer,
-      }
-      await apiRequest('/api/weekly-setup/reconcile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          week_id: weekId,
-          profile: { ...profile, weekly_context: weeklyContext },
-          tasks: tasks.map((task) => ({
-            id: task.id,
-            title: task.title,
-            due: task.due || task.deadline || task.deadline_at,
-            duration: Number(task.duration || task.estimated_duration || 60),
-            priority: task.priority || 'medium',
-            context: task.context || '',
-            contextWindow: task.contextWindow || task.context_window || {},
-          })),
-        }),
-      })
-      await loadPlanningState()
-      toast(t('planning.setupSaved'))
-    } catch (error) {
-      toast(error instanceof Error ? error.message : t('planning.saveFailed'))
-      throw error
-    } finally {
-      setSubmitting(false)
+    const weeklyContext = {
+      ...(profile.weekly_context || {}),
+      week_id: weekId,
+      week_of: weekId,
+      weekly_goal: weeklyGoal,
+      weekly_available_windows: availableWindows,
+      temporary_constraints: temporaryConstraints.split('\n').map((item) => item.trim()).filter(Boolean),
+      keep_buffer: keepBuffer,
     }
+    await apiRequest('/api/weekly-setup/reconcile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        week_id: weekId,
+        profile: { ...profile, weekly_context: weeklyContext },
+        tasks: tasks.map((task) => ({
+          id: task.id,
+          title: task.title,
+          due: task.due || task.deadline || task.deadline_at,
+          duration: Number(task.duration || task.estimated_duration || 60),
+          priority: task.priority || 'medium',
+          context: task.context || '',
+          contextWindow: task.contextWindow || task.context_window || {},
+        })),
+      }),
+    })
   }
 
   const generatePlan = async () => {
@@ -343,7 +333,7 @@ export default function WeeklyPlanPage() {
                     <Button type="button" size="icon" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => void deleteTask(task)} aria-label={locale === 'zh' ? '删除任务' : 'Delete task'}><Trash2 className="h-4 w-4" /></Button>
                   </div>
                 ))}
-                <div className="flex justify-end gap-2 pt-2"><Button variant="outline" onClick={saveSetup} disabled={submitting}>{t('planning.saveSetup')}</Button><Button onClick={generatePlan} disabled={submitting || weekStatus?.new_week}><Sparkles className="mr-2 h-4 w-4" />{t('planning.generate')}</Button></div>
+                <div className="flex justify-end pt-2"><Button onClick={generatePlan} disabled={submitting || weekStatus?.new_week}><Sparkles className="mr-2 h-4 w-4" />{t('planning.generate')}</Button></div>
               </CardContent>
             </Card>
           </div>

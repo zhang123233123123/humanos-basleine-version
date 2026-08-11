@@ -146,7 +146,7 @@ export default function OnboardingPage() {
       }
       localStorage.removeItem(STORAGE_KEY)
       toast.success(t('onboarding.planReady'))
-      router.push('/app/plan')
+      router.replace('/app')
     } catch (error) { toast.error(error instanceof Error ? error.message : t('onboarding.saveFailed')) }
     finally { setLoading(false) }
   }

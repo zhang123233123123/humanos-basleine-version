@@ -267,7 +267,7 @@ const zh = {
     newWeek: '新的一周已经开始', newWeekDescription: '选择要带入本周的未完成任务。', startWeek: '开始新一周', weekStarted: '已开始新一周', rolloverFailed: '周切换失败',
     weekContext: '本周上下文', weekContextDescription: '这些信息决定计划的硬边界与偏好。', weeklyGoal: '本周目标', availableWindows: '可用时间', temporaryConstraints: '临时约束（每行一项）', keepBuffer: '保留可调整的缓冲时间',
     weekTasks: '本周任务', weekTasksDescription: '确认 Deadline、总时长和优先级。', noTasks: '本周暂无未完成任务。', taskTitle: '任务名称', deadline: '截止时间',
-    saveSetup: '保存设置', setupSaved: '本周设置已保存', saveFailed: '保存设置失败', generate: '生成日历安排草案', generateFailed: '日历安排草案生成失败', aiUnavailable: 'AI 计划生成功能当前不可用',
+    saveSetup: '保存本周设置', setupSaved: '本周设置已保存', saveFailed: '本周设置保存失败', generate: '保存变更并生成候选计划', generateFailed: '候选计划生成失败', aiUnavailable: 'AI 计划生成功能当前不可用',
     reviewTitle: '检查日历安排草案', reviewDescription: '虚线时间块只是预览；调整后需要重新验证，确认后才会写入正式日历。', backToSetup: '返回设置', validate: '验证安排', confirm: '确认并加入日历',
     validation: '约束验证', validPlan: '计划通过全部硬约束', invalidPlan: '计划存在约束冲突', notValidated: '修改后请重新验证', validateFailed: '计划验证失败',
     unscheduled: '尚未排入的任务', rationaleRequired: '请说明调整计划的原因', whyChanged: '为什么这样调整？', whyChangedDescription: '你的说明用于理解本次修改，不会自动成为长期偏好。', submitRationale: '提交说明并确认', confirmFailed: '确认计划失败',
