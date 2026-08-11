@@ -292,6 +292,29 @@ class PromptAndTemporalContractTests(unittest.TestCase):
         self.assertEqual(10.0, block["end"])
         self.assertEqual("ai_global_weekly_plan", block["state_scope"])
 
+    def test_python_rejects_ai_sessions_without_profile_rest_gap(self) -> None:
+        profile = {
+            "timezone": "Asia/Shanghai",
+            "_client_now": "2026-08-03T08:00:00+08:00",
+            "task_preferences": {"preferred_session_minutes": 45, "rest_between_tasks_minutes": 15},
+            "weekly_context": {"weekly_available_windows": "周一 08:00-18:00", "keep_buffer": False},
+        }
+        task = {
+            "id": "paper", "title": "论文", "task_type": "flexible_task", "due": "周一 18:00",
+            "duration": 90, "priority": "高", "status": "queued",
+        }
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            candidate = Store(Path(temp_dir) / "rest-gap.db").validate_llm_schedule_candidates(
+                {"profile": profile, "tasks": [task], "ai_task_analysis": {"task_demands": []}},
+                {"plan_patch": []},
+                {"candidate_plans": [{"id": "no-rest", "blocks": [
+                    {"task_id": "paper", "day_index": 0, "start": 9.0, "end": 9.75},
+                    {"task_id": "paper", "day_index": 0, "start": 9.75, "end": 10.5},
+                ]}]},
+            )[0]
+        self.assertFalse(candidate["validation"]["valid"])
+        self.assertTrue(any(item["type"] == "insufficient_rest" for item in candidate["validation"]["violations"]))
+
     def test_momentary_state_changes_the_valid_next_session(self) -> None:
         profile = {
             "timezone": "Asia/Shanghai", "_client_now": "2026-08-03T08:00:00+08:00",

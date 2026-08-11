@@ -5285,7 +5285,11 @@ class Store:
             timezone_name=timezone_name,
             blocks=blocks,
             task_kinds={task_id: schedule_task_kind(task) for task_id, task in task_map.items()},
-            minimum_rest_minutes=int(payload.get("minimum_rest_minutes") or 0),
+            minimum_rest_minutes=int(
+                payload.get("minimum_rest_minutes")
+                or (profile.get("task_preferences") or {}).get("rest_between_tasks_minutes")
+                or 15
+            ),
         )
         violations.extend(timeline_violations)
         return {
@@ -5356,6 +5360,7 @@ class Store:
         tasks = state.get("tasks", [])
         task_map = {str(task.get("id")): task for task in tasks}
         context = build_scheduling_context(profile)
+        rest_minutes = int(context.get("rest_minutes") or 15)
         validation_windows = context.get("movable_routine_windows") or context["windows"]
         now = profile_now(profile)
         today_index = now.weekday()
@@ -5521,6 +5526,17 @@ class Store:
                             break
                         if not confirmed_parallel_overlap_allowed(previous, current):
                             violations.append({"type": "overlap", "block_ids": [previous.get("block_id"), current.get("block_id")]})
+                task_sessions = [block for block in ordered if block.get("kind") == "task_session"]
+                for previous, current in zip(task_sessions, task_sessions[1:]):
+                    gap_minutes = round((float(current["start"]) - float(previous["end"])) * 60)
+                    if 0 <= gap_minutes < rest_minutes:
+                        violations.append({
+                            "type": "insufficient_rest",
+                            "block_ids": [previous.get("block_id"), current.get("block_id")],
+                            "task_ids": [previous.get("task_id"), current.get("task_id")],
+                            "required_rest_minutes": rest_minutes,
+                            "actual_rest_minutes": gap_minutes,
+                        })
 
             for group_id, accepted in accepted_pair_specs.items():
                 group_blocks = [block for block in blocks if block.get("parallel_group_id") == group_id]
