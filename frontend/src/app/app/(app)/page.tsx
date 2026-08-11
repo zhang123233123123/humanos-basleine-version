@@ -49,6 +49,18 @@ function TaskInspectorWrapper() {
     setPreviewTasks((prev) => prev.filter((t) => t.uniqueId !== uniqueId))
   }
 
+  const openScheduleProposal = async (source: string) => {
+    const proposal = await apiRequest<{ decision: PlanDecision }>('/api/schedules/decide', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_now: new Date().toISOString(), source }),
+    })
+    if (proposal.decision?.unavailable || proposal.decision?.error) {
+      throw new Error(proposal.decision.error || 'The scheduling service could not generate a plan preview')
+    }
+    router.push('/app/plan?proposal=latest')
+  }
+
   const handleConfirm = async (task: {
     title: string
     description?: string
@@ -89,6 +101,7 @@ function TaskInspectorWrapper() {
     toast(t('event.eventUpdated'))
     setActiveEvent(null)
     await refetchEvents(currentStart, currentEnd)
+    await openScheduleProposal('single_task_confirmation')
   }
 
   const handleReject = () => {
@@ -122,7 +135,7 @@ function TaskInspectorWrapper() {
       setEvents(useEvents.getState().events.filter((e) => e.id !== previewId))
     }
 
-    await fetch('/api/tasks', {
+    await apiRequest('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -142,6 +155,7 @@ function TaskInspectorWrapper() {
     toast(t('event.eventUpdated'))
     if (previewId) removeFromPreviewTasks(previewId)
     await refetchEvents(currentStart, currentEnd)
+    await openScheduleProposal('single_preview_confirmation')
   }
 
   const handleRejectPreview = (task: { uniqueId: string }) => {
@@ -211,15 +225,7 @@ function TaskInspectorWrapper() {
       setBatchReason('')
       await refetchEvents(currentStart, currentEnd)
       if (failedCount === 0) {
-        const proposal = await apiRequest<{ decision: PlanDecision }>('/api/schedules/decide', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ client_now: new Date().toISOString(), source: 'task_preview_confirmation' }),
-        })
-        if (proposal.decision?.unavailable || proposal.decision?.error) {
-          throw new Error(proposal.decision.error || 'The scheduling service could not generate a plan preview')
-        }
-        router.push('/app/plan?proposal=latest')
+        await openScheduleProposal('task_preview_confirmation')
       }
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Tasks were saved, but the schedule preview could not be generated')
