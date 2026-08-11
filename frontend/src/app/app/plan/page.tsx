@@ -153,11 +153,18 @@ export default function WeeklyPlanPage() {
     setSubmitting(true)
     try {
       await saveSetup()
-      const result = await apiRequest<{ decision: PlanDecision }>('/api/schedules/decide', {
+      const accepted = await apiRequest<{ job: { job_id: string } }>('/api/schedules/decide', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ week_id: weekId, client_now: new Date().toISOString(), adjustment_trigger: adjustmentTrigger || undefined }),
       })
+      let job: { status: string; result?: PlanDecision; error?: string } = { status: 'queued' }
+      for (let attempt = 0; attempt < 180 && !['completed', 'failed'].includes(job.status); attempt += 1) {
+        if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 1000))
+        job = (await apiRequest<{ job: typeof job }>(`/api/background-jobs?job_id=${encodeURIComponent(accepted.job.job_id)}`)).job
+      }
+      if (job.status !== 'completed' || !job.result) throw new Error(job.error || t('planning.generateFailed'))
+      const result = { decision: job.result }
       if (result.decision?.unavailable || result.decision?.error) {
         throw new Error(result.decision.error || t('planning.aiUnavailable'))
       }
@@ -270,7 +277,7 @@ export default function WeeklyPlanPage() {
   }
 
   return (
-    <main className="humanos-operating-page h-full min-h-0 overflow-y-auto px-4 pb-28 pt-6 md:px-8">
+    <main className="humanos-operating-page h-full min-h-0 overflow-y-auto overscroll-contain px-4 pb-28 pt-6 md:px-8">
       <div className="humanos-operating-container mx-auto max-w-6xl space-y-6">
         <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>

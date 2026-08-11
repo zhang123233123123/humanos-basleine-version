@@ -48,6 +48,16 @@ function TaskInspectorWrapper() {
   const [proposalError, setProposalError] = useState('')
   const [proposalRetrying, setProposalRetrying] = useState(false)
 
+  const waitForJob = async <T,>(jobId: string): Promise<T> => {
+    for (let attempt = 0; attempt < 180; attempt += 1) {
+      const response = await apiRequest<{ job: { status: string; result?: T; error?: string } }>(`/api/background-jobs?job_id=${encodeURIComponent(jobId)}`)
+      if (response.job.status === 'completed') return response.job.result as T
+      if (response.job.status === 'failed') throw new Error(response.job.error || 'Background processing failed')
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+    }
+    throw new Error('Background processing is still running. Please try again shortly.')
+  }
+
   const removeFromPreviewTasks = (uniqueId: string) => {
     setPreviewTasks((prev) => prev.filter((t) => t.uniqueId !== uniqueId))
   }
@@ -56,11 +66,12 @@ function TaskInspectorWrapper() {
     setProposalRetrying(true)
     setProposalError('')
     try {
-      const proposal = await apiRequest<{ decision: PlanDecision }>('/api/schedules/decide', {
+      const accepted = await apiRequest<{ job: { job_id: string } }>('/api/schedules/decide', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ client_now: new Date().toISOString(), source }),
       })
+      const proposal = { decision: await waitForJob<PlanDecision>(accepted.job.job_id) }
       if (proposal.decision?.unavailable || proposal.decision?.error) {
         throw new Error(proposal.decision.error || 'The scheduling service could not generate a plan preview')
       }
@@ -668,7 +679,9 @@ function AppContent({
     })
     if (res.ok) {
       await refetchEvents(currentStart, currentEnd)
-      const data = await res.json()
+      const accepted = await res.json()
+      const turn = await waitForJob<any>(accepted.job.job_id)
+      const data = { turn }
       // If AI returned tasks, show the first one in the right inspector
       const tasks = data?.turn?.tasks
       if (tasks && tasks.length > 0) {
@@ -727,7 +740,7 @@ function AppContent({
   }
 
   return (
-    <div className="flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col overflow-hidden">
+    <div className="flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col overflow-y-auto overscroll-contain">
       <TaskReminder />
       {/* Top bar */}
       <div className="border-b shrink-0">

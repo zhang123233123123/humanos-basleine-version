@@ -617,6 +617,7 @@ class Store:
         self.schedule_request_lock = threading.Lock()
         self.schedule_request_cache: dict[str, dict] = {}
         self.init_db()
+        self.resume_background_jobs()
 
     @contextmanager
     def connect(self):
@@ -916,6 +917,22 @@ class Store:
                   created_at INTEGER NOT NULL,
                   PRIMARY KEY(user_id, request_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS background_jobs (
+                  id TEXT PRIMARY KEY,
+                  user_id TEXT NOT NULL,
+                  kind TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  payload_json TEXT NOT NULL,
+                  result_json TEXT,
+                  error TEXT,
+                  created_at INTEGER NOT NULL,
+                  started_at INTEGER,
+                  completed_at INTEGER,
+                  updated_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_background_jobs_user
+                ON background_jobs(user_id, created_at DESC);
                 """
             )
             columns = {
@@ -1001,6 +1018,59 @@ class Store:
             for name, definition in user_migrations.items():
                 if name not in user_columns:
                     conn.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
+
+    def create_background_job(self, user_id: str, kind: str, payload: dict) -> dict:
+        if kind not in {"chat_parse", "schedule_plan"}:
+            raise ValueError("unsupported background job kind")
+        job_id = new_id("job")
+        timestamp = now_ms()
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO background_jobs (id,user_id,kind,status,payload_json,result_json,error,created_at,started_at,completed_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (job_id, user_id, kind, "queued", as_json(payload), None, None, timestamp, None, None, timestamp),
+            )
+        self.start_background_job(job_id)
+        return self.get_background_job(user_id, job_id) or {}
+
+    def get_background_job(self, user_id: str, job_id: str) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM background_jobs WHERE id=? AND user_id=?", (job_id, user_id)).fetchone()
+        if not row:
+            return None
+        return {
+            "job_id": row["id"], "kind": row["kind"], "status": row["status"],
+            "result": from_json(row["result_json"], None), "error": row["error"],
+            "created_at": row["created_at"], "started_at": row["started_at"],
+            "completed_at": row["completed_at"], "updated_at": row["updated_at"],
+        }
+
+    def start_background_job(self, job_id: str) -> None:
+        threading.Thread(target=self.run_background_job, args=(job_id,), daemon=True, name=f"humanos-{job_id}").start()
+
+    def run_background_job(self, job_id: str) -> None:
+        timestamp = now_ms()
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM background_jobs WHERE id=?", (job_id,)).fetchone()
+            if not row or row["status"] == "completed":
+                return
+            conn.execute("UPDATE background_jobs SET status='running',started_at=?,updated_at=?,error=NULL WHERE id=?", (timestamp, timestamp, job_id))
+        try:
+            payload = from_json(row["payload_json"], {})
+            result = self.chat_turn(row["user_id"], payload) if row["kind"] == "chat_parse" else self.decide_schedule(row["user_id"], payload)
+            completed = now_ms()
+            with self.connect() as conn:
+                conn.execute("UPDATE background_jobs SET status='completed',result_json=?,completed_at=?,updated_at=? WHERE id=?", (as_json(result), completed, completed, job_id))
+        except Exception as exc:
+            completed = now_ms()
+            with self.connect() as conn:
+                conn.execute("UPDATE background_jobs SET status='failed',error=?,completed_at=?,updated_at=? WHERE id=?", (f"{type(exc).__name__}: {exc}", completed, completed, job_id))
+
+    def resume_background_jobs(self) -> None:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT id FROM background_jobs WHERE status IN ('queued','running') ORDER BY created_at ASC").fetchall()
+            conn.execute("UPDATE background_jobs SET status='queued',updated_at=? WHERE status='running'", (now_ms(),))
+        for row in rows:
+            self.start_background_job(row["id"])
 
     def password_hash(self, password: str, salt: str) -> str:
         return hashlib.sha256(f"{salt}:{password}".encode("utf-8")).hexdigest()
@@ -1713,18 +1783,13 @@ class Store:
         expected_count = self.estimated_task_count(clean)
         profile = self.ensure_profile(user_id)
         timezone_name = str(profile.get("timezone") or "Asia/Shanghai")
-        prefer_local_parser = self.looks_like_compact_multi_task_list(clean) or bool(self.english_task_segments(clean))
-        # Numbered and compact lists already contain deterministic boundaries.
-        # Parse them locally before invoking an external model so a provider
-        # timeout cannot block the task-confirmation workflow.
-        if prefer_local_parser:
-            return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
         typed_tasks = parse_tasks_with_agent(
             clean,
             current_time=self.user_clock_now(user_id, timezone_name).isoformat(),
             timezone_name=timezone_name,
             chat_context=chat_context,
         ) if parse_tasks_with_agent else None
+        prefer_local_parser = self.looks_like_compact_multi_task_list(clean) or bool(self.english_task_segments(clean))
         explicit_schedule_tasks = [] if typed_tasks else self.parse_explicit_schedule_lines(user_id, clean, create_tasks=create_tasks)
         if explicit_schedule_tasks:
             return explicit_schedule_tasks
@@ -2376,7 +2441,7 @@ class Store:
             return self.calendar_advisor_turn(user_id, text, payload)
         chat_context = self.build_chat_context(user_id, text)
         chat_context["client_context"] = payload.get("client_context") or {}
-        features = self.extract_behavior_features(user_id, text, chat_context, local_only=True)
+        features = self.extract_behavior_features(user_id, text, chat_context)
         intent = features.get("intent", "other")
         response = {
             "intent": intent,
@@ -2713,10 +2778,7 @@ class Store:
         ]
         latest_chain = self.latest_task_turn_tasks(user_id)
         recent_tasks = latest_chain or active_tasks[-5:]
-        # Context construction is on the interactive chat path. Semantic
-        # memory retrieval may call an external embedding service, so it must
-        # not delay task parsing or turn a provider timeout into a 502.
-        memories = []
+        memories = self.search_memories(user_id, query, top_k=5)
         context = {
             "recent_turns": [
                 {
@@ -5372,10 +5434,7 @@ class Store:
             ]
             runtime_state = payload.get("runtime_state") or self.latest_runtime_state(user_id)
             query = payload.get("query") or self.build_schedule_query(tasks, runtime_state)
-            # Do not make external embedding/LLM calls on the interactive
-            # confirmation path. A draft must be persisted before the proxy
-            # deadline so the calendar can display it immediately.
-            memories = []
+            memories = self.search_memories(user_id, query, top_k=4)
             analysis_state = {
                 "user_id": user_id,
                 "payload": payload,
@@ -5384,7 +5443,6 @@ class Store:
                 "runtime_state": runtime_state,
                 "query": query,
                 "memories": memories,
-                "deterministic_only": True,
             }
             analysis = self.analyze_schedule_inputs(analysis_state)
             # Confirmed calendar commitments are the scheduling baseline. A
@@ -5411,11 +5469,15 @@ class Store:
                 "task_demands": analysis.get("task_demands", []),
                 "dependencies": analysis.get("dependencies", []),
             }
-            decision["ai_soft_review"] = {
-                "status": "deferred",
+            ai_soft_review = chat_completion([
+                {"role": "system", "content": "Review this Python-generated weekly schedule for soft risks only. Do not change exact times. Return JSON with status, risks, strengths, and user_message. Consider cognitive load, context switching, buffer, deadline pressure, and profile rhythm."},
+                {"role": "user", "content": as_json(review_payload)},
+            ], temperature=0.1)
+            decision["ai_soft_review"] = ai_soft_review if isinstance(ai_soft_review, dict) else {
+                "status": "unavailable",
                 "risks": [],
                 "strengths": ["The draft passed deterministic timeline allocation and hard-constraint validation."],
-                "user_message": "The schedule draft is ready. AI soft-risk review does not block calendar display.",
+                "user_message": "The deterministic schedule is available; AI soft-risk review was unavailable.",
             }
             validation = self.validate_confirmed_schedule(user_id, {**decision, "user_id": user_id})
             decision["validation"] = validation
@@ -6804,6 +6866,25 @@ class Handler(BaseHTTPRequestHandler):
                 user_id = payload.get("user_id", "demo")
                 store.ensure_profile(user_id)
                 self.send_json({"decision": store.decide_schedule(user_id, payload)})
+                return
+
+            if path == "/api/background-jobs" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                store.ensure_profile(user_id)
+                kind = str(payload.get("kind") or "")
+                job_payload = dict(payload.get("payload") or {})
+                job_payload["user_id"] = user_id
+                self.send_json({"job": store.create_background_job(user_id, kind, job_payload)}, status=202)
+                return
+
+            if path == "/api/background-jobs" and method == "GET":
+                user_id = query.get("user_id", ["demo"])[0]
+                job_id = query.get("job_id", [""])[0]
+                job = store.get_background_job(user_id, job_id)
+                if not job:
+                    raise KeyError(job_id)
+                self.send_json({"job": job})
                 return
 
             if path == "/api/schedules/validate" and method == "POST":

@@ -145,6 +145,17 @@ export default function OnboardingPage() {
         const error = await planResponse.json().catch(() => ({})) as { message?: string; error?: string }
         throw new Error(error.message || error.error || t('onboarding.planFailed'))
       }
+      const accepted = await planResponse.json() as { job?: { job_id?: string } }
+      const jobId = accepted.job?.job_id
+      if (!jobId) throw new Error(t('onboarding.planFailed'))
+      let job: { status: string; error?: string } = { status: 'queued' }
+      for (let attempt = 0; attempt < 180 && !['completed', 'failed'].includes(job.status); attempt += 1) {
+        if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 1000))
+        const statusResponse = await fetch(`/api/background-jobs?job_id=${encodeURIComponent(jobId)}`)
+        if (!statusResponse.ok) throw new Error(t('onboarding.planFailed'))
+        job = ((await statusResponse.json()) as { job: typeof job }).job
+      }
+      if (job.status !== 'completed') throw new Error(job.error || t('onboarding.planFailed'))
       localStorage.removeItem(STORAGE_KEY)
       // Force the workspace to load the draft created by this onboarding run.
       useEvents.getState().setEvents([])

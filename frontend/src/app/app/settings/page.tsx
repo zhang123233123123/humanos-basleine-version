@@ -75,7 +75,7 @@ export default function SettingsPage() {
   if (!profile) return <div className="grid h-full place-items-center text-sm text-muted-foreground">{c('无法加载设置', 'Unable to load settings')}</div>
 
   return (
-    <main className="h-full overflow-y-auto bg-[#f3f1eb] pb-28 text-stone-900 dark:bg-[#090d13] dark:text-stone-100">
+    <main className="h-full min-h-0 overflow-y-auto overscroll-contain bg-[#f3f1eb] pb-28 text-stone-900 dark:bg-[#090d13] dark:text-stone-100">
       <div className="mx-auto max-w-6xl px-4 py-8 md:px-8 md:py-12">
         <header className="mb-8 flex flex-col gap-4 border-b border-stone-300/70 pb-7 dark:border-white/10 md:flex-row md:items-end md:justify-between">
           <div><p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-700 dark:text-blue-400">HumanOS preferences</p><h1 className="mt-2 font-serif text-4xl font-semibold md:text-5xl">{c('设置中心', 'Settings')}</h1><p className="mt-2 max-w-xl text-sm text-stone-600 dark:text-stone-400">{c('控制 HumanOS 如何理解你的时间、工作方式和个人记忆。', 'Control how HumanOS understands your time, working style, and personal memory.')}</p></div>

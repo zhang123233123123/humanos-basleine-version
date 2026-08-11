@@ -35,7 +35,16 @@ export function Chat({ closeChat, chatOpen }: { closeChat: () => void; chatOpen:
       const response = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: text, assistant_mode: 'calendar_advisor', locale }) })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(body.message || body.error || 'Advisor unavailable')
-      const turn = body.turn || {}
+      let job = body.job
+      for (let attempt = 0; job && job.status !== 'completed' && job.status !== 'failed' && attempt < 180; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        const statusResponse = await fetch(`/api/background-jobs?job_id=${encodeURIComponent(job.job_id)}`)
+        const statusBody = await statusResponse.json().catch(() => ({}))
+        if (!statusResponse.ok) throw new Error(statusBody.message || statusBody.error || 'Advisor unavailable')
+        job = statusBody.job
+      }
+      if (job?.status === 'failed') throw new Error(job.error || 'Advisor unavailable')
+      const turn = job?.result || {}
       setMessages((current) => [...current, { role: 'assistant', text: turn.reply || (zh ? '暂时没有可用摘要。' : 'No summary is available.') }])
       if (turn.handoff_required) setHandoffText(turn.handoff_text || text)
     } catch (error) {

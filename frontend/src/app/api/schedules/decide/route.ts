@@ -6,9 +6,8 @@ export async function POST(req: Request) {
   if (!userId) return unauthorizedResponse()
   try {
     const body = await req.json()
-    return Response.json(await humanosRequest('POST', '/api/schedules/decide', { ...body, user_id: userId }))
+    return Response.json(await humanosRequest('POST', '/api/background-jobs', { user_id: userId, kind: 'schedule_plan', payload: body }), { status: 202 })
   } catch (error) {
     return humanosErrorResponse(error)
   }
 }
-
