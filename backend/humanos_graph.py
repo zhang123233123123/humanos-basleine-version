@@ -886,6 +886,25 @@ def scheduler_node(_: Any):
             violations: list[dict[str, Any]] = []
             flexible_blocks = [block for block in blocks if block.get("kind") != "fixed_event"]
             for block in flexible_blocks:
+                start = float(block.get("start") or 0)
+                end = float(block.get("end") or 0)
+                session_minutes = int(block.get("session_minutes") or round((end - start) * 60))
+                if (
+                    abs(start * 4 - round(start * 4)) > 0.001
+                    or abs(end * 4 - round(end * 4)) > 0.001
+                ):
+                    violations.append({
+                        "type": "not_on_15_minute_grid",
+                        "block_id": block["block_id"],
+                        "task_id": block["task_id"],
+                    })
+                if session_minutes <= 0 or abs((end - start) * 60 - session_minutes) > 0.01:
+                    violations.append({
+                        "type": "session_duration_mismatch",
+                        "block_id": block["block_id"],
+                        "task_id": block["task_id"],
+                        "session_minutes": session_minutes,
+                    })
                 if block["day_index"] == today_index and block["start"] < next_quarter_hour - 0.001:
                     violations.append({"type": "past_time", "block_id": block["block_id"], "task_id": block["task_id"]})
                 inside = any(

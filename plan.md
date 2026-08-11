@@ -190,7 +190,7 @@ feat(onboarding): implement profile and weekly setup wizard
 fix(tasks): stabilize structured parsing and task confirmation
 ```
 
-## Step 4：建立 Weekly Setup 与可靠的 Draft Plan
+## Step 4：建立 Weekly Setup 与可靠的 Draft Plan（已完成）
 
 ### 目标
 
