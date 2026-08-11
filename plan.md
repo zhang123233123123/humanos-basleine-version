@@ -130,7 +130,7 @@ docs(architecture): map formal UX flow to current implementation
 fix(auth): unify frontend and backend user identity
 ```
 
-## Step 2：完成首次 Profile 四步建模
+## Step 2：完成首次 Profile 四步建模（已完成）
 
 ### 目标
 
