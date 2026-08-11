@@ -13,7 +13,7 @@ type Profile = Record<string, any>
 
 export default function SettingsPage() {
   const { locale } = useTranslation()
-  const c = (zh: string, en: string) => locale === 'zh' ? zh : en
+  const c = useCallback((zh: string, en: string) => locale === 'zh' ? zh : en, [locale])
   const sections: Array<{ id: Section; title: string; description: string; icon: typeof UserRound }> = [
     { id: 'account', title: c('个人资料', 'Profile'), description: c('身份与所在时区', 'Identity and timezone'), icon: UserRound },
     { id: 'rhythm', title: c('工作节律', 'Working Rhythm'), description: c('高效与低能量时段', 'High and low energy windows'), icon: Clock3 },
@@ -42,7 +42,7 @@ export default function SettingsPage() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : c('无法加载设置', 'Unable to load settings'))
     } finally { setLoading(false) }
-  }, [])
+  }, [c])
 
   useEffect(() => { void load() }, [load])
 

@@ -49,7 +49,6 @@ export default function CheckInPage() {
           attention_residue: attentionResidue,
           daily_note: dailyNote,
           daily_checkin: true,
-          local_date: new Date().toLocaleDateString('en-CA'),
         }),
       })
       setDailyReview(result.data.daily_plan_review)

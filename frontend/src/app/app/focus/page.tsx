@@ -45,7 +45,7 @@ export default function FocusPage() {
   const [completion, setCompletion] = useState<'completed' | 'some_progress' | 'no_progress' | 'did_not_start'>('some_progress')
   const [remainingMinutes, setRemainingMinutes] = useState(0)
   const [progress, setProgress] = useState('')
-  const [nextStep, setNextStep] = useState('')
+  const [feedbackNextStep, setFeedbackNextStep] = useState('')
   const [remainingWork, setRemainingWork] = useState('')
   const [scheduleAction, setScheduleAction] = useState<'keep_time_free' | 'review_today'>('keep_time_free')
   const [difficulty, setDifficulty] = useState(4)
@@ -242,7 +242,7 @@ export default function FocusPage() {
             actual_minutes: actualMinutes,
             remaining_duration_minutes: completion === 'completed' ? 0 : remainingMinutes,
             progress,
-            next_step: nextStep,
+            next_step: feedbackNextStep,
             remaining_work: remainingWork,
             perceived_difficulty: difficulty,
           },
@@ -303,7 +303,7 @@ export default function FocusPage() {
               <label className="grid gap-2 text-sm"><span>{t('execution.actualMinutes')}</span><input className="h-10 rounded-md border bg-background px-3" type="number" min={0} value={actualMinutes} onChange={(event) => setActualMinutes(Number(event.target.value))} /></label>
               {completion !== 'completed' && <><label className="grid gap-2 text-sm"><span>{t('execution.remainingMinutes')}</span><input className="h-10 rounded-md border bg-background px-3" type="number" min={0} value={remainingMinutes} onChange={(event) => setRemainingMinutes(Number(event.target.value))} /></label><label className="grid gap-2 text-sm"><span>{t('execution.remainingWork')}</span><input className="h-10 rounded-md border bg-background px-3" value={remainingWork} onChange={(event) => setRemainingWork(event.target.value)} /></label></>}
               <label className="grid gap-2 text-sm"><span>{t('execution.progress')}</span><input className="h-10 rounded-md border bg-background px-3" value={progress} onChange={(event) => setProgress(event.target.value)} /></label>
-              {completion !== 'completed' && <label className="grid gap-2 text-sm"><span>{t('execution.nextStep')}</span><input className="h-10 rounded-md border bg-background px-3" value={nextStep} onChange={(event) => setNextStep(event.target.value)} /></label>}
+              {completion !== 'completed' && <label className="grid gap-2 text-sm"><span>{t('execution.feedbackNextStep')}</span><input className="h-10 rounded-md border bg-background px-3" value={feedbackNextStep} onChange={(event) => setFeedbackNextStep(event.target.value)} /></label>}
               {completion === 'completed' && actualMinutes < plannedMinutes && <label className="grid gap-2 text-sm md:col-span-2"><span>{t('execution.earlyFinishAction')}</span><select className="h-10 rounded-md border bg-background px-3" value={scheduleAction} onChange={(event) => setScheduleAction(event.target.value as typeof scheduleAction)}><option value="keep_time_free">{t('execution.keepTimeFree')}</option><option value="review_today">{t('execution.reviewToday')}</option></select></label>}
               <label className="grid gap-2 text-sm"><span>{t('execution.difficulty')} {difficulty}/7</span><input type="range" min={1} max={7} value={difficulty} onChange={(event) => setDifficulty(Number(event.target.value))} /></label>
               {[['focusAfter', focusAfter, setFocusAfter], ['energyAfter', energyAfter, setEnergyAfter], ['stressAfter', stressAfter, setStressAfter]].map(([key, value, setter]) => <label key={String(key)} className="grid gap-2 text-sm"><span>{t(`execution.${key}`)} {String(value)}/7</span><input type="range" min={1} max={7} value={Number(value)} onChange={(event) => (setter as (value: number) => void)(Number(event.target.value))} /></label>)}

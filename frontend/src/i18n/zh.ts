@@ -111,6 +111,12 @@ const zh = {
     failedToLoad: '加载个人资料失败',
   },
   onboarding: {
+    coursesLabel: '当前主要课程或研究任务',
+    coursesPlaceholder: '例如：AI 规划论文、用户访谈整理、VLA 复现',
+    toolsLabel: '当前使用的计划工具',
+    toolsPlaceholder: '日历、Todo、Notion、Excel……',
+    deadlinesLabel: '近期重要截止日期',
+    deadlinesPlaceholder: '例如：周四提交文献综述，周六完成研究报告',
     title: '建立你的 HumanOS',
     subtitle: '先建立长期工作节奏，再配置本周环境并生成第一份计划草案。',
     step1of: '第 1 步，共 4 步',
@@ -272,7 +278,7 @@ const zh = {
     elapsed: '本次已执行', planned: '计划时长', remaining: 'Session 剩余', pause: '暂停', resume: '继续', start: '开始专注', end: '结束 Session', captureContext: '记录中断上下文',
     context: '任务上下文', noContext: '暂无任务上下文。', nextStep: '回来后的第一步', schedule: '计划信息',
     noSession: '当前没有可执行 Session', noSessionDescription: '先确认一份周计划，系统才会创建正式的执行 Session。', openPlan: '打开周计划',
-    feedbackTitle: '这次 Session 实际发生了什么？', feedbackDescription: '结束 Session 不会自动完成任务，请根据实际结果更新任务和状态。', completion: '完成情况', partial: '有一些进展', completed: '任务已完成', noProgress: '没有进展', didNotStart: '没有开始', actualMinutes: '实际分钟数', remainingMinutes: '任务剩余分钟数', progress: '本次完成了什么', nextStep: '下一步从哪里继续', remainingWork: '仍需完成的工作', earlyFinishAction: '提前完成后如何处理空出的时间？', keepTimeFree: '保留为空闲时间', reviewToday: '复盘并调整今天的计划', difficulty: '实际难度', focusAfter: '结束后专注', energyAfter: '结束后精力', stressAfter: '结束后压力', timingFit: '时间是否合适', lengthFit: 'Session 长度', good: '合适', tooEarly: '太早', tooLate: '太晚', appropriate: '合适', tooShort: '太短', tooLong: '太长', saveFeedback: '保存反馈', feedbackSaved: '执行反馈已保存', feedbackFailed: '保存反馈失败',
+    feedbackTitle: '这次 Session 实际发生了什么？', feedbackDescription: '结束 Session 不会自动完成任务，请根据实际结果更新任务和状态。', completion: '完成情况', partial: '有一些进展', completed: '任务已完成', noProgress: '没有进展', didNotStart: '没有开始', actualMinutes: '实际分钟数', remainingMinutes: '任务剩余分钟数', progress: '本次完成了什么', feedbackNextStep: '下一步从哪里继续', remainingWork: '仍需完成的工作', earlyFinishAction: '提前完成后如何处理空出的时间？', keepTimeFree: '保留为空闲时间', reviewToday: '复盘并调整今天的计划', difficulty: '实际难度', focusAfter: '结束后专注', energyAfter: '结束后精力', stressAfter: '结束后压力', timingFit: '时间是否合适', lengthFit: 'Session 长度', good: '合适', tooEarly: '太早', tooLate: '太晚', appropriate: '合适', tooShort: '太短', tooLong: '太长', saveFeedback: '保存反馈', feedbackSaved: '执行反馈已保存', feedbackFailed: '保存反馈失败',
     history: '执行记录', historyDescription: '后端保存的 Session 状态与时间。', noHistory: '暂无执行记录。',
   },
   checkin: {

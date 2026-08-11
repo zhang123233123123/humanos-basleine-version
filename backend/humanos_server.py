@@ -3811,7 +3811,7 @@ class Store:
             if payload.get("daily_checkin"):
                 conn.execute(
                     "UPDATE profiles SET last_daily_checkin_date=?,updated_at=? WHERE user_id=?",
-                    (self.daily_checkin_status(user_id)["local_date"], state["created_at"], user_id),
+                    (str(payload.get("local_date") or self.daily_checkin_status(user_id)["local_date"]), state["created_at"], user_id),
                 )
         self.log_event(user_id, "runtime_state_saved", state)
         return state
