@@ -280,7 +280,7 @@ export default function WeeklyPlanPage() {
   }
 
   return (
-    <main className="humanos-operating-page min-h-screen overflow-y-auto px-4 pb-28 pt-6 md:px-8">
+    <main className="humanos-operating-page h-full min-h-0 overflow-y-auto px-4 pb-28 pt-6 md:px-8">
       <div className="humanos-operating-container mx-auto max-w-6xl space-y-6">
         <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>

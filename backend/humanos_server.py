@@ -1615,6 +1615,21 @@ class Store:
                     timestamp,
                 ),
             )
+            # A newly created Task changes the planning input set. Any draft
+            # generated before this Task existed is stale and must never be
+            # confirmable; an already confirmed plan requires a new revision.
+            conn.execute(
+                "UPDATE plans SET plan_status='superseded',updated_at=? WHERE user_id=? AND week_id=? AND plan_status='proposed'",
+                (timestamp, user_id, aggregate.week_id),
+            )
+            conn.execute(
+                "UPDATE plans SET plan_status='needs_update',updated_at=? WHERE user_id=? AND week_id=? AND plan_status='confirmed'",
+                (timestamp, user_id, aggregate.week_id),
+            )
+            conn.execute(
+                "UPDATE profiles SET active_plan_revision=NULL,updated_at=? WHERE user_id=?",
+                (timestamp, user_id),
+            )
         self.add_memory(
             user_id=user_id,
             source_type="task",
