@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { Button } from '@/components/ui/button'
-import { Check, Play, Save, Trash2, X } from 'lucide-react'
+import { ArrowLeft, Check, Play, Save, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface TaskDetail {
@@ -35,9 +35,10 @@ interface TaskInspectorProps {
   onSave?: (task: TaskDetail) => Promise<void>
   onOpenFocus?: (task: TaskDetail) => Promise<void>
   onDelete?: (task: TaskDetail) => Promise<void>
+  onBack?: () => void
 }
 
-function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDelete }: TaskInspectorProps) {
+function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDelete, onBack }: TaskInspectorProps) {
   const { t } = useTranslation()
   const [confirming, setConfirming] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -167,6 +168,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
     <>
       {/* Header */}
       <div className="border-b border-border p-3">
+        {onBack && <Button variant="ghost" size="sm" className="mb-2 h-8 px-2 text-xs" onClick={onBack}><ArrowLeft className="mr-1 h-3.5 w-3.5" />{t('workspace.backToTaskList')}</Button>}
         <h2 className="text-sm font-semibold">
           {isExistingTask ? t('workspace.editTitle') : t('workspace.taskDetail')}
         </h2>
@@ -338,12 +340,12 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
   )
 }
 
-export function TaskInspector({ task, onConfirm, onReject, onSave, onOpenFocus, onDelete }: TaskInspectorProps) {
+export function TaskInspector({ task, onConfirm, onReject, onSave, onOpenFocus, onDelete, onBack }: TaskInspectorProps) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => { setMounted(true) }, [])
   return (
     <aside className="w-80 shrink-0 border-l border-border h-full flex flex-col bg-background overflow-y-auto" suppressHydrationWarning>
-      {mounted ? <InspectorContent task={task} onConfirm={onConfirm} onReject={onReject} onSave={onSave} onOpenFocus={onOpenFocus} onDelete={onDelete} /> : null}
+      {mounted ? <InspectorContent task={task} onConfirm={onConfirm} onReject={onReject} onSave={onSave} onOpenFocus={onOpenFocus} onDelete={onDelete} onBack={onBack} /> : null}
     </aside>
   )
 }

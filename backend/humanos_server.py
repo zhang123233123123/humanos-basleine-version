@@ -5387,7 +5387,10 @@ class Store:
                 "deterministic_only": True,
             }
             analysis = self.analyze_schedule_inputs(analysis_state)
-            existing_plan = self.latest_proposed_plan(user_id, week_id) or self.active_plan(user_id, week_id)
+            # Confirmed calendar commitments are the scheduling baseline. A
+            # stale proposed revision must never move Profile/onboarding tasks
+            # that the user has already confirmed.
+            existing_plan = self.active_plan(user_id, week_id) or self.latest_proposed_plan(user_id, week_id)
             decision = build_deterministic_plan(
                 profile=profile,
                 tasks=tasks,

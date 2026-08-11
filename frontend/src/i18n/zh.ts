@@ -217,7 +217,7 @@ const zh = {
     cancel: '取消',
   },
   workspace: {
-    saveAllTaskFacts: '保存全部任务信息', savingTaskFacts: '正在保存任务信息...', saveTaskFacts: '保存任务信息', pendingTaskFacts: '保存前请检查任务信息', completeTaskFacts: '请补充任务名称、预计时长和截止日期。', missingTaskFacts: '仍需补充', difficulty: '难度（1-10）', dependency: '依赖任务', unscheduledTask: '尚未安排时间',
+    saveAllTaskFacts: '一键确认并生成排期', savingTaskFacts: '正在确认并生成排期...', saveTaskFacts: '确认并排期', pendingTaskFacts: '确认任务信息', completeTaskFacts: '请补充任务名称、预计时长和截止日期。', missingTaskFacts: '仍需补充', difficulty: '难度（1-10）', dependency: '依赖任务', unscheduledTask: '尚未安排时间', backToTaskList: '返回全部待确认任务', taskPreviewExplanation: '这里只核对 AI 从输入中提取的任务信息；一键确认后才会保存任务并生成日历排期。',
     aiChat: 'AI 对话',
     calendar: '日历',
     tasks: '任务',
@@ -254,7 +254,7 @@ const zh = {
     recovery: '恢复策略',
     recoveryHint: '中断后如何快速恢复',
     editTitle: '编辑任务',
-    aiGeneratedTasks: 'AI 生成的任务',
+    aiGeneratedTasks: '任务解析预览',
   },
   reminder: {
     upcoming: '任务提醒',

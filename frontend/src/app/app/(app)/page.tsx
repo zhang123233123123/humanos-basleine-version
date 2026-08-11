@@ -373,6 +373,7 @@ function TaskInspectorWrapper() {
         onSave={!activeEvent.isPreview && activeEvent.id ? handleSave : undefined}
         onOpenFocus={!activeEvent.isPreview && activeEvent.id ? openFocus : undefined}
         onDelete={!activeEvent.isPreview && activeEvent.id ? handleDelete : undefined}
+        onBack={() => setActiveEvent(null)}
       />
     )
   }
@@ -406,6 +407,7 @@ function TaskInspectorWrapper() {
                 {previewTasks.length}
               </span>
             </div>
+            <p className="text-xs leading-5 text-muted-foreground">{t('workspace.taskPreviewExplanation')}</p>
             <Button
               className="h-9 w-full rounded-xl shadow-sm"
               onClick={() => void confirmAllPreview()}

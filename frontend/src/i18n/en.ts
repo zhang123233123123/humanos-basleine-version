@@ -204,7 +204,7 @@ const en = {
     cancel: 'Cancel',
   },
   workspace: {
-    saveAllTaskFacts: 'Save all task details', savingTaskFacts: 'Saving task details...', saveTaskFacts: 'Save task details', pendingTaskFacts: 'Review task details before saving', completeTaskFacts: 'Add a task name, estimated duration, and deadline.', missingTaskFacts: 'Still required', difficulty: 'Difficulty (1-10)', dependency: 'Dependency', unscheduledTask: 'Not scheduled yet',
+    saveAllTaskFacts: 'Confirm all & create schedule', savingTaskFacts: 'Confirming and creating schedule...', saveTaskFacts: 'Confirm & schedule', pendingTaskFacts: 'Confirm task details', completeTaskFacts: 'Add a task name, estimated duration, and deadline.', missingTaskFacts: 'Still required', difficulty: 'Difficulty (1-10)', dependency: 'Dependency', unscheduledTask: 'Not scheduled yet', backToTaskList: 'Back to all pending tasks', taskPreviewExplanation: 'Review the task facts extracted from your message. Confirming saves the tasks and creates the calendar schedule.',
     aiChat: 'AI Chat',
     calendar: 'Calendar',
     tasks: 'Tasks',
@@ -241,7 +241,7 @@ const en = {
     recovery: 'Recovery Strategy',
     recoveryHint: 'How to quickly resume after interruption',
     editTitle: 'Edit Task',
-    aiGeneratedTasks: 'AI Generated Tasks',
+    aiGeneratedTasks: 'Task parsing preview',
   },
   reminder: {
     upcoming: 'Task Reminder',
