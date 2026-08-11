@@ -427,7 +427,7 @@ feat(weekly): implement daily check-in and week rollover
 feat(insights): expose user-controlled memory and patterns
 ```
 
-## Step 12：统一导航、设置、中英文与响应式体验
+## Step 12：统一导航、设置、中英文与响应式体验（已完成）
 
 ### 目标
 

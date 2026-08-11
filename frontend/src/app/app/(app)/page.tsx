@@ -784,6 +784,8 @@ function AppContent({
             now={new Date()}
             selectable={false}
             datesSet={handleDatesSet}
+            dayMaxEvents={3}
+            moreLinkClick="popover"
             eventContent={function renderEventContent(arg) {
               if (arg.view.type === 'dayGridMonth') {
                 const isPreview = Boolean(arg.event.extendedProps.isPreview)
@@ -851,11 +853,11 @@ function AppContent({
       {pendingCalendarEdit && (
         <div className="fixed inset-0 z-[100] grid place-items-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl border bg-background p-5 shadow-2xl">
-            <h3 className="text-lg font-semibold">Why did you adjust this task?</h3>
-            <p className="mt-1 text-sm text-muted-foreground">The reason is optional and applies only to this schedule change.</p>
-            <div className="mt-4 flex flex-wrap gap-2">{['Time conflict', 'Energy level', 'Priority changed', 'Availability changed', 'Duration changed'].map((reason) => <Button key={reason} type="button" size="sm" variant={calendarEditReason === reason ? 'default' : 'outline'} onClick={() => setCalendarEditReason(reason)}>{reason}</Button>)}</div>
-            <textarea className="mt-4 min-h-24 w-full rounded-md border bg-background p-3 text-sm" placeholder="Optional explanation" value={calendarEditReason} onChange={(event) => setCalendarEditReason(event.target.value)} />
-            <div className="mt-4 flex justify-end gap-2"><Button variant="outline" onClick={cancelCalendarEdit} disabled={savingCalendarEdit}>Cancel and restore</Button><Button onClick={() => void saveCalendarEdit()} disabled={savingCalendarEdit}>{calendarEditReason.trim() ? 'Save change' : 'Skip reason and save'}</Button></div>
+            <h3 className="text-lg font-semibold">{locale === 'zh' ? '为什么调整这个任务？' : 'Why did you adjust this task?'}</h3>
+            <p className="mt-1 text-sm text-muted-foreground">{locale === 'zh' ? '原因可选，并且只用于本次日程变更。' : 'The reason is optional and applies only to this schedule change.'}</p>
+            <div className="mt-4 flex flex-wrap gap-2">{(locale === 'zh' ? ['时间冲突', '精力状态', '优先级变化', '可用时间变化', '时长变化'] : ['Time conflict', 'Energy level', 'Priority changed', 'Availability changed', 'Duration changed']).map((reason) => <Button key={reason} type="button" size="sm" variant={calendarEditReason === reason ? 'default' : 'outline'} onClick={() => setCalendarEditReason(reason)}>{reason}</Button>)}</div>
+            <textarea className="mt-4 min-h-24 w-full rounded-md border bg-background p-3 text-sm" placeholder={locale === 'zh' ? '可选说明' : 'Optional explanation'} value={calendarEditReason} onChange={(event) => setCalendarEditReason(event.target.value)} />
+            <div className="mt-4 flex justify-end gap-2"><Button variant="outline" onClick={cancelCalendarEdit} disabled={savingCalendarEdit}>{locale === 'zh' ? '取消并恢复' : 'Cancel and restore'}</Button><Button onClick={() => void saveCalendarEdit()} disabled={savingCalendarEdit}>{calendarEditReason.trim() ? (locale === 'zh' ? '保存变更' : 'Save change') : (locale === 'zh' ? '跳过原因并保存' : 'Skip reason and save')}</Button></div>
           </div>
         </div>
       )}

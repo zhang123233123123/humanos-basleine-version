@@ -3,7 +3,7 @@ import { Moon, Sun } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import FullCalendar from '@fullcalendar/react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { Tab, Tabs } from '@/components/ui/tabs'
+import { Tabs } from '@/components/ui/tabs'
 import { useCallback } from 'react'
 import {
   Tooltip,
@@ -23,7 +23,7 @@ interface CustomHeaderProps {
 const CustomHeader: FC<CustomHeaderProps> = ({ calendarRef }) => {
   const [mounted, setMounted] = useState(false)
   const [showToday, setShowToday] = useState(false)
-  const [active, setActive] = useState<Tab>('Week')
+  const [activeView, setActiveView] = useState('timeGridWeek')
   const { isMobile } = useDevice()
   const { setTheme, theme } = useTheme()
   const { t } = useTranslation()
@@ -86,7 +86,10 @@ const CustomHeader: FC<CustomHeaderProps> = ({ calendarRef }) => {
 
     const view = tabToView[tab]
 
-    calendarRef.current?.getApi().changeView(view)
+    if (view) {
+      setActiveView(view)
+      calendarRef.current?.getApi().changeView(view)
+    }
   }
 
   useEffect(() => {
@@ -107,7 +110,7 @@ const CustomHeader: FC<CustomHeaderProps> = ({ calendarRef }) => {
   useEffect(() => {
     if (isMobile) {
       calendarRef.current?.getApi().changeView('timeGridDay')
-      setActive(t('header.day') as Tab)
+      setActiveView('timeGridDay')
     }
   }, [calendarRef, isMobile, t])
 
@@ -190,8 +193,8 @@ const CustomHeader: FC<CustomHeaderProps> = ({ calendarRef }) => {
         <Tabs
           tabs={[t('header.month'), t('header.week'), t('header.day')]}
           onTabChange={changeTab}
-          active={active}
-          setActive={setActive}
+          active={{ dayGridMonth: t('header.month'), timeGridWeek: t('header.week'), timeGridDay: t('header.day') }[activeView] || t('header.week')}
+          setActive={() => undefined}
         />
       </div>
     </div>

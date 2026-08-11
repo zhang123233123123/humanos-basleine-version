@@ -25,7 +25,7 @@ export const Tabs = ({
     <>
       <div
         className={cn(
-          'hidden flex-row items-center justify-start [perspective:1000px] relative overflow-auto sm:overflow-visible no-visible-scrollbar max-w-full bg-muted w-fit rounded-full p-1 sm:flex',
+          'flex flex-row items-center justify-start [perspective:1000px] relative overflow-auto sm:overflow-visible no-visible-scrollbar max-w-full bg-muted w-fit rounded-full p-1',
           containerClassName,
         )}
       >
@@ -36,7 +36,7 @@ export const Tabs = ({
               setActive(tab)
               onTabChange?.(tab)
             }}
-            className={cn('relative px-4 py-2 rounded-full', tabClassName)}
+            className={cn('relative whitespace-nowrap px-3 py-2 text-xs rounded-full sm:px-4 sm:text-sm', tabClassName)}
             style={{
               transformStyle: 'preserve-3d',
             }}
