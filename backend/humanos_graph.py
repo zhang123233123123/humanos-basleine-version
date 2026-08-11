@@ -13,6 +13,11 @@ from datetime import datetime, timedelta
 from typing import Any, TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+try:
+    from app.domain.timeline import validate_block_overlaps
+except ModuleNotFoundError:  # imported as backend.humanos_graph in tests
+    from backend.app.domain.timeline import validate_block_overlaps
+
 
 class HumanOSState(TypedDict, total=False):
     user_id: str
@@ -916,11 +921,7 @@ def scheduler_node(_: Any):
                         "task_id": block["task_id"],
                         "constraint": hard_conflict["label"],
                     })
-            for day in range(7):
-                ordered = sorted((block for block in blocks if block["day_index"] == day), key=lambda item: item["start"])
-                for previous, current in zip(ordered, ordered[1:]):
-                    if current["start"] < previous["end"] - 0.001:
-                        violations.append({"type": "overlap", "block_ids": [previous["block_id"], current["block_id"]]})
+            violations.extend(validate_block_overlaps(blocks))
             for after, predecessors in dependency_predecessors.items():
                 after_blocks = [block for block in blocks if str(block.get("task_id")) == after]
                 for before in predecessors:

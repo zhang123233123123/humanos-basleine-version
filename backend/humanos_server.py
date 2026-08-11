@@ -25,6 +25,13 @@ from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+try:
+    from app.application.task_input import normalize_parsed_task_items
+    from app.domain.timeline import validate_block_overlaps
+except ModuleNotFoundError:  # imported as backend.humanos_server in tests
+    from backend.app.application.task_input import normalize_parsed_task_items
+    from backend.app.domain.timeline import validate_block_overlaps
+
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
@@ -1400,6 +1407,7 @@ class Store:
             "startAt": payload.get("start_at") or context_window.get("startAt"),
             "deadlineAt": payload.get("deadline_at") or context_window.get("deadlineAt"),
             "deadlineAssumption": payload.get("deadline_assumption") or context_window.get("deadlineAssumption"),
+            "inputContract": payload.get("input_contract") or context_window.get("inputContract"),
         }
         timestamp = now_ms()
         with self.connect() as conn:
@@ -1525,6 +1533,7 @@ class Store:
                 raw_tasks = llm_result.get("tasks") if isinstance(llm_result.get("tasks"), list) else [llm_result]
             else:
                 raw_tasks = []
+            raw_tasks = normalize_parsed_task_items(raw_tasks, clean)
             payloads = []
             for item in raw_tasks[:8]:
                 if not isinstance(item, dict):
@@ -1549,6 +1558,7 @@ class Store:
                     "missing_fields": item.get("missing_fields") or [],
                     "source_spans": item.get("source_spans") or [],
                     "confidence": item.get("confidence") or 0.0,
+                    "input_contract": item.get("input_contract") or {},
                 }
                 payload["parser"] = "deepseek"
                 payloads.append(payload)
@@ -4824,7 +4834,17 @@ class Store:
         profile_map = {str(item.get("task_id")): item for item in (analysis.get("task_resource_profiles") or []) if isinstance(item, dict)}
         context = build_scheduling_context(profile)
         windows = context.get("movable_routine_windows") or context.get("windows", [])
-        now = profile_now(profile)
+        # Deadline day indexes belong to the Plan's target week, not to the
+        # machine's current date.  Using wall-clock "now" made a saved QA week
+        # become invalid merely because the test was run in a later week.
+        wall_clock_reference = profile_now(profile)
+        target_week_id = str(payload.get("week_id") or profile.get("active_week_id") or "").strip()
+        try:
+            now = datetime.fromisoformat(f"{target_week_id}T00:00:00").replace(
+                tzinfo=safe_timezone(profile.get("timezone") or "Asia/Shanghai")
+            )
+        except (TypeError, ValueError):
+            now = wall_clock_reference
         violations: list[dict] = []
         blocks: list[dict] = []
         planned_work: dict[str, int] = {}
@@ -4863,6 +4883,12 @@ class Store:
                     overlap_end = min(end, float(conflict.get("end", end)))
                     violations.append({"type": "hard_constraint_conflict", "task_id": task_id, "block_id": block.get("block_id"), "constraint": conflict.get("label"), "conflicting_item_id": conflict.get("id"), "conflicting_item_title": conflict.get("label"), "day_index": day, "start": overlap_start, "end": overlap_end})
                 due_day = day_index_from_due(task.get("due"), now)
+                # Legacy plans and execution QA fixtures may carry an absolute
+                # deadline while omitting or retaining an older week_id.  Keep
+                # those readable without weakening validation for a correctly
+                # identified target week.
+                if due_day is None:
+                    due_day = day_index_from_due(task.get("due"), wall_clock_reference)
                 due_hour = parse_due_start_hour(task.get("due"))
                 if due_day is None or day > due_day or (day == due_day and due_hour is not None and end > due_hour + 0.001):
                     violations.append({"type": "deadline", "task_id": task_id, "block_id": block.get("block_id"), "day_index": day, "start": start, "end": end, "deadline": task.get("due")})
@@ -4877,6 +4903,7 @@ class Store:
             if len(task_ids) != 2:
                 violations.append({"type": "parallel_group_size", "parallel_group_id": group_id, "task_ids": sorted(task_ids)})
 
+        violations.extend(validate_block_overlaps(blocks, overlap_allowed=confirmed_parallel_overlap_allowed))
         for day in range(7):
             ordered = sorted((block for block in blocks if block.get("day_index") == day), key=lambda item: (item.get("start", 0), item.get("end", 0)))
             for index, first in enumerate(ordered):
@@ -4884,9 +4911,6 @@ class Store:
                     if float(second["start"]) >= float(first["end"]) - 0.001:
                         break
                     if not confirmed_parallel_overlap_allowed(first, second):
-                        overlap_start = max(float(first["start"]), float(second["start"]))
-                        overlap_end = min(float(first["end"]), float(second["end"]))
-                        violations.append({"type": "overlap", "block_ids": [first.get("block_id"), second.get("block_id")], "task_id": str(first.get("task_id")), "conflicting_task_id": str(second.get("task_id")), "day_index": day, "start": overlap_start, "end": overlap_end})
                         continue
                     first_id = str(first.get("task_id"))
                     second_id = str(second.get("task_id"))
