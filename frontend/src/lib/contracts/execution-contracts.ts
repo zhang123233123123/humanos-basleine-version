@@ -61,9 +61,11 @@ export interface ExecutionImpact {
 }
 
 export interface ExecutionFeedbackResult {
-  feedback: Record<string, unknown>
+  feedback?: Record<string, unknown>
   task: Record<string, unknown>
-  execution_session: ExecutionSession | null
+  execution_session?: ExecutionSession | null
+  requires_plan_adjustment: boolean
+  schedule_action: 'keep_time_free' | 'review_today'
 }
 
 export interface ExecutionResourceEnvelope<T> {

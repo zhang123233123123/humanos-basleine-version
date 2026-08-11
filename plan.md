@@ -338,7 +338,7 @@ feat(focus): unify active session execution and timing
 feat(execution): implement contextual pause resume and replanning
 ```
 
-## Step 9：完成 Finish、Feedback 与 Remaining Work
+## Step 9：完成 Finish、Feedback 与 Remaining Work（已完成）
 
 ### 目标
 

@@ -42,8 +42,12 @@ export default function FocusPage() {
   const [preferredResumeAt, setPreferredResumeAt] = useState('')
   const [now, setNow] = useState(Date.now())
   const [actualMinutes, setActualMinutes] = useState(0)
-  const [completion, setCompletion] = useState<'partial' | 'completed'>('partial')
+  const [completion, setCompletion] = useState<'completed' | 'some_progress' | 'no_progress' | 'did_not_start'>('some_progress')
   const [remainingMinutes, setRemainingMinutes] = useState(0)
+  const [progress, setProgress] = useState('')
+  const [nextStep, setNextStep] = useState('')
+  const [remainingWork, setRemainingWork] = useState('')
+  const [scheduleAction, setScheduleAction] = useState<'keep_time_free' | 'review_today'>('keep_time_free')
   const [difficulty, setDifficulty] = useState(4)
   const [focusAfter, setFocusAfter] = useState(4)
   const [energyAfter, setEnergyAfter] = useState(4)
@@ -237,10 +241,14 @@ export default function FocusPage() {
             completion,
             actual_minutes: actualMinutes,
             remaining_duration_minutes: completion === 'completed' ? 0 : remainingMinutes,
+            progress,
+            next_step: nextStep,
+            remaining_work: remainingWork,
             perceived_difficulty: difficulty,
           },
           state_evaluation: { focus_after: focusAfter, energy_after: energyAfter, stress_after: stressAfter },
           recommendation_evaluation: { timing_fit: timingFit, session_length_fit: sessionLengthFit },
+          schedule_action: scheduleAction,
         }),
       })
       setEndedSession(null)
@@ -249,6 +257,7 @@ export default function FocusPage() {
       }))
       await loadExecution()
       toast(t('execution.feedbackSaved'))
+      if (result.data.requires_plan_adjustment) window.location.href = '/app/plan?adjust=remaining-work'
     } catch (error) {
       toast(error instanceof Error ? error.message : t('execution.feedbackFailed'))
     } finally {
@@ -290,9 +299,12 @@ export default function FocusPage() {
           <Card className="border-primary/30">
             <CardHeader><CardTitle>{t('execution.feedbackTitle')}</CardTitle><CardDescription>{t('execution.feedbackDescription')}</CardDescription></CardHeader>
             <CardContent className="grid gap-5 md:grid-cols-2">
-              <label className="grid gap-2 text-sm"><span>{t('execution.completion')}</span><select className="h-10 rounded-md border bg-background px-3" value={completion} onChange={(event) => setCompletion(event.target.value as 'partial' | 'completed')}><option value="partial">{t('execution.partial')}</option><option value="completed">{t('execution.completed')}</option></select></label>
+              <label className="grid gap-2 text-sm"><span>{t('execution.completion')}</span><select className="h-10 rounded-md border bg-background px-3" value={completion} onChange={(event) => setCompletion(event.target.value as typeof completion)}><option value="completed">{t('execution.completed')}</option><option value="some_progress">{t('execution.partial')}</option><option value="no_progress">{t('execution.noProgress')}</option><option value="did_not_start">{t('execution.didNotStart')}</option></select></label>
               <label className="grid gap-2 text-sm"><span>{t('execution.actualMinutes')}</span><input className="h-10 rounded-md border bg-background px-3" type="number" min={0} value={actualMinutes} onChange={(event) => setActualMinutes(Number(event.target.value))} /></label>
-              {completion === 'partial' && <label className="grid gap-2 text-sm"><span>{t('execution.remainingMinutes')}</span><input className="h-10 rounded-md border bg-background px-3" type="number" min={0} value={remainingMinutes} onChange={(event) => setRemainingMinutes(Number(event.target.value))} /></label>}
+              {completion !== 'completed' && <><label className="grid gap-2 text-sm"><span>{t('execution.remainingMinutes')}</span><input className="h-10 rounded-md border bg-background px-3" type="number" min={0} value={remainingMinutes} onChange={(event) => setRemainingMinutes(Number(event.target.value))} /></label><label className="grid gap-2 text-sm"><span>{t('execution.remainingWork')}</span><input className="h-10 rounded-md border bg-background px-3" value={remainingWork} onChange={(event) => setRemainingWork(event.target.value)} /></label></>}
+              <label className="grid gap-2 text-sm"><span>{t('execution.progress')}</span><input className="h-10 rounded-md border bg-background px-3" value={progress} onChange={(event) => setProgress(event.target.value)} /></label>
+              {completion !== 'completed' && <label className="grid gap-2 text-sm"><span>{t('execution.nextStep')}</span><input className="h-10 rounded-md border bg-background px-3" value={nextStep} onChange={(event) => setNextStep(event.target.value)} /></label>}
+              {completion === 'completed' && actualMinutes < plannedMinutes && <label className="grid gap-2 text-sm md:col-span-2"><span>{t('execution.earlyFinishAction')}</span><select className="h-10 rounded-md border bg-background px-3" value={scheduleAction} onChange={(event) => setScheduleAction(event.target.value as typeof scheduleAction)}><option value="keep_time_free">{t('execution.keepTimeFree')}</option><option value="review_today">{t('execution.reviewToday')}</option></select></label>}
               <label className="grid gap-2 text-sm"><span>{t('execution.difficulty')} {difficulty}/7</span><input type="range" min={1} max={7} value={difficulty} onChange={(event) => setDifficulty(Number(event.target.value))} /></label>
               {[['focusAfter', focusAfter, setFocusAfter], ['energyAfter', energyAfter, setEnergyAfter], ['stressAfter', stressAfter, setStressAfter]].map(([key, value, setter]) => <label key={String(key)} className="grid gap-2 text-sm"><span>{t(`execution.${key}`)} {String(value)}/7</span><input type="range" min={1} max={7} value={Number(value)} onChange={(event) => (setter as (value: number) => void)(Number(event.target.value))} /></label>)}
               <label className="grid gap-2 text-sm"><span>{t('execution.timingFit')}</span><select className="h-10 rounded-md border bg-background px-3" value={timingFit} onChange={(event) => setTimingFit(event.target.value)}><option value="good">{t('execution.good')}</option><option value="too_early">{t('execution.tooEarly')}</option><option value="too_late">{t('execution.tooLate')}</option></select></label>

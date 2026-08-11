@@ -22,7 +22,9 @@ def apply_execution_feedback(
     feedback_id: str,
     feedback_created_at: int,
 ) -> TaskFeedbackDecision:
-    completion = str(task_evaluation.get("completion") or "partial")
+    completion = str(task_evaluation.get("completion") or "some_progress")
+    if completion == "partial":
+        completion = "some_progress"
     actual_minutes = (
         0
         if completion in {"not_started", "did_not_start"}
@@ -41,6 +43,10 @@ def apply_execution_feedback(
         previous = int(execution.get("remaining_duration_minutes") or task.get("duration") or 0)
         remaining = max(previous - actual_minutes, 0)
     execution["remaining_duration_minutes"] = remaining
+    execution["last_progress"] = str(task_evaluation.get("progress") or "").strip() or None
+    execution["next_step"] = str(task_evaluation.get("next_step") or "").strip() or None
+    execution["remaining_work"] = str(task_evaluation.get("remaining_work") or "").strip() or None
+    execution["last_completion_outcome"] = completion
     execution["last_perceived_difficulty"] = task_evaluation.get("perceived_difficulty")
     sessions = list(execution.get("sessions") or [])
     sessions.append({

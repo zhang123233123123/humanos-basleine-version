@@ -4386,7 +4386,7 @@ class Store:
                 confirmed_actual = 0 if session_status == "not_started" else max(int((feedback["task_evaluation"] or {}).get("actual_minutes") or 0), 0)
                 conn.execute(
                     "UPDATE execution_sessions SET status=?,completion_outcome=?,actual_end_at=?,accumulated_active_minutes=?,updated_at=? WHERE id=? AND user_id=?",
-                    (session_status, outcome, clock_now(ZoneInfo(feedback_profile.get("timezone") or "Asia/Shanghai")).isoformat(), confirmed_actual, feedback["created_at"], feedback["execution_session_id"], user_id),
+                    (session_status, outcome, self.user_clock_now(user_id, feedback_profile.get("timezone") or "Asia/Shanghai").isoformat(), confirmed_actual, feedback["created_at"], feedback["execution_session_id"], user_id),
                 )
                 self._insert_state_transition(
                     conn,
@@ -4403,14 +4403,17 @@ class Store:
                 "UPDATE tasks SET execution_json=?,demand_json=?,status=?,updated_at=? WHERE id=? AND user_id=?",
                 (as_json(feedback_decision.execution), as_json(feedback_decision.task_demand), feedback_decision.task_status, feedback["created_at"], task_id, user_id),
             )
-            conn.execute(
-                "UPDATE plans SET plan_status='needs_update',updated_at=? WHERE user_id=? AND week_id=? AND plan_status='confirmed'",
-                (feedback["created_at"], user_id, task.get("week_id")),
-            )
-            conn.execute(
-                "UPDATE profiles SET active_plan_revision=NULL,updated_at=? WHERE user_id=?",
-                (feedback["created_at"], user_id),
-            )
+            schedule_action = str(payload.get("schedule_action") or "keep_time_free")
+            requires_plan_adjustment = feedback_decision.execution.get("remaining_duration_minutes", 0) > 0 or schedule_action == "review_today"
+            if requires_plan_adjustment:
+                conn.execute(
+                    "UPDATE plans SET plan_status='needs_update',updated_at=? WHERE user_id=? AND week_id=? AND plan_status='confirmed'",
+                    (feedback["created_at"], user_id, task.get("week_id")),
+                )
+                conn.execute(
+                    "UPDATE profiles SET active_plan_revision=NULL,updated_at=? WHERE user_id=?",
+                    (feedback["created_at"], user_id),
+                )
         self.add_memory(
             user_id=user_id,
             source_type="episodic_memory",
@@ -4430,6 +4433,9 @@ class Store:
                 "partner_task_ids": (feedback["parallel_evaluation"] or {}).get("partner_task_ids", []),
             },
         )
+        feedback["task"] = self.get_task(task_id, user_id)
+        feedback["requires_plan_adjustment"] = requires_plan_adjustment
+        feedback["schedule_action"] = schedule_action
         self.log_event(user_id, "execution_feedback_saved", feedback)
         return feedback
 
