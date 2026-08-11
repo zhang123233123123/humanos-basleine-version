@@ -149,6 +149,25 @@
   box-shadow: none !important;
 }
 
+.fc .fc-event.humanos-draft-event {
+  border: 2px dashed hsl(var(--primary)) !important;
+  border-radius: 8px !important;
+  background: hsl(var(--primary) / 0.08) !important;
+  opacity: 0.82;
+  cursor: default;
+}
+
+.fc .fc-event.humanos-draft-event .fc-event-main {
+  color: hsl(var(--foreground)) !important;
+}
+
+.fc .fc-event.humanos-draft-event .fc-event-title::after {
+  content: ' · DRAFT';
+  font-size: 0.625rem;
+  font-weight: 600;
+  color: hsl(var(--primary));
+}
+
 .fc-event-main-frame {
   display: flex !important;
   flex-direction: column-reverse !important;

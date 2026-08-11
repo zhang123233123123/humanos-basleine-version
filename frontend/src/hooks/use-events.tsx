@@ -2,6 +2,41 @@ import { create } from 'zustand'
 import { EventInput } from '@fullcalendar/core'
 import { toast } from 'sonner'
 
+function draftDate(weekId: string, dayIndex: number, hour: number) {
+  const date = new Date(`${weekId}T00:00:00`)
+  date.setDate(date.getDate() + dayIndex)
+  date.setMinutes(Math.round(hour * 60))
+  return date.toISOString()
+}
+
+async function fetchDraftEvents(): Promise<EventInput[]> {
+  const [planResponse, taskResponse] = await Promise.all([
+    fetch('/api/plans/proposed', { cache: 'no-store' }),
+    fetch('/api/tasks', { cache: 'no-store' }),
+  ])
+  if (!planResponse.ok) return []
+  const planBody = await planResponse.json()
+  const taskBody = taskResponse.ok ? await taskResponse.json() : {}
+  const plan = planBody?.data?.plan
+  if (!plan?.week_id || !Array.isArray(plan.plan_patch)) return []
+  const titles = new Map<string, string>((taskBody?.data?.tasks || []).map((task: any) => [String(task.id), String(task.title || '')]))
+  return plan.plan_patch.map((block: any, index: number) => ({
+    id: `draft-${plan.plan_id}-${block.block_id || index}`,
+    title: block.title || titles.get(String(block.task_id)) || (block.task_id ? String(block.task_id) : 'Draft session'),
+    start: draftDate(String(plan.week_id), Number(block.day_index || 0), Number(block.start || 0)),
+    end: draftDate(String(plan.week_id), Number(block.day_index || 0), Number(block.end || block.start || 0)),
+    editable: false,
+    classNames: ['humanos-draft-event'],
+    extendedProps: {
+      isDraft: true,
+      status: 'draft',
+      taskId: block.task_id,
+      planId: plan.plan_id,
+      planRevision: plan.plan_revision,
+    },
+  }))
+}
+
 type State = {
   events: EventInput[]
   currentStart: string
@@ -53,6 +88,8 @@ export const useEvents = create<State & Actions>((set, get) => ({
         newEvents = [...newEvents, ...(data.data?.events || [])]
       }
 
+      newEvents = [...newEvents, ...await fetchDraftEvents()]
+
       set((state) => {
         const overlapsFetchedRange = (event: EventInput) => {
           const eventStart = new Date(event.start as string | Date).getTime()
@@ -65,7 +102,7 @@ export const useEvents = create<State & Actions>((set, get) => ({
           })
         }
 
-        const retained = state.events.filter((event) => !overlapsFetchedRange(event))
+        const retained = state.events.filter((event) => !event.extendedProps?.isDraft && !overlapsFetchedRange(event))
         const byId = new Map<string, EventInput>()
         ;[...retained, ...newEvents].forEach((event) => {
           const key = String(event.id || `${event.title}-${event.start}`)
