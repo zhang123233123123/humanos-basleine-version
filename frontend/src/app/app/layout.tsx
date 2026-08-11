@@ -13,7 +13,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         <div className="relative h-dvh w-full flex flex-col overflow-hidden">
           <AppNavigation />
           <FocusReadyGate />
-          <div className="min-h-0 flex-1 overflow-auto">{children}</div>
+          <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
         </div>
       </ModalProvider>
     </ThemeProvider>

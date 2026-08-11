@@ -105,7 +105,7 @@ export default function InsightsPage() {
   if (loading) return <div className="grid h-full place-items-center"><Loader2 className="h-7 w-7 animate-spin" /></div>
 
   return (
-    <main className="min-h-screen overflow-y-auto bg-[radial-gradient(circle_at_10%_0%,hsl(var(--primary)/0.14),transparent_34%),radial-gradient(circle_at_90%_24%,hsl(var(--accent)/0.5),transparent_30%),linear-gradient(to_bottom,hsl(var(--background)),hsl(var(--muted)/0.4))] px-4 pb-28 pt-6 md:px-8">
+    <main className="h-full min-h-0 overflow-y-auto bg-[radial-gradient(circle_at_10%_0%,hsl(var(--primary)/0.14),transparent_34%),radial-gradient(circle_at_90%_24%,hsl(var(--accent)/0.5),transparent_30%),linear-gradient(to_bottom,hsl(var(--background)),hsl(var(--muted)/0.4))] px-4 pb-28 pt-6 md:px-8">
       <div className="mx-auto max-w-6xl space-y-6">
         <header>
           <Link href="/app" className="mb-3 inline-flex items-center text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="mr-1 h-4 w-4" />{t('insights.workspace')}</Link>

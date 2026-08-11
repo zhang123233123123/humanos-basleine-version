@@ -728,7 +728,7 @@ function AppContent({
       </div>
 
       {/* Three-column layout */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {/* Left Sidebar */}
         {leftOpen && (
           <WorkspaceSidebar
@@ -748,7 +748,7 @@ function AppContent({
         </button>
 
         {/* Calendar center */}
-        <div className="flex-1 overflow-auto p-2">
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden p-2">
           <FullCalendar
             ref={calendarRef}
             plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
@@ -759,6 +759,7 @@ function AppContent({
             allDaySlot={true}
             events={events}
             height="100%"
+            expandRows
             views={{
               timeGridWeek: {
                 titleFormat: { year: 'numeric', month: 'short' },

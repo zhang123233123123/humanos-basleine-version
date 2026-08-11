@@ -119,10 +119,21 @@ export default function OnboardingPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           profile: { ...profilePayload(3), weekly_context: { weekly_goal: weeklyGoal, weekly_available_windows: availableWindows, context_items: contextItems.filter((item) => item.title.trim()), keep_buffer: keepBuffer } },
-          tasks: readyTasks.map((task) => ({ ...task, due: task.due.trim() || null, duration: Number(task.duration), expected_difficulty: Number(task.expected_difficulty), status: 'queued' })),
+          tasks: readyTasks.map((task) => ({
+            title: task.title.trim(),
+            due: task.due.trim() || null,
+            duration: Number(task.duration),
+            priority: task.priority,
+            expected_difficulty: Number(task.expected_difficulty),
+            dependency: task.dependency.trim(),
+            status: 'queued',
+          })),
         }),
       })
-      if (!weekResponse.ok) throw new Error(t('onboarding.weekFailed'))
+      if (!weekResponse.ok) {
+        const error = await weekResponse.json().catch(() => ({})) as { message?: string; error?: string }
+        throw new Error(error.message || error.error || t('onboarding.weekFailed'))
+      }
 
       const stateResponse = await fetch('/api/state-checkins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...momentary, source: 'onboarding' }) })
       if (!stateResponse.ok) throw new Error(t('onboarding.stateFailed'))

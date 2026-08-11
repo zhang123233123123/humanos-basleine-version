@@ -68,17 +68,22 @@ export default function LoginPage() {
         toast(err.message || err.error || t('login.registerFailed'))
         return
       }
+      const registeredEmail = email.trim().toLowerCase()
+      toast.success(
+        t('login.registerSuccess').replace('{email}', registeredEmail),
+        { duration: 4000 },
+      )
+      // Keep the confirmation visible before automatic sign-in navigates away.
+      await new Promise((resolve) => window.setTimeout(resolve, 900))
       // Auto login after register
       const result = await signIn('credentials', {
-        email: email.trim().toLowerCase(),
+        email: registeredEmail,
         password,
         callbackUrl: '/app',
         redirect: false,
       })
       if (!result?.ok || result.error) {
-        toast(result?.error === 'AUTH_SERVICE_UNAVAILABLE'
-          ? t('login.serviceUnavailable')
-          : t('login.invalidCredentials'))
+        toast.error(t('login.registerSuccessLoginFailed').replace('{email}', registeredEmail))
         return
       }
       window.location.assign('/app/onboarding')

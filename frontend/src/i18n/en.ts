@@ -55,6 +55,8 @@ const en = {
     invalidCredentials: 'Incorrect email or password.',
     serviceUnavailable: 'Authentication service is temporarily unavailable. Please try again.',
     registerFailed: 'Registration failed. Please try again.',
+    registerSuccess: 'Account created successfully: {email}. Signing you in…',
+    registerSuccessLoginFailed: 'Account {email} was created, but automatic sign-in failed. Please sign in manually.',
     termsPrefix: 'By continuing, you agree to our',
     termsOfService: 'Terms of Service',
     and: 'and',

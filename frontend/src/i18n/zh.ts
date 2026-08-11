@@ -55,6 +55,8 @@ const zh = {
     invalidCredentials: '邮箱或密码不正确。',
     serviceUnavailable: '认证服务暂时不可用，请稍后重试。',
     registerFailed: '注册失败，请重试。',
+    registerSuccess: '账号创建成功：{email}，正在为你登录…',
+    registerSuccessLoginFailed: '账号 {email} 已创建成功，但自动登录失败。请返回登录页面手动登录。',
     termsPrefix: '继续即表示您同意我们的',
     termsOfService: '服务条款',
     and: '和',
