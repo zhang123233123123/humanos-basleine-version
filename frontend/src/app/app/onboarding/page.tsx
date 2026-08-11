@@ -153,7 +153,7 @@ export default function OnboardingPage() {
 
   const selectClass = (selected: boolean) => `rounded-xl border px-3 py-2 text-sm transition ${selected ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:border-primary/50'}`
 
-  return <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_#eef5e8,_transparent_38%),linear-gradient(135deg,#faf8f1,#f0f4ef)] p-4 md:p-10">
+  return <main className="h-full min-h-0 overflow-y-auto overscroll-contain bg-[radial-gradient(circle_at_top_left,_#eef5e8,_transparent_38%),linear-gradient(135deg,#faf8f1,#f0f4ef)] p-4 pb-12 md:p-10 md:pb-16">
     <Card className="mx-auto max-w-4xl border-[#d5d7cc] bg-white/90 shadow-xl shadow-[#52614c]/10">
       <CardHeader className="border-b border-[#e3e3da]">
         <div className="flex items-start justify-between gap-4"><div><CardTitle className="text-2xl">{t('onboarding.title')}</CardTitle><p className="mt-2 text-sm text-muted-foreground">{t('onboarding.subtitle')}</p></div><Badge variant="secondary">{t(`onboarding.step${step + 1}of`)}</Badge></div>

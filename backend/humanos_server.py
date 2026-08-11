@@ -1022,6 +1022,16 @@ class Store:
                 (identity, identity),
             ).fetchone()
 
+    def user_row_by_name(self, name: str) -> sqlite3.Row | None:
+        normalized_name = name.strip()
+        if not normalized_name:
+            return None
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM users WHERE lower(name)=lower(?)",
+                (normalized_name,),
+            ).fetchone()
+
     def account_capabilities(self, identity: str) -> dict:
         row = self.user_row(identity)
         is_test = bool(row and row["account_type"] == "test")
@@ -1171,10 +1181,20 @@ class Store:
                 ),
             )
             row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-        self.ensure_profile(user_id)
+        # Registration must not wait for embedding/model-backed memory work.
+        # Onboarding will persist the user's actual profile and learning evidence.
+        from app.domain.profile import build_default_profile
+
+        timezone_name = os.environ.get("HUMANOS_DEFAULT_TIMEZONE", "Asia/Shanghai")
+        self.upsert_profile(build_default_profile(
+            user_id,
+            timezone_name=timezone_name,
+            week_of=today_label(timezone_name),
+        ).model_dump())
         self.log_event(user_id, "user_registered", {"email": email})
         return {
             "user": self.public_user(row),
+            "created": True,
             "resources": {"profile": "/api/profile"},
         }
 
@@ -6424,20 +6444,30 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/auth/register" and method == "POST":
                 payload = self.read_json()
                 requested_email = str(payload.get("email") or "").strip().lower()
+                requested_name = str(payload.get("name") or "").strip()
                 existing_user = store.user_row(requested_email) if requested_email else None
                 if existing_user:
                     self.send_json({
-                        "error": "account_exists",
+                        "error": "email_exists",
                         "message": "This email is already registered.",
                         "email": existing_user["email"],
                         "username": existing_user["name"],
                         "action": "sign_in",
                     }, status=409)
                     return
+                existing_name = store.user_row_by_name(requested_name)
+                if existing_name:
+                    self.send_json({
+                        "error": "username_exists",
+                        "message": "This username is already in use.",
+                        "username": existing_name["name"],
+                        "action": "choose_another_username",
+                    }, status=409)
+                    return
                 result = store.create_user(
                     email=requested_email,
                     password=payload.get("password", ""),
-                    name=payload.get("name", ""),
+                    name=requested_name,
                 )
                 self.send_json(result, status=201)
                 return
