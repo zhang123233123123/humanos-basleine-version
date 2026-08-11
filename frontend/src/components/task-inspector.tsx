@@ -342,7 +342,7 @@ export function TaskInspector({ task, onConfirm, onReject, onSave, onOpenFocus, 
   const [mounted, setMounted] = useState(false)
   useEffect(() => { setMounted(true) }, [])
   return (
-    <aside className="w-72 shrink-0 border-l border-border h-full flex flex-col bg-background overflow-y-auto" suppressHydrationWarning>
+    <aside className="w-80 shrink-0 border-l border-border h-full flex flex-col bg-background overflow-y-auto" suppressHydrationWarning>
       {mounted ? <InspectorContent task={task} onConfirm={onConfirm} onReject={onReject} onSave={onSave} onOpenFocus={onOpenFocus} onDelete={onDelete} /> : null}
     </aside>
   )

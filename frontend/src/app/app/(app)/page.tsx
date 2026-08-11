@@ -374,7 +374,7 @@ function TaskInspectorWrapper() {
 
   if (proposalError && previewTasks.length === 0) {
     return (
-      <aside className="w-72 shrink-0 border-l border-border bg-background p-4">
+      <aside className="w-80 shrink-0 border-l border-border bg-background p-4">
         <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-950">
           <h2 className="text-sm font-semibold">{t('planning.generateFailed')}</h2>
           <p className="mt-2 text-xs leading-5">{proposalError}</p>
@@ -390,7 +390,7 @@ function TaskInspectorWrapper() {
   // Branch 2: Preview task list
   if (previewTasks.length > 0) {
     return (
-      <aside className="w-72 border-l border-border bg-background overflow-y-auto shrink-0">
+      <aside className="w-80 border-l border-border bg-background overflow-y-auto shrink-0">
         <div className="sticky top-0 z-20 border-b border-border bg-background/95 p-4 backdrop-blur">
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
@@ -832,7 +832,7 @@ function AppContent({
         <button
           onClick={() => setRightOpen(!rightOpen)}
           className="absolute z-40 top-1/2 -translate-y-1/2 rounded-l-md border border-r-0 border-border bg-background px-1 py-3 text-muted-foreground hover:text-foreground transition-colors"
-          style={{ right: rightOpen ? 288 : 0 }}
+          style={{ right: rightOpen ? 320 : 0 }}
           suppressHydrationWarning
         >
           {rightOpen ? '\u203A\u203A' : '\u2039\u2039'}
