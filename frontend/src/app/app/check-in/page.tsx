@@ -116,14 +116,25 @@ export default function CheckInPage() {
   }
 
   const slider = (label: string, value: number, setter: (value: number) => void, icon: React.ReactNode) => (
-    <label className="rounded-2xl border bg-background/70 p-4">
-      <span className="mb-3 flex items-center justify-between text-sm font-medium"><span className="flex items-center gap-2">{icon}{label}</span><strong>{value}/7</strong></span>
-      <input className="w-full accent-primary" type="range" min={1} max={7} value={value} onChange={(event) => setter(Number(event.target.value))} />
+    <label className="block select-none rounded-2xl border bg-background/70 p-4">
+      <span className="mb-2 flex items-center justify-between text-sm font-medium"><span className="flex items-center gap-2">{icon}{label}</span><strong className="min-w-10 rounded-full bg-primary/10 px-2 py-1 text-center text-primary">{value}/7</strong></span>
+      <input
+        aria-label={label}
+        className="h-10 w-full cursor-grab touch-pan-y appearance-none bg-transparent active:cursor-grabbing [&::-moz-range-progress]:h-2 [&::-moz-range-progress]:rounded-full [&::-moz-range-progress]:bg-primary [&::-moz-range-thumb]:h-6 [&::-moz-range-thumb]:w-6 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-4 [&::-moz-range-thumb]:border-background [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:shadow-md [&::-moz-range-track]:h-2 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-muted [&::-webkit-slider-runnable-track]:h-2 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-muted [&::-webkit-slider-thumb]:-mt-2 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-4 [&::-webkit-slider-thumb]:border-background [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+        type="range"
+        min={1}
+        max={7}
+        step={1}
+        value={value}
+        onInput={(event) => setter(Number(event.currentTarget.value))}
+        onChange={(event) => setter(Number(event.currentTarget.value))}
+      />
+      <span className="flex justify-between px-1 text-[11px] text-muted-foreground"><span>1</span><span>4</span><span>7</span></span>
     </label>
   )
 
   return (
-    <main className="humanos-operating-page min-h-screen overflow-y-auto px-4 pb-28 pt-6 md:px-8">
+    <main className="humanos-operating-page h-full min-h-0 overflow-y-auto overscroll-contain px-4 pb-28 pt-6 md:px-8">
       <div className="humanos-operating-container mx-auto max-w-6xl space-y-6">
         <header>
           <Link href={mode === 'interruption' ? '/app/focus' : '/app'} className="mb-3 inline-flex items-center text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="mr-1 h-4 w-4" />{t('checkin.back')}</Link>
