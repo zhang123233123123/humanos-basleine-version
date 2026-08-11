@@ -5,8 +5,7 @@ import authOptions from '@/app/api/auth/[...nextauth]/authOptions'
 
 export async function getHumanOSUserId(): Promise<string | null> {
   const session = await getServerSession(authOptions)
-  const email = session?.user?.email?.trim().toLowerCase()
-  return email || null
+  return session?.user?.id?.trim() || null
 }
 
 export function unauthorizedResponse(): Response {

@@ -104,7 +104,7 @@ observation -> candidate -> confirmed -> dismissed/forgotten
 docs(architecture): map formal UX flow to current implementation
 ```
 
-## Step 1：统一登录身份与 API 基础契约
+## Step 1：统一登录身份与 API 基础契约（已完成）
 
 ### 目标
 
