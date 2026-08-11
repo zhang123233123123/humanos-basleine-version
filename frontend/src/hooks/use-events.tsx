@@ -65,9 +65,7 @@ export const useEvents = create<State & Actions>((set, get) => ({
           })
         }
 
-        const retained = state.events.filter(
-          (event) => event.extendedProps?.isPreview || !overlapsFetchedRange(event),
-        )
+        const retained = state.events.filter((event) => !overlapsFetchedRange(event))
         const byId = new Map<string, EventInput>()
         ;[...retained, ...newEvents].forEach((event) => {
           const key = String(event.id || `${event.title}-${event.start}`)

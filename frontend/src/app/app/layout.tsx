@@ -1,5 +1,5 @@
 import { ThemeProvider } from '@/components/theme-provider'
-import { FloatingDock } from '@/components/ui/floating-dock'
+import { AppNavigation } from '@/components/app-navigation'
 import { Toaster } from '@/components/ui/sonner'
 import { ReactNode } from 'react'
 import { ModalProvider } from '@/hooks/use-modal'
@@ -10,8 +10,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       <ModalProvider>
         <Toaster />
         <div className="relative h-dvh w-full flex flex-col overflow-hidden">
-          {children}
-          <FloatingDock />
+          <AppNavigation />
+          <div className="min-h-0 flex-1 overflow-auto">{children}</div>
         </div>
       </ModalProvider>
     </ThemeProvider>

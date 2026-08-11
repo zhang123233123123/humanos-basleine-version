@@ -16,6 +16,7 @@ import { toast } from 'sonner'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { WorkspaceSidebar } from '@/components/workspace-sidebar'
 import { TaskInspector } from '@/components/task-inspector'
+import { PlanReviewPanel } from '@/components/plan-review-panel'
 import { TaskReminder } from '@/hooks/use-task-reminders'
 import { Button } from '@/components/ui/button'
 import { Plus } from 'lucide-react'
@@ -454,7 +455,7 @@ function TaskInspectorWrapper() {
   }
 
   // Branch 3: Empty state
-  return <TaskInspector task={null} />
+  return <PlanReviewPanel />
 }
 
 function AppContent({
@@ -714,7 +715,7 @@ function AppContent({
   }
 
   return (
-    <div className="h-dvh flex flex-col overflow-hidden">
+    <div className="h-full flex flex-col overflow-hidden">
       <TaskReminder />
       {/* Top bar */}
       <div className="border-b shrink-0">

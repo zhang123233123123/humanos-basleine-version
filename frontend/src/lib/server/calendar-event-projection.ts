@@ -106,3 +106,27 @@ export function projectCalendarEvents(
     .filter((event): event is HumanOSMapEventInput => event !== null)
     .filter((event) => inRange(event, rangeStart, rangeEnd))
 }
+
+export function projectDraftPlanEvents(plan: Record<string, any> | null, tasks: HumanOSTask[], rangeStart?: string | null, rangeEnd?: string | null): HumanOSMapEventInput[] {
+  if (!plan || plan.plan_status === 'confirmed') return []
+  const monday = new Date(`${plan.week_id}T00:00:00`)
+  if (Number.isNaN(monday.getTime())) return []
+  const taskById = new Map(tasks.map((task) => [String(task.id), task]))
+  return (plan.plan_patch || []).map((block: Record<string, any>, index: number) => {
+    const start = new Date(monday)
+    start.setDate(monday.getDate() + Number(block.day_index || 0))
+    start.setMinutes(Math.round(Number(block.start || 0) * 60))
+    const end = new Date(monday)
+    end.setDate(monday.getDate() + Number(block.day_index || 0))
+    end.setMinutes(Math.round(Number(block.end || 0) * 60))
+    const task = taskById.get(String(block.task_id))
+    return {
+      id: `draft-${plan.plan_id}-${block.block_id || index}`,
+      title: block.title || task?.title || 'Untitled',
+      start: start.toISOString(), end: end.toISOString(), allDay: false,
+      extendedProps: {
+        description: task?.context || '', status: 'proposed', priority: normalizePriority(task?.priority), attendees: [], context: task?.context || '', progress: '', nextStep: '', openQuestions: '', blockId: block.block_id, taskType: String(task?.task_type || ''), isPreview: true, planRevision: plan.plan_revision,
+      },
+    }
+  }).filter((event: HumanOSMapEventInput) => inRange(event, rangeStart, rangeEnd))
+}

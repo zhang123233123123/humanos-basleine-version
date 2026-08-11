@@ -220,7 +220,7 @@ fix(tasks): stabilize structured parsing and task confirmation
 feat(planning): generate and validate weekly draft plans
 ```
 
-## Step 5：重构 Calendar Workspace 与整份计划确认
+## Step 5：重构 Calendar Workspace 与整份计划确认（已完成）
 
 ### 目标
 
