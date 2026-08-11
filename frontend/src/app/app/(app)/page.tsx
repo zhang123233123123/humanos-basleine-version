@@ -125,6 +125,7 @@ function TaskInspectorWrapper() {
     setActiveEvent(null)
     await refetchEvents(currentStart, currentEnd)
     await openScheduleProposal('single_task_confirmation')
+    await refetchEvents(currentStart, currentEnd)
   }
 
   const handleReject = () => {
@@ -179,6 +180,7 @@ function TaskInspectorWrapper() {
     if (previewId) removeFromPreviewTasks(previewId)
     await refetchEvents(currentStart, currentEnd)
     await openScheduleProposal('single_preview_confirmation')
+    await refetchEvents(currentStart, currentEnd)
   }
 
   const handleRejectPreview = (task: { uniqueId: string }) => {
@@ -249,6 +251,7 @@ function TaskInspectorWrapper() {
       await refetchEvents(currentStart, currentEnd)
       if (failedCount === 0) {
         await openScheduleProposal('task_preview_confirmation')
+        await refetchEvents(currentStart, currentEnd)
       }
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Tasks were saved, but the schedule preview could not be generated')

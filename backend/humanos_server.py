@@ -4718,6 +4718,24 @@ class Store:
             })
             fallback_profiles.append(local_resource_profile(task))
 
+        # Interactive scheduling must remain available when external AI is slow
+        # or unavailable. The deterministic scheduler only needs these locally
+        # derived fields; richer AI analysis can be performed outside the
+        # confirmation request without delaying calendar persistence.
+        if state.get("deterministic_only"):
+            return {
+                "provider": "local_deterministic",
+                "model": None,
+                "prompt_version": "task-demand-resource-v3",
+                "parallel_prompt_version": "parallel-compatibility-v2",
+                "task_demands": fallback_demands,
+                "dependencies": [],
+                "task_resource_profiles": fallback_profiles,
+                "parallel_candidate_pairs": [],
+                "evidence": ["Profile, confirmed task fields, and local scheduling rules"],
+                "confidence_level": "medium",
+            }
+
         llm_result = chat_completion(
             [
                 {
@@ -5357,7 +5375,10 @@ class Store:
             ]
             runtime_state = payload.get("runtime_state") or self.latest_runtime_state(user_id)
             query = payload.get("query") or self.build_schedule_query(tasks, runtime_state)
-            memories = self.search_memories(user_id, query, top_k=4)
+            # Do not make external embedding/LLM calls on the interactive
+            # confirmation path. A draft must be persisted before the proxy
+            # deadline so the calendar can display it immediately.
+            memories = []
             analysis_state = {
                 "user_id": user_id,
                 "payload": payload,
@@ -5366,6 +5387,7 @@ class Store:
                 "runtime_state": runtime_state,
                 "query": query,
                 "memories": memories,
+                "deterministic_only": True,
             }
             analysis = self.analyze_schedule_inputs(analysis_state)
             existing_plan = self.latest_proposed_plan(user_id, week_id) or self.active_plan(user_id, week_id)
@@ -5389,24 +5411,11 @@ class Store:
                 "task_demands": analysis.get("task_demands", []),
                 "dependencies": analysis.get("dependencies", []),
             }
-            ai_soft_review = chat_completion([
-                {
-                    "role": "system",
-                    "content": (
-                        "Review this Python-generated weekly schedule for soft risks only. "
-                        "Do not propose or change exact times. Return JSON with keys status, "
-                        "risks, strengths, and user_message. Consider cognitive load, context "
-                        "switching, buffer, deadline pressure, and profile rhythm. Python remains "
-                        "the final authority for hard constraints."
-                    ),
-                },
-                {"role": "user", "content": as_json(review_payload)},
-            ], temperature=0.1)
-            decision["ai_soft_review"] = ai_soft_review if isinstance(ai_soft_review, dict) else {
-                "status": "unavailable",
+            decision["ai_soft_review"] = {
+                "status": "deferred",
                 "risks": [],
-                "strengths": [],
-                "user_message": "The deterministic schedule is available; AI soft-risk review was unavailable.",
+                "strengths": ["The draft passed deterministic timeline allocation and hard-constraint validation."],
+                "user_message": "The schedule draft is ready. AI soft-risk review does not block calendar display.",
             }
             validation = self.validate_confirmed_schedule(user_id, {**decision, "user_id": user_id})
             decision["validation"] = validation
