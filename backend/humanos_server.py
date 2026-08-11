@@ -6385,8 +6385,19 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/auth/register" and method == "POST":
                 payload = self.read_json()
+                requested_email = str(payload.get("email") or "").strip().lower()
+                existing_user = store.user_row(requested_email) if requested_email else None
+                if existing_user:
+                    self.send_json({
+                        "error": "account_exists",
+                        "message": "This email is already registered.",
+                        "email": existing_user["email"],
+                        "username": existing_user["name"],
+                        "action": "sign_in",
+                    }, status=409)
+                    return
                 result = store.create_user(
-                    email=payload.get("email", ""),
+                    email=requested_email,
                     password=payload.get("password", ""),
                     name=payload.get("name", ""),
                 )

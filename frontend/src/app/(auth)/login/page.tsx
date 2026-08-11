@@ -9,7 +9,7 @@ import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 
 export default function LoginPage() {
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
@@ -59,8 +59,13 @@ export default function LoginPage() {
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
+        if (res.status === 409 && err.error === 'account_exists') {
+          toast(locale === 'zh'
+            ? `邮箱 ${err.email || email.trim()} 已经注册，用户名为 ${err.username || '—'}。请直接登录或使用其他邮箱。`
+            : `Email ${err.email || email.trim()} is already registered under username ${err.username || '—'}. Sign in or use another email.`)
+          return
+        }
         toast(err.message || err.error || t('login.registerFailed'))
-        setLoading(false)
         return
       }
       // Auto login after register
