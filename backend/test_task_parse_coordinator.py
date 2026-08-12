@@ -8,7 +8,7 @@ class TaskParseCoordinatorTests(unittest.TestCase):
     def test_invalid_first_result_is_retried_with_feedback(self) -> None:
         parser = Mock(side_effect=[
             [{"title": "期末复习", "schedule_type": "flexible_task"}, {"title": "三个小时", "duration_minutes": 180}],
-            [{"title": "期末复习", "schedule_type": "flexible_task", "duration_minutes": 180, "deadline_at": "2026-08-14T23:59:00+08:00"}],
+            [{"title": "期末复习", "schedule_type": "flexible_task", "duration_minutes": 180, "deadline_at": "2026-08-14T23:59:00+08:00", "source_spans": ["完成期末复习", "大概三个小时"], "resource_modality": ["visual"]}],
         ])
         events = []
         result = parse_with_validation_retry(

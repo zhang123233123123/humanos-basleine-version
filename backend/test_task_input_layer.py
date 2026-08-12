@@ -128,7 +128,7 @@ class TaskInputLayerTests(unittest.TestCase):
             {"title": "三个小时", "duration_minutes": 180, "schedule_type": "flexible_task"},
         ]
         corrected = [
-            {"title": "期末复习", "duration_minutes": 180, "deadline_at": "2026-08-14T20:00:00+08:00", "schedule_type": "flexible_task"},
+            {"title": "完成期末复习", "duration_minutes": 180, "deadline_at": "2026-08-14T20:00:00+08:00", "schedule_type": "flexible_task", "source_spans": ["完成期末复习", "大概三个小时"], "resource_modality": ["visual"]},
         ]
         with patch("backend.humanos_server.parse_tasks_with_agent", side_effect=[bad, corrected]) as parser:
             tasks = self.store.parse_tasks_from_text(
@@ -136,9 +136,22 @@ class TaskInputLayerTests(unittest.TestCase):
             )
         self.assertEqual(2, parser.call_count)
         self.assertEqual(1, len(tasks))
-        self.assertEqual("期末复习", tasks[0]["title"])
+        self.assertIn("期末复习", tasks[0]["title"])
         self.assertEqual(180, tasks[0]["duration"])
         self.assertTrue(parser.call_args.kwargs["validation_feedback"])
+
+    def test_structured_duration_is_not_overwritten_by_shared_context(self) -> None:
+        task = self.store.create_task("user-a", {
+            "title": "洗衣服",
+            "duration": 45,
+            "estimated_duration": 45,
+            "due": "2026-08-15T18:00:00+08:00",
+            "context": "修订文献综述，120分钟；洗衣服，45分钟；听播客，30分钟",
+            "resource_modality": ["manual"],
+            "parallelizable": True,
+        })
+        self.assertEqual(45, task["duration"])
+        self.assertEqual(45, self.store.get_task(task["id"], "user-a")["duration"])
 
     def test_expanded_action_keywords_are_not_dropped(self) -> None:
         tasks = self.store.local_parse_tasks_from_text(
