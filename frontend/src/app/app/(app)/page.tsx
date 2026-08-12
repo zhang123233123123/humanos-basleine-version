@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import FullCalendar from '@fullcalendar/react'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import timeGridPlugin from '@fullcalendar/timegrid'
@@ -25,6 +25,7 @@ import { useRouter } from 'next/navigation'
 import type { ExecutionResourceEnvelope, ExecutionSession } from '@/lib/contracts/execution-contracts'
 import type { PlanDecision, PlanResourceEnvelope } from '@/lib/contracts/planning-contracts'
 import { requestId } from '@/lib/client/request-id'
+import type { HumanOSTask } from '@/lib/contracts/task-contracts'
 
 export interface CalendarEvent {
   id: string
@@ -47,6 +48,34 @@ function TaskInspectorWrapper() {
   const [batchReason, setBatchReason] = useState('')
   const [proposalError, setProposalError] = useState('')
   const [proposalRetrying, setProposalRetrying] = useState(false)
+  const [pendingTasks, setPendingTasks] = useState<HumanOSTask[]>([])
+  const [hasProposedPlan, setHasProposedPlan] = useState(false)
+
+  const refreshPendingTasks = useCallback(async () => {
+    const [envelope, proposedEnvelope] = await Promise.all([
+      apiRequest<any>('/api/tasks'),
+      apiRequest<any>('/api/plans/proposed'),
+    ])
+    const tasks = (envelope?.data?.tasks || []) as HumanOSTask[]
+    setHasProposedPlan(Boolean(proposedEnvelope?.data?.plan || proposedEnvelope?.plan))
+    setPendingTasks(tasks.filter((task) => {
+      const status = String(task.status || 'queued').toLowerCase()
+      const sessions = Array.isArray(task.execution?.sessions) ? task.execution.sessions : []
+      return !task.is_preview && !String(task.id || '').startsWith('preview-') &&
+        !['completed', 'terminated'].includes(status) && sessions.length === 0
+    }))
+  }, [])
+
+  useEffect(() => {
+    void refreshPendingTasks().catch(() => undefined)
+    const refresh = () => void refreshPendingTasks().catch(() => undefined)
+    window.addEventListener('humanos:plan-revision', refresh)
+    window.addEventListener('humanos:plan-updated', refresh)
+    return () => {
+      window.removeEventListener('humanos:plan-revision', refresh)
+      window.removeEventListener('humanos:plan-updated', refresh)
+    }
+  }, [refreshPendingTasks])
 
   const waitForJob = async <T,>(jobId: string): Promise<T> => {
     for (let attempt = 0; attempt < 180; attempt += 1) {
@@ -209,6 +238,7 @@ function TaskInspectorWrapper() {
     setEvents(useEvents.getState().events.filter((event) => String((event as any).taskId || event.id) !== taskId))
     setActiveEvent(null)
     await refetchEvents(currentStart, currentEnd)
+    await refreshPendingTasks()
     window.dispatchEvent(new CustomEvent('humanos:plan-revision', { detail: { source: 'task-deleted', taskId } }))
     toast('Task deleted. The weekly plan needs regeneration.')
   }
@@ -482,6 +512,36 @@ function TaskInspectorWrapper() {
     )
   }
 
+  if (pendingTasks.length > 0 && !hasProposedPlan) {
+    return (
+      <aside className="w-80 shrink-0 overflow-y-auto border-l border-border bg-background">
+        <div className="sticky top-0 z-20 border-b border-border bg-background/95 p-4 backdrop-blur">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold">{t('workspace.aiGeneratedTasks')}</h2>
+            <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-700">{pendingTasks.length}</span>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">任务已经保存，正在等待周计划安排。生成草案后会以虚线时间块显示在日历中。</p>
+        </div>
+        <ul className="divide-y divide-border">
+          {pendingTasks.map((task) => (
+            <li key={String(task.id)} className="cursor-pointer p-3 transition-colors hover:bg-muted/50" onClick={() => setActiveEvent({
+              id: String(task.id), taskId: String(task.id), uniqueId: String(task.id), title: String(task.title || 'Untitled'), start: null, end: null,
+              allDay: false, timeText: String(task.due || task.deadline_at || ''), description: String(task.context || ''), attendees: [],
+              status: String(task.status || 'queued'), priority: String(task.priority || 'medium'), duration: Number(task.duration || 0) || undefined,
+              deadlineAt: String(task.deadline_at || ''), due: String(task.due || task.deadline_at || ''), context: String(task.context || ''),
+            })}>
+              <div className="truncate text-sm font-medium">{task.title}</div>
+              <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span>{task.deadline_at || task.due || t('workspace.unscheduledTask')}</span>
+                <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-amber-700">待排期</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </aside>
+    )
+  }
+
   // Branch 3: Empty state
   return <PlanReviewPanel />
 }
@@ -698,6 +758,7 @@ function AppContent({
         setPreviewTasks([])
         setRightOpen(true)
         await refetchEvents(currentStart, currentEnd)
+        window.dispatchEvent(new CustomEvent('humanos:plan-revision', { detail: { source: 'tasks-saved-before-schedule' } }))
         window.dispatchEvent(new CustomEvent('humanos:plan-revision', { detail: { source: 'async_chat_task_import' } }))
         return data
       }
