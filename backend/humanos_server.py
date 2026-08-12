@@ -36,6 +36,7 @@ try:
     from .app.application.task_payloads import build_task_previews, normalize_parser_items
     from .app.domain.intent import classify_intent
     from .app.domain.task.change_policy import exact_task_reference_indexes, has_unique_task_identity, is_explicit_change_request, matching_context_item
+    from .app.domain.execution import analyze_remaining_work_impact, settle_interruption
 except ImportError:
     try:
         from app.application.parse_task import parse_structured_tasks as parse_tasks_with_agent
@@ -48,6 +49,7 @@ except ImportError:
         from app.application.task_payloads import build_task_previews, normalize_parser_items
         from app.domain.intent import classify_intent
         from app.domain.task.change_policy import exact_task_reference_indexes, has_unique_task_identity, is_explicit_change_request, matching_context_item
+        from app.domain.execution import analyze_remaining_work_impact, settle_interruption
     except ImportError as parser_import_error:
         print(f"PydanticAI parser import fallback: {parser_import_error}", flush=True)
         parse_tasks_with_agent = None
@@ -4277,14 +4279,26 @@ class Store:
 
             require_execution_transition(str(row["status"]), "paused")
             calculated = int(row["accumulated_active_minutes"] or 0)
+            elapsed_segment = 0
             if row["status"] == "running":
-                calculated += self._iso_elapsed_minutes(row["resumed_at"] or row["actual_start_at"], paused_at)
-            active = max(calculated, confirmed_minutes)
-            if not remaining_minutes:
-                remaining_minutes = max(int(row["planned_work_minutes"] or 0) - active, 0)
+                elapsed_segment = self._iso_elapsed_minutes(row["resumed_at"] or row["actual_start_at"], paused_at)
+            task = self.get_task(str(row["task_id"]), user_id) or {}
+            task_remaining = int((task.get("execution") or {}).get("remaining_duration_minutes", task.get("duration") or row["planned_work_minutes"] or 0))
+            settlement = settle_interruption(
+                planned_session_minutes=int(row["planned_work_minutes"] or 0),
+                previous_active_minutes=calculated,
+                elapsed_segment_minutes=elapsed_segment,
+                reported_active_minutes=confirmed_minutes,
+                previous_task_remaining_minutes=task_remaining,
+            )
+            active = settlement.effective_active_minutes
+            remaining_minutes = settlement.session_remaining_minutes
             conn.execute("UPDATE execution_sessions SET status='paused',paused_at=?,resumed_at=NULL,accumulated_active_minutes=?,pause_reason=?,resume_preference=?,preferred_resume_at=?,remaining_at_pause=?,updated_at=? WHERE id=? AND user_id=?", (paused_at, active, pause_reason, resume_preference, preferred_resume_at, remaining_minutes, timestamp, session_id, user_id))
-            conn.execute("UPDATE tasks SET status='paused',updated_at=? WHERE id=? AND user_id=?", (timestamp, row["task_id"], user_id))
-            self._insert_state_transition(conn, user_id=user_id, task_id=row["task_id"], before_status=str(row["status"]), action_type="pause", after_status="paused", execution_session_id=session_id, action_detail={"pause_reason": pause_reason, "resume_preference": resume_preference, "remaining_minutes": remaining_minutes}, created_at=timestamp)
+            execution = dict(task.get("execution") or {})
+            execution["accumulated_actual_minutes"] = int(execution.get("accumulated_actual_minutes") or 0) + max(settlement.effective_active_minutes - settlement.previous_active_minutes, 0)
+            execution["remaining_duration_minutes"] = settlement.task_remaining_minutes
+            conn.execute("UPDATE tasks SET status='paused',execution_json=?,updated_at=? WHERE id=? AND user_id=?", (as_json(execution), timestamp, row["task_id"], user_id))
+            self._insert_state_transition(conn, user_id=user_id, task_id=row["task_id"], before_status=str(row["status"]), action_type="pause", after_status="paused", execution_session_id=session_id, action_detail={"pause_reason": pause_reason, "resume_preference": resume_preference, **settlement.to_dict()}, created_at=timestamp)
             self._record_execution_request(conn, user_id, request_id, session_id, "pause", timestamp)
             updated = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (session_id,)).fetchone()
         return self.execution_session_row(updated)
@@ -4308,7 +4322,7 @@ class Store:
             int(payload.get("remaining_minutes") if payload.get("remaining_minutes") is not None else session.get("session_remaining_minutes") or 0),
             0,
         )
-        estimated_end = current + timedelta(minutes=remaining_minutes)
+        task = self.get_task(str(session.get("task_id") or ""), user_id) or {}
         future = [
             item for item in self.list_execution_sessions(user_id, ["ready"])
             if item.get("execution_session_id") != session_id
@@ -4316,38 +4330,19 @@ class Store:
             and item.get("plan_revision") == session.get("plan_revision")
             and item.get("planned_start_at")
         ]
-        conflicts = []
-        for item in future:
-            try:
-                planned_start = datetime.fromisoformat(str(item["planned_start_at"]))
-                if planned_start.tzinfo is None:
-                    planned_start = planned_start.replace(tzinfo=current.tzinfo)
-                if planned_start < estimated_end and planned_start >= current:
-                    conflicts.append({
-                        "execution_session_id": item["execution_session_id"],
-                        "task_id": item["task_id"],
-                        "task_title": item.get("task_title") or item.get("title"),
-                        "planned_start_at": item.get("planned_start_at"),
-                        "planned_end_at": item.get("planned_end_at"),
-                        "overlap_minutes": max(int((estimated_end - planned_start).total_seconds() // 60), 1),
-                    })
-            except (TypeError, ValueError):
-                continue
-        return {
-            "action": str(payload.get("action") or "resume"),
-            "execution_session_id": session_id,
-            "evaluated_at": current.isoformat(),
-            "remaining_minutes": remaining_minutes,
-            "estimated_end_at": estimated_end.isoformat(),
-            "requires_plan_adjustment": bool(conflicts),
-            "affected_sessions": conflicts,
-            "options": ["continue_without_changes"] if not conflicts else [
-                "shorten_current_task",
-                "reschedule_future_tasks",
-                "regenerate_today_plan",
-                "edit_plan_manually",
-            ],
-        }
+        context = dict(task.get("contextWindow") or {})
+        deadline_at = task.get("deadline_at") or context.get("deadlineAt") or context.get("deadline_at")
+        week_start = datetime.fromisoformat(f"{session.get('week_id')}T00:00:00").replace(tzinfo=current.tzinfo)
+        week_end = week_start + timedelta(days=7)
+        return analyze_remaining_work_impact(
+            current=current,
+            remaining_minutes=remaining_minutes,
+            future_sessions=future,
+            current_session_id=session_id,
+            deadline_at=deadline_at,
+            week_end_at=week_end,
+            action=str(payload.get("action") or "resume"),
+        )
 
     def end_execution_session(self, user_id: str, payload: dict) -> dict:
         session_id = str(payload.get("execution_session_id") or "")
