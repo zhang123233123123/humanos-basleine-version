@@ -1057,6 +1057,14 @@ class Store:
         return self.get_background_job(user_id, job_id) or {}
 
     def get_background_job(self, user_id: str, job_id: str) -> dict | None:
+    def request_replan(self, user_id: str, *, scope: str, trigger: str, affected_task_ids: list[str] | None = None, week_id: str | None = None) -> dict:
+        """Queue a Plan Revision without mutating the confirmed calendar."""
+        profile = self.ensure_profile(user_id)
+        target_week = str(week_id or profile.get("active_week_id") or (profile.get("weekly_context") or {}).get("week_id") or iso_week_id(timezone_name=profile.get("timezone")))
+        job = self.create_background_job(user_id, "schedule_plan", {"week_id": target_week, "source": "mutation_replan", "adjustment_trigger": trigger, "replan_scope": scope if scope in {"local", "full", "today"} else "local", "affected_task_ids": sorted({str(item) for item in (affected_task_ids or []) if item}), "request_id": new_id("replan")})
+        return {"required": True, "scope": scope, "trigger": trigger, "affected_task_ids": sorted({str(item) for item in (affected_task_ids or []) if item}), "job": job, "confirmation_required": True}
+
+    def get_background_job(self, user_id: str, job_id: str) -> dict | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM background_jobs WHERE id=? AND user_id=?", (job_id, user_id)).fetchone()
         if not row:
@@ -6745,8 +6753,11 @@ class Handler(BaseHTTPRequestHandler):
                 if method == "PUT":
                     payload = self.read_json()
                     payload["user_id"] = payload.get("user_id", user_id)
+                    before = store.ensure_profile(payload["user_id"])
+                    profile = store.upsert_profile(payload)
+                    changed = any(before.get(key) != profile.get(key) for key in {"deep_work_window", "low_energy_window", "task_preferences", "timezone", "weekly_context"})
                     self.send_json({
-                        "data": {"profile": store.upsert_profile(payload)},
+                        "data": {"profile": profile, "replan": store.request_replan(payload["user_id"], scope="full", trigger="profile_changed") if changed and before.get("active_plan_revision") else {"required": False}},
                         "resources": {"self": "/api/profile", "tasks": "/api/tasks"},
                         "meta": {"resource": "profile", "aggregate_root": "profile", "read_only": False},
                     })
@@ -6756,7 +6767,10 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 user_id = payload.get("user_id", "demo")
                 store.ensure_profile(user_id)
-                self.send_json(store.reconcile_weekly_setup(user_id, payload))
+                result = store.reconcile_weekly_setup(user_id, payload)
+                if result.get("plan_needs_update"):
+                    result["replan"] = store.request_replan(user_id, scope="full", trigger="weekly_setup_changed", affected_task_ids=result.get("invalidated_task_ids"), week_id=result.get("week_id"))
+                self.send_json(result)
                 return
 
             if path == "/api/weeks/status" and method == "GET":
@@ -6785,8 +6799,9 @@ class Handler(BaseHTTPRequestHandler):
                     payload = self.read_json()
                     user_id = payload.get("user_id", user_id)
                     store.ensure_profile(user_id)
+                    task = store.create_task(user_id, payload)
                     self.send_json({
-                        "data": {"task": store.create_task(user_id, payload)},
+                        "data": {"task": task, "replan": store.request_replan(user_id, scope="local", trigger="task_created", affected_task_ids=[task.get("id")], week_id=task.get("week_id"))},
                         "resources": {"collection": "/api/tasks"},
                         "meta": {"resource": "task", "aggregate_root": "task", "read_only": False},
                     }, status=201)
@@ -6831,8 +6846,11 @@ class Handler(BaseHTTPRequestHandler):
                 task_id = path.split("/")[-1]
                 payload = self.read_json()
                 user_id = payload.get("user_id") or query.get("user_id", ["demo"])[0]
+                before = store.get_task(task_id, user_id) or {}
+                task = store.patch_task(task_id, payload, user_id)
+                changed = any(before.get(key) != task.get(key) for key in {"due", "duration", "priority", "expected_difficulty", "cognitive_load", "task_demand", "contextWindow", "status"})
                 self.send_json({
-                    "data": {"task": store.patch_task(task_id, payload, user_id)},
+                    "data": {"task": task, "replan": store.request_replan(user_id, scope="local", trigger="task_schedule_changed", affected_task_ids=[task_id], week_id=task.get("week_id")) if changed else {"required": False}},
                     "resources": {"collection": "/api/tasks"},
                     "meta": {"resource": "task", "aggregate_root": "task", "read_only": False},
                 })
@@ -6841,8 +6859,9 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/tasks/") and method == "DELETE":
                 task_id = path.split("/")[-1]
                 user_id = query.get("user_id", ["demo"])[0]
+                before = store.get_task(task_id, user_id) or {}
                 self.send_json({
-                    "data": {"task": store.delete_task(task_id, user_id)},
+                    "data": {"task": store.delete_task(task_id, user_id), "replan": store.request_replan(user_id, scope="local", trigger="task_deleted", affected_task_ids=[task_id], week_id=before.get("week_id"))},
                     "resources": {"collection": "/api/tasks"},
                     "meta": {"resource": "task", "aggregate_root": "task", "read_only": False},
                 })
@@ -6854,7 +6873,8 @@ class Handler(BaseHTTPRequestHandler):
                 store.ensure_profile(user_id)
                 runtime_state = store.save_runtime_state(user_id, payload)
                 daily_plan_review = store.evaluate_daily_checkin(user_id, runtime_state) if payload.get("daily_checkin") else None
-                self.send_json({"runtime_state": runtime_state, "daily_plan_review": daily_plan_review}, status=201)
+                replan = store.request_replan(user_id, scope="today", trigger="daily_checkin_changed_capacity", affected_task_ids=[str((daily_plan_review.get("first_session") or {}).get("task_id") or "")]) if daily_plan_review and daily_plan_review.get("requires_plan_adjustment") else {"required": False}
+                self.send_json({"runtime_state": runtime_state, "daily_plan_review": daily_plan_review, "replan": replan}, status=201)
                 return
 
             if path == "/api/state-checkins" and method == "GET":
@@ -6922,6 +6942,12 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 user_id = payload.get("user_id", "demo")
                 self.send_json({"impact": store.analyze_execution_impact(user_id, payload)})
+                return
+
+            if path == "/api/plans/replan" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                self.send_json({"replan": store.request_replan(user_id, scope=str(payload.get("scope") or "local"), trigger=str(payload.get("trigger") or "user_requested"), affected_task_ids=payload.get("affected_task_ids") or [], week_id=payload.get("week_id"))}, status=202)
                 return
 
             if path == "/api/execution-sessions/end" and method == "POST":
