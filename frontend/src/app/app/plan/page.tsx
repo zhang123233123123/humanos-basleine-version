@@ -1,9 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { ArrowLeft, CalendarCheck, Loader2, RefreshCw, ShieldCheck, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowLeft, CalendarCheck, Loader2, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -29,7 +29,6 @@ export default function WeeklyPlanPage() {
   const { t, locale } = useTranslation()
   const searchParams = useSearchParams()
   const adjustmentTrigger = searchParams.get('adjust') || ''
-  const proposalRequested = searchParams.get('proposal') === 'latest'
   const [stage, setStage] = useState<Stage>('setup')
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -48,6 +47,7 @@ export default function WeeklyPlanPage() {
   const [availableWindows, setAvailableWindows] = useState('')
   const [temporaryConstraints, setTemporaryConstraints] = useState('')
   const [keepBuffer, setKeepBuffer] = useState(true)
+  const editSnapshot = useRef('')
 
   const days = locale === 'zh' ? DAYS_ZH : DAYS_EN
   const weekId = weekStatus?.current_week_id || ''
@@ -78,7 +78,7 @@ export default function WeeklyPlanPage() {
       )
       setKeepBuffer(weekly.keep_buffer !== false)
       setActivePlan(planData.data.plan)
-      if (proposalRequested && proposalData.data.plan) {
+      if (proposalData.data.plan) {
         setDecision(proposalData.data.plan)
         setBlocks(proposalData.data.plan.plan_patch || [])
         setValidation(proposalData.data.plan.validation || null)
@@ -90,7 +90,7 @@ export default function WeeklyPlanPage() {
     } finally {
       setLoading(false)
     }
-  }, [adjustmentTrigger, proposalRequested, t])
+  }, [adjustmentTrigger, t])
 
   useEffect(() => {
     void loadPlanningState()
@@ -178,6 +178,24 @@ export default function WeeklyPlanPage() {
       setSubmitting(false)
     }
   }
+
+  useEffect(() => {
+    if (loading || stage !== 'setup' || weekStatus?.new_week) return
+    const snapshot = JSON.stringify({
+      weeklyGoal, availableWindows, temporaryConstraints, keepBuffer,
+      tasks: tasks.map((task) => ({ id: task.id, title: task.title, due: task.due || task.deadline || task.deadline_at, duration: task.duration || task.estimated_duration, priority: task.priority })),
+    })
+    if (!editSnapshot.current) {
+      editSnapshot.current = snapshot
+      return
+    }
+    if (snapshot === editSnapshot.current) return
+    const timer = window.setTimeout(() => {
+      editSnapshot.current = snapshot
+      void generatePlan()
+    }, 900)
+    return () => window.clearTimeout(timer)
+  }, [availableWindows, keepBuffer, loading, stage, tasks, temporaryConstraints, weeklyGoal, weekStatus?.new_week])
 
   const updateBlock = (index: number, field: 'day_index' | 'start' | 'end', value: number) => {
     setBlocks((current) => current.map((block, blockIndex) => {
@@ -340,7 +358,7 @@ export default function WeeklyPlanPage() {
                     <Button type="button" size="icon" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => void deleteTask(task)} aria-label={locale === 'zh' ? '删除任务' : 'Delete task'}><Trash2 className="h-4 w-4" /></Button>
                   </div>
                 ))}
-                <div className="flex justify-end pt-2"><Button onClick={generatePlan} disabled={submitting || weekStatus?.new_week}><Sparkles className="mr-2 h-4 w-4" />{t('planning.generate')}</Button></div>
+                <div className="flex items-center justify-end gap-2 pt-2 text-xs text-muted-foreground">{submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}<span>{submitting ? (locale === 'zh' ? '正在保存修改并更新草案…' : 'Saving changes and updating draft…') : (locale === 'zh' ? '修改会自动保存并更新草案' : 'Changes save automatically and refresh the draft')}</span></div>
               </CardContent>
             </Card>
           </div>
