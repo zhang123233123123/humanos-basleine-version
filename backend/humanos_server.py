@@ -3621,10 +3621,12 @@ class Store:
             blocks_by_task: dict[str, list[dict]] = {}
             for block in decorated:
                 block["plan_status"] = "confirmed"
-                blocks_by_task.setdefault(str(block.get("task_id")), []).append(block)
+                block_task_id = str(block.get("task_id") or "").strip()
+                if str(block.get("kind") or "") == "fixed_event" or not block_task_id:
+                    continue
+                blocks_by_task.setdefault(block_task_id, []).append(block)
                 execution_id = new_id("exec")
                 planned_minutes = int(block.get("planned_work_minutes") or block.get("session_minutes") or round((float(block["end"]) - float(block["start"])) * 60))
-                block_task_id = str(block.get("task_id") or "")
                 paused_source = execution_sessions.latest_paused_for_task(user_id=user_id, task_id=block_task_id)
                 execution_sessions.upsert_ready(
                     execution_id=execution_id,
