@@ -8,6 +8,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from humanos_graph import build_scheduling_context, day_index_from_due, parse_due_start_hour, profile_now
+from app.domain.timeline import WeeklySegment, WeeklyTimeAxis
 
 
 GRID_MINUTES = 15
@@ -31,11 +32,11 @@ def _week_start(week_id: str, timezone_name: str) -> datetime:
 
 
 def _axis(day_index: int, hour: float) -> int:
-    return day_index * 1440 + round(hour * 60)
+    return WeeklyTimeAxis.from_legacy_hour(day_index, hour)
 
 
 def _hour(axis_minute: int) -> float:
-    return (axis_minute % 1440) / 60
+    return WeeklyTimeAxis.to_legacy_hour(axis_minute)
 
 
 def _deadline_axis(task: dict[str, Any], now: datetime) -> int | None:
@@ -56,7 +57,8 @@ def _task_kind(task: dict[str, Any]) -> str:
 
 
 def _overlaps(start: int, end: int, occupied: list[tuple[int, int]]) -> bool:
-    return any(start < occupied_end and occupied_start < end for occupied_start, occupied_end in occupied)
+    candidate = WeeklySegment(start, end)
+    return any(candidate.overlaps(WeeklySegment(occupied_start, occupied_end)) for occupied_start, occupied_end in occupied)
 
 
 def _dependency_order(tasks: list[dict[str, Any]], analysis: dict[str, Any], now: datetime) -> list[dict[str, Any]]:
@@ -106,6 +108,7 @@ def build_deterministic_plan(
     now = profile_now(profile)
     week_id = str(payload.get("week_id") or profile.get("active_week_id") or (profile.get("weekly_context") or {}).get("week_id") or (now - timedelta(days=now.weekday())).date().isoformat())
     week_start = _week_start(week_id, timezone_name)
+    weekly_axis = WeeklyTimeAxis(week_id, timezone_name)
     preferences = profile.get("task_preferences") or {}
     session_minutes = _rounded_preference(preferences.get("preferred_session_minutes"), 45)
     rest_minutes = _rounded_preference(preferences.get("rest_between_tasks_minutes"), 15, maximum=60)
@@ -121,6 +124,9 @@ def build_deterministic_plan(
         for item in context.get("hard_constraints") or []
         if int(item.get("day_index", -1)) in range(7) and float(item.get("end", 0)) > float(item.get("start", 0))
     )
+    available_segments = [WeeklySegment(start, end) for start, end in windows]
+    occupied_segments = [WeeklySegment(start, end) for start, end in occupied]
+    initial_free_segments = WeeklyTimeAxis.subtract(available_segments, occupied_segments)
     active_tasks = {
         str(task.get("id")): task
         for task in tasks
@@ -211,6 +217,8 @@ def build_deterministic_plan(
                 "end": _hour(end),
                 "start_at": start_at.isoformat(),
                 "end_at": end_at.isoformat(),
+                "week_start_minute": start,
+                "week_end_minute": end,
                 "kind": "task_session",
                 "mode": "execution",
                 "session_index": session_index,
@@ -248,7 +256,7 @@ def build_deterministic_plan(
         "explanation": f"Python allocated {len(blocks)} focus sessions on the weekly timeline using {session_minutes}-minute sessions and {rest_minutes}-minute protected breaks. AI analysis is retained for demand, dependency, and soft-risk review.",
         "confidence": {"level": "high" if not unscheduled else "medium", "evidence": ["Profile", "Weekly Context", "Task deadlines", "Task dependencies", "Python timeline allocation"]},
         "constraint_summary": {**context, "preferred_session_minutes": session_minutes, "rest_minutes": rest_minutes},
-        "scheduler": {"engine": "python_timeline_v1", "grid_minutes": GRID_MINUTES, "session_minutes": session_minutes, "rest_minutes": rest_minutes, "ai_role": "task_analysis_and_soft_review"},
+        "scheduler": {"engine": "python_timeline_v2", "axis_start": 0, "axis_end": 10080, "grid_minutes": GRID_MINUTES, "session_minutes": session_minutes, "rest_minutes": rest_minutes, "initial_available_minutes": WeeklyTimeAxis.capacity(initial_free_segments), "ai_role": "task_analysis_and_soft_review"},
         "task_ids": sorted(active_tasks),
         "week_id": week_id,
     }
