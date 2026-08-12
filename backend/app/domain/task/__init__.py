@@ -8,6 +8,7 @@ from .update import TaskPatchDecision, decide_task_patch, status_after_schedule_
 from .validator import validate_enriched_task
 from .boundary_validator import validate_task_candidates
 from .change_policy import exact_task_reference_indexes, has_unique_task_identity, is_explicit_change_request, matching_context_item
+from .schedule_projection import TaskScheduleProjection, project_confirmed_task_schedule
 
 __all__ = [
     "ParsedTask",
@@ -32,4 +33,6 @@ __all__ = [
     "exact_task_reference_indexes",
     "has_unique_task_identity",
     "matching_context_item",
+    "TaskScheduleProjection",
+    "project_confirmed_task_schedule",
 ]

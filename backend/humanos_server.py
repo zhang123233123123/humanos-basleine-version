@@ -3565,10 +3565,12 @@ class Store:
         week_id = str(payload.get("week_id") or profile.get("active_week_id") or iso_week_id(timezone_name=timezone_name))
         timestamp = now_ms()
         with self.connect() as conn:
-            from app.repositories import ExecutionSessionRepository, PlanRepository
+            from app.repositories import ExecutionSessionRepository, PlanRepository, TaskRepository
+            from app.domain.task import project_confirmed_task_schedule
 
             plans = PlanRepository(conn)
             execution_sessions = ExecutionSessionRepository(conn)
+            tasks = TaskRepository(conn)
             row = plans.get_for_user(plan_id=plan_id, user_id=user_id) if plan_id else None
             if row and row["plan_status"] == "confirmed":
                 result = from_json(row["plan_json"], {})
@@ -3622,28 +3624,23 @@ class Store:
                 )
                 if paused_source:
                     execution_sessions.mark_continued_in_revision(session_id=paused_source["id"], timestamp=timestamp)
-            active_rows = conn.execute(
-                "SELECT * FROM tasks WHERE user_id=? AND week_id=? AND removed_from_week=0 AND status NOT IN ('completed','terminated')",
-                (user_id,week_id),
-            ).fetchall()
+            active_rows = tasks.active_for_week(user_id=user_id, week_id=week_id)
             for task_row in active_rows:
                 task = self.task_row(task_row)
                 task_id = str(task["id"])
-                sessions = sorted(blocks_by_task.get(task_id, []), key=lambda item: (item["start_at"], item["end_at"]))
-                if not sessions:
-                    conn.execute("UPDATE tasks SET slot_json=?,updated_at=? WHERE id=? AND user_id=?", (as_json(None),timestamp,task_id,user_id))
-                    continue
-                for index, session in enumerate(sessions):
-                    session["session_index"] = index + 1
-                    session["session_count"] = len(sessions)
-                slot = {"sessions": sessions,"start": sessions[0]["start"],"end": sessions[0]["end"],"day_index": sessions[0]["day_index"],"week_id": week_id,"plan_revision": revision,"plan_status": "confirmed","color": sessions[0].get("color") or "blue"}
-                execution = dict(task.get("execution") or {})
-                execution["scheduled_duration_minutes"] = sum(int(item.get("planned_work_minutes") or item.get("session_minutes") or round((item["end"] - item["start"]) * 60)) for item in sessions)
-                execution["unallocated_schedule_minutes"] = max(int(execution.get("remaining_duration_minutes", task.get("duration") or 0)) - execution["scheduled_duration_minutes"], 0)
-                status = "scheduled" if execution["unallocated_schedule_minutes"] == 0 else "partially_scheduled"
-                conn.execute(
-                    "UPDATE tasks SET slot_json=?,execution_json=?,status=?,updated_at=? WHERE id=? AND user_id=?",
-                    (as_json(slot),as_json(execution),status,timestamp,task_id,user_id),
+                projection = project_confirmed_task_schedule(
+                    task,
+                    sessions=blocks_by_task.get(task_id, []),
+                    week_id=week_id,
+                    revision=revision,
+                )
+                tasks.save_schedule_projection(
+                    task_id=task_id,
+                    user_id=user_id,
+                    slot_json=as_json(projection.slot),
+                    execution_json=as_json(projection.execution),
+                    status=projection.status,
+                    timestamp=timestamp,
                 )
             stored = dict(payload.get("decision") or {})
             stored.update({"plan_id": plan_id,"plan_revision": revision,"plan_status": "confirmed","week_id": week_id,"plan_patch": decorated,"confirmed_at": timestamp})
@@ -4209,6 +4206,9 @@ class Store:
         profile = self.ensure_profile(user_id)
         actual_start = str(payload.get("actual_start_at") or self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai").isoformat())
         with self.connect() as conn:
+            from app.repositories import TaskRepository
+
+            tasks = TaskRepository(conn)
             replay = self._execution_request_seen(conn, user_id, request_id)
             if replay:
                 return self.execution_session_row(replay)
@@ -4320,7 +4320,13 @@ class Store:
             execution = dict(task.get("execution") or {})
             execution["accumulated_actual_minutes"] = int(execution.get("accumulated_actual_minutes") or 0) + max(settlement.effective_active_minutes - settlement.previous_active_minutes, 0)
             execution["remaining_duration_minutes"] = settlement.task_remaining_minutes
-            conn.execute("UPDATE tasks SET status='paused',execution_json=?,updated_at=? WHERE id=? AND user_id=?", (as_json(execution), timestamp, row["task_id"], user_id))
+            tasks.save_execution_state(
+                task_id=str(row["task_id"]),
+                user_id=user_id,
+                execution_json=as_json(execution),
+                status="paused",
+                timestamp=timestamp,
+            )
             self._insert_state_transition(conn, user_id=user_id, task_id=row["task_id"], before_status=str(row["status"]), action_type="pause", after_status="paused", execution_session_id=session_id, action_detail={"pause_reason": pause_reason, "resume_preference": resume_preference, **settlement.to_dict()}, created_at=timestamp)
             self._record_execution_request(conn, user_id, request_id, session_id, "pause", timestamp)
             updated = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (session_id,)).fetchone()
