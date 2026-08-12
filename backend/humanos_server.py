@@ -1669,7 +1669,12 @@ class Store:
                 return self.task_row(duplicate)
         # Mutable fields are not identity. Two Tasks may share a title and
         # deadline; only replaying the same request_id may reuse a Task.
-        task_id = payload.get("id") or new_id("task")
+        requested_task_id = str(payload.get("id") or "").strip()
+        # Preview identifiers are transport-only identities. Once the user
+        # confirms a candidate it becomes a real Task and must receive a
+        # persistent task_* identity; calendar projection intentionally hides
+        # preview-* resources.
+        task_id = new_id("task") if not requested_task_id or requested_task_id.startswith("preview-") else requested_task_id
         priority = payload.get("priority") or "中"
         duration = infer_duration_minutes(f"{title} {context}") or int(
             payload.get("estimated_duration") or payload.get("duration") or 60

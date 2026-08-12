@@ -42,6 +42,16 @@ class TaskInputLayerTests(unittest.TestCase):
         self.assertIn("duration_minutes", previews[0]["missing_fields"])
         self.assertEqual([], self.store.list_tasks("user-a"))
 
+    def test_confirmed_preview_receives_persistent_task_identity(self) -> None:
+        task = self.store.create_task("user-a", {
+            "id": "preview-test-0",
+            "title": "期末复习",
+            "due": "周五 24:00",
+            "duration": 180,
+        })
+        self.assertTrue(task["id"].startswith("task_"))
+        self.assertFalse(task["id"].startswith("preview-"))
+
     def test_confirmed_task_preserves_absolute_temporal_metadata(self) -> None:
         task = self.store.create_task("user-a", {
             "title": "提交报告",

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { ArrowLeft, CalendarCheck, Loader2, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react'
+import { ArrowLeft, CalendarCheck, Loader2, ShieldCheck, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -14,7 +14,7 @@ import type { ResourceEnvelope } from '@/lib/contracts/api-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 
-type Stage = 'setup' | 'review' | 'confirmed'
+type Stage = 'setup' | 'review'
 
 const DAYS_ZH = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 const DAYS_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -35,7 +35,6 @@ export default function WeeklyPlanPage() {
   const [weekStatus, setWeekStatus] = useState<WeekStatus | null>(null)
   const [profile, setProfile] = useState<Record<string, any> | null>(null)
   const [tasks, setTasks] = useState<HumanOSTask[]>([])
-  const [activePlan, setActivePlan] = useState<PlanDecision | null>(null)
   const [decision, setDecision] = useState<PlanDecision | null>(null)
   const [blocks, setBlocks] = useState<PlanBlock[]>([])
   const [validation, setValidation] = useState<PlanValidation | null>(null)
@@ -77,14 +76,12 @@ export default function WeeklyPlanPage() {
           : String(weekly.temporary_constraints || ''),
       )
       setKeepBuffer(weekly.keep_buffer !== false)
-      setActivePlan(planData.data.plan)
       if (proposalData.data.plan) {
         setDecision(proposalData.data.plan)
         setBlocks(proposalData.data.plan.plan_patch || [])
         setValidation(proposalData.data.plan.validation || null)
         setStage('review')
-      } else if (planData.data.plan?.plan_status === 'confirmed' && !adjustmentTrigger) setStage('confirmed')
-      else setStage('setup')
+      } else setStage('setup')
     } catch (error) {
       toast(error instanceof Error ? error.message : t('planning.loadFailed'))
     } finally {
@@ -259,9 +256,11 @@ export default function WeeklyPlanPage() {
         return
       }
       const activePlanResult = await apiRequest<PlanResourceEnvelope<{ plan: PlanDecision | null }>>('/api/plans/active')
-      setActivePlan(activePlanResult.data.plan)
       setRationaleRequired(false)
-      setStage('confirmed')
+      setDecision(null)
+      setBlocks([])
+      setValidation(null)
+      setStage('setup')
       window.dispatchEvent(new CustomEvent('humanos:plan-updated', {
         detail: { source: 'plan-confirmation', planRevision: activePlanResult.data.plan?.plan_revision },
       }))
@@ -305,7 +304,7 @@ export default function WeeklyPlanPage() {
             <p className="mt-2 max-w-2xl text-muted-foreground">{t('planning.subtitle')}</p>
           </div>
           <div className="flex gap-2">
-            {(['setup', 'review', 'confirmed'] as Stage[]).map((item, index) => (
+            {(['setup', 'review'] as Stage[]).map((item, index) => (
               <div key={item} className={`rounded-full px-3 py-1 text-xs ${stage === item ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{index + 1}. {t(`planning.${item}`)}</div>
             ))}
           </div>
@@ -389,12 +388,6 @@ export default function WeeklyPlanPage() {
           </div>
         )}
 
-        {stage === 'confirmed' && (
-          <Card className="overflow-hidden border-emerald-500/30 bg-emerald-500/5">
-            <CardHeader><div className="mb-3 grid h-12 w-12 place-items-center rounded-full bg-emerald-500 text-white"><CalendarCheck /></div><CardTitle>{t('planning.confirmedTitle')}</CardTitle><CardDescription>{t('planning.confirmedDescription')}</CardDescription></CardHeader>
-            <CardContent className="flex flex-wrap items-center gap-3"><span className="rounded-full bg-background px-3 py-1 text-sm">{t('planning.revision')} {activePlan?.plan_revision || decision?.plan_revision || 1}</span><span className="rounded-full bg-background px-3 py-1 text-sm">{activePlan?.plan_status || 'confirmed'}</span><Button asChild><Link href="/app">{t('planning.openCalendar')}</Link></Button><Button variant="outline" onClick={() => setStage('setup')}><RefreshCw className="mr-2 h-4 w-4" />{t('planning.revise')}</Button></CardContent>
-          </Card>
-        )}
       </div>
     </main>
   )

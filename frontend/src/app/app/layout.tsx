@@ -9,7 +9,7 @@ import { DraftPlanEventSync } from '@/components/draft-plan-event-sync'
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
-    <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
+    <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
       <ModalProvider>
         <Toaster />
         <div className="relative h-dvh w-full flex flex-col overflow-hidden">

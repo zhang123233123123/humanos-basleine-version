@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, CalendarCheck2, GitMerge, Loader2, Pencil } from 'lucide-react'
+import { AlertTriangle, GitMerge, Loader2, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { apiRequest } from '@/lib/client/api'
@@ -27,7 +27,7 @@ export function PlanReviewPanel() {
   const confirm = async () => { if (!plan?.plan_id) return; setConfirming(true); try { const payload = { ...plan, plan_id: plan.plan_id, week_id: plan.week_id, plan_patch: plan.plan_patch || [], unscheduled_tasks: plan.unscheduled_tasks || [] }; const envelope: any = await apiRequest('/api/schedules/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); const validation = envelope?.validation || envelope?.data?.validation || envelope; if (validation?.valid === false) { const violation = validation.violations?.[0] || {}; if (violation.type === 'unexplained_unallocated_work') throw new Error(locale === 'zh' ? `任务“${titles.get(String(violation.task_id)) || violation.task_id}”仍有 ${violation.remaining || 0} 分钟未安排。` : `Task still has ${violation.remaining || 0} unallocated minutes.`); throw new Error(violation.message || violation.type || 'Plan violates hard constraints') } await apiRequest('/api/schedules/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); toast.success(locale === 'zh' ? '整份计划已加入日历' : 'The full plan was added to your calendar'); setPlan(null); await refetchEvents(); window.dispatchEvent(new CustomEvent('humanos:plan-revision')) } catch (e) { toast.error(e instanceof Error ? e.message : 'Plan confirmation failed') } finally { setConfirming(false) } }
   if (loading) return <aside className="grid w-80 shrink-0 place-items-center border-l bg-background"><Loader2 className="h-5 w-5 animate-spin" /></aside>
   if (error) return <aside className="w-80 shrink-0 border-l bg-background p-4"><div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs">{error}<Button className="mt-3 w-full" variant="outline" size="sm" onClick={() => void load()}>{locale === 'zh' ? '重试' : 'Retry'}</Button></div></aside>
-  if (!plan) return <aside className="flex w-80 shrink-0 flex-col border-l bg-background p-5"><h2 className="font-semibold">{locale === 'zh' ? '计划审查' : 'Plan Review'}</h2><div className="mt-8 rounded-2xl border border-dashed bg-muted/30 p-5 text-center"><CalendarCheck2 className="mx-auto h-5 w-5 text-muted-foreground" /><p className="mt-2 text-sm">{locale === 'zh' ? '当前没有等待确认的计划草案' : 'No draft plan is waiting for confirmation'}</p></div></aside>
+  if (!plan) return null
   const pending = (plan.parallel_suggestions || []).filter((item) => item.status === 'pending' || !item.status)
   const unscheduled = (plan.unscheduled_tasks || []) as Array<{ task_id?: string; remaining_minutes?: number; reason?: string }>
   const blockKey = (block: any) => [block.task_id, block.day_index, block.start, block.end, block.planned_work_minutes || block.session_minutes || 0].join('|')
