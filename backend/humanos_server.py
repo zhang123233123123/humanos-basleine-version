@@ -5868,8 +5868,16 @@ class Store:
                 fit_scores.append(max(0.0, 1.0 - abs(block["start"] - preferred) / 6.0))
                 capacity_fit = str(block.get("capacity_fit") or "acceptable").lower()
                 if capacity_fit not in capacity_fit_counts:
-                    capacity_fit = "acceptable"
+                    violations.append({"type": "invalid_capacity_fit", "task_id": block.get("task_id"), "capacity_fit": capacity_fit})
+                    capacity_fit = "unsuitable"
                     block["capacity_fit"] = capacity_fit
+                capacity_evidence = [str(item).strip() for item in (block.get("capacity_evidence") or []) if str(item).strip()]
+                if not capacity_evidence:
+                    violations.append({"type": "missing_capacity_evidence", "task_id": block.get("task_id")})
+                if capacity_fit == "risky" and not str(block.get("capacity_tradeoff") or "").strip():
+                    violations.append({"type": "missing_capacity_tradeoff", "task_id": block.get("task_id")})
+                if capacity_fit == "unsuitable":
+                    violations.append({"type": "unsuitable_capacity_assignment", "task_id": block.get("task_id")})
                 capacity_fit_counts[capacity_fit] += 1
             active_loads = [value for value in daily_load.values() if value] or [0]
             mean_load = sum(active_loads) / len(active_loads)
@@ -6050,7 +6058,10 @@ class Store:
                                     "day_index": "0-6 integer",
                                     "start": "15-minute-grid decimal hour",
                                     "end": "15-minute-grid decimal hour",
-                                    "reason": "English evidence for this time block",
+                                    "reason": "English time, deadline, and priority evidence for this block",
+                                    "capacity_fit": "ideal/acceptable/risky/unsuitable",
+                                    "capacity_evidence": ["specific Profile baseline, runtime-state, and task-demand evidence"],
+                                    "capacity_tradeoff": "required English explanation when capacity_fit is risky; otherwise null",
                                     "parallel_group_id": "only the exact id from an accepted pair, otherwise null",
                                     "parallel_role": "primary/secondary only for an accepted pair",
                                 }],
