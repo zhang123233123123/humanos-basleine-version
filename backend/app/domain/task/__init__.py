@@ -6,6 +6,7 @@ from .feedback import TaskFeedbackDecision, apply_execution_feedback
 from .models import ParsedTask, ParsedTaskBatch
 from .update import TaskPatchDecision, decide_task_patch, status_after_schedule_change
 from .validator import validate_enriched_task
+from .boundary_validator import validate_task_candidates
 
 __all__ = [
     "ParsedTask",
@@ -25,4 +26,5 @@ __all__ = [
     "decide_task_patch",
     "status_after_schedule_change",
     "validate_enriched_task",
+    "validate_task_candidates",
 ]

@@ -27,9 +27,21 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 try:
     from .app.application.parse_task import parse_structured_tasks as parse_tasks_with_agent
+    from .app.application.chat_replies import interruption_reply, progress_reply, task_preview_reply
+    from .app.application.chat_routing import normalized_chat_intent, should_parse_task_candidates
+    from .app.application.behavior_features import local_behavior_features
+    from .app.application.task_parse_coordinator import parse_with_validation_retry
+    from .app.application.task_payloads import build_task_previews, normalize_parser_items
+    from .app.domain.intent import classify_intent
 except ImportError:
     try:
         from app.application.parse_task import parse_structured_tasks as parse_tasks_with_agent
+        from app.application.chat_replies import interruption_reply, progress_reply, task_preview_reply
+        from app.application.chat_routing import normalized_chat_intent, should_parse_task_candidates
+        from app.application.behavior_features import local_behavior_features
+        from app.application.task_parse_coordinator import parse_with_validation_retry
+        from app.application.task_payloads import build_task_previews, normalize_parser_items
+        from app.domain.intent import classify_intent
     except ImportError as parser_import_error:
         print(f"PydanticAI parser import fallback: {parser_import_error}", flush=True)
         parse_tasks_with_agent = None
@@ -1782,27 +1794,12 @@ class Store:
     ) -> list[dict]:
         if create_tasks:
             return [self.create_task(user_id, payload) for payload in payloads]
-        previews = []
-        for index, payload in enumerate(payloads):
-            task_type = payload.get("task_type") or "flexible_task"
-            due = payload.get("due") or payload.get("deadline") or "未设置"
-            missing = list(payload.get("missing_fields") or [])
-            if not str(payload.get("title") or "").strip():
-                missing.append("title")
-            if due == "未设置":
-                missing.append("start_at" if task_type == "fixed_event" else "deadline_at")
-            if payload.get("duration") is None and payload.get("estimated_duration") is None:
-                missing.append("duration_minutes")
-            previews.append({
-                **payload,
-                "id": f"preview-{now_ms()}-{index}",
-                "parser": parser,
-                "is_preview": True,
-                "missing_fields": list(dict.fromkeys(missing)),
-                "source_spans": payload.get("source_spans") or [],
-                "confidence": float(payload.get("confidence") or 0.0),
-            })
-        return previews
+        preview_batch_id = now_ms()
+        return build_task_previews(
+            payloads,
+            parser_name=parser,
+            preview_id=lambda index: f"preview-{preview_batch_id}-{index}",
+        )
 
     def parse_tasks_from_text(
         self,
@@ -1817,60 +1814,15 @@ class Store:
         expected_count = self.estimated_task_count(clean)
         profile = self.ensure_profile(user_id)
         timezone_name = str(profile.get("timezone") or "Asia/Shanghai")
-        typed_tasks = parse_tasks_with_agent(
+        typed_tasks = parse_with_validation_retry(
             clean,
+            expected_count=expected_count,
             current_time=self.user_clock_now(user_id, timezone_name).isoformat(),
             timezone_name=timezone_name,
             chat_context=chat_context,
-        ) if parse_tasks_with_agent else None
-        def candidate_errors(tasks: list[dict] | None) -> list[str]:
-            if not tasks:
-                return ["No tasks were returned."]
-            errors: list[str] = []
-            if len(tasks) != expected_count:
-                errors.append(f"Expected {expected_count} independent task(s), but returned {len(tasks)}.")
-            metadata_only = re.compile(
-                r"^\s*(?:"
-                r"(?:大概|约|预计|需要|持续)?\s*(?:\d+(?:\.\d+)?|[一二两三四五六七八九十半]+)\s*(?:分钟|小时|天)|"
-                r"(?:deadline|due|截止(?:日期|时间)?|截止|日期|时间|优先级|高优先级|中优先级|低优先级)"
-                r")\s*[。.!！]?\s*$",
-                re.I,
-            )
-            for index, task in enumerate(tasks):
-                title = str(task.get("title") or "").strip()
-                if not title:
-                    errors.append(f"Task {index + 1} has no title.")
-                elif metadata_only.fullmatch(title):
-                    errors.append(f'Task {index + 1} title "{title}" is metadata, not an executable task.')
-                schedule_type = str(task.get("schedule_type") or task.get("task_type") or "flexible_task")
-                if schedule_type == "fixed_event" and not task.get("start_at"):
-                    errors.append(f"Task {index + 1} is fixed_event but has no start_at.")
-                if schedule_type != "fixed_event" and task.get("start_at") and not task.get("deadline_at"):
-                    errors.append(f"Task {index + 1} is flexible work but incorrectly uses start_at instead of deadline_at.")
-            return errors
-        first_errors = candidate_errors(typed_tasks)
-        if typed_tasks and first_errors and parse_tasks_with_agent:
-            self.log_event(user_id, "task_parse_validation_failed", {
-                "attempt": 1, "errors": first_errors, "text": clean[:500],
-            })
-            retried_tasks = parse_tasks_with_agent(
-                clean,
-                current_time=self.user_clock_now(user_id, timezone_name).isoformat(),
-                timezone_name=timezone_name,
-                chat_context=chat_context,
-                validation_feedback=first_errors,
-            )
-            second_errors = candidate_errors(retried_tasks)
-            if retried_tasks and not second_errors:
-                typed_tasks = retried_tasks
-                self.log_event(user_id, "task_parse_validation_recovered", {
-                    "attempt": 2, "task_count": len(retried_tasks), "text": clean[:500],
-                })
-            else:
-                self.log_event(user_id, "task_parse_validation_failed", {
-                    "attempt": 2, "errors": second_errors, "text": clean[:500],
-                })
-                typed_tasks = None
+            parser=parse_tasks_with_agent,
+            record_event=lambda event_type, details: self.log_event(user_id, event_type, details),
+        )
         prefer_local_parser = self.looks_like_compact_multi_task_list(clean) or bool(self.english_task_segments(clean))
         explicit_schedule_tasks = [] if typed_tasks else self.parse_explicit_schedule_lines(user_id, clean, create_tasks=create_tasks)
         if explicit_schedule_tasks:
@@ -1918,44 +1870,14 @@ class Store:
                     },
                 )
                 return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
-            payloads = []
-            for item in raw_tasks[:8]:
-                if not isinstance(item, dict):
-                    continue
-                explicit_duration = infer_duration_minutes(clean) if len(raw_tasks) == 1 else None
-                duration_value = item.get("duration_minutes")
-                if duration_value is None:
-                    duration_value = item.get("estimated_duration") or item.get("duration") or explicit_duration
-                parsed_duration = safe_duration_minutes(duration_value) if duration_value is not None else None
-                task_type = item.get("schedule_type") or item.get("task_type") or item.get("taskType") or "flexible_task"
-                due_value = item.get("start_at") if task_type == "fixed_event" else item.get("deadline_at")
-                due_value = due_value or item.get("deadline") or item.get("due") or "未设置"
-                payload = {
-                    "title": item.get("title") or "",
-                    "task_type": task_type,
-                    "domain_type": item.get("domain_type") or "general",
-                    "classification_rule": item.get("classification_rule") or "legacy_unclassified",
-                    "classification_validation": item.get("classification_validation") or {
-                        "valid": True,
-                        "errors": [],
-                        "checked_by": "legacy_parser",
-                    },
-                    "deadline": due_value,
-                    "due": due_value,
-                    "timezone": timezone_name,
-                    "start_at": item.get("start_at"),
-                    "deadline_at": item.get("deadline_at"),
-                    "deadline_assumption": "pydantic_ai_resolved" if item.get("deadline_at") else None,
-                    "estimated_duration": parsed_duration,
-                    "duration": parsed_duration,
-                    "priority": item.get("priority") if item.get("priority") in {"高", "中", "低"} else None,
-                    "context": item.get("context") or clean,
-                    "missing_fields": item.get("missing_fields") or [],
-                    "source_spans": item.get("source_spans") or [],
-                    "confidence": item.get("confidence") or 0.0,
-                }
-                payload["parser"] = parser_name
-                payloads.append(payload)
+            payloads = normalize_parser_items(
+                raw_tasks,
+                source_text=clean,
+                timezone_name=timezone_name,
+                parser_name=parser_name,
+                inferred_single_duration=infer_duration_minutes(clean) if len(raw_tasks) == 1 else None,
+                normalize_duration=safe_duration_minutes,
+            )
             if expected_count > 1 and len(payloads) < expected_count:
                 self.log_event(
                     user_id,
@@ -2281,39 +2203,11 @@ class Store:
         clean = text.strip()
         llm_result = None if local_only else chat_completion(behavior_feature_messages(clean, chat_context))
         if not isinstance(llm_result, dict):
-            blockers = []
-            if any(word in clean for word in ["不知道", "不清楚", "模糊", "从哪"]):
-                blockers.append("任务不清楚")
-            if any(word in clean for word in ["累", "困", "没精力"]):
-                blockers.append("疲劳")
-            if any(word in clean for word in ["焦虑", "压力", "慌"]):
-                blockers.append("焦虑")
-            if any(word in clean for word in ["被打断", "临时打断", "消息打断"]):
-                blockers.append("外部打断")
-            if any(word in clean for word in ["回不来", "忘了", "上下文"]):
-                blockers.append("上下文丢失")
-            if any(word in clean for word in ["进展", "完成", "写完", "做完"]):
-                intent = "progress_update"
-            elif any(word in clean for word in ["安排", "排", "计划", "日历"]):
-                intent = "add_task"
-            elif any(word in clean for word in ["中断", "暂停", "切换"]):
-                intent = "interruption"
-            else:
-                intent = "other"
-            llm_result = {
-                "intent": intent,
-                "planning_behavior": [],
-                "blockers": blockers,
-                "explicit_state": {
-                    "fatigue": True if any(word in clean for word in ["很累", "疲劳", "没精力"]) else None,
-                    "stress": True if any(word in clean for word in ["压力很大", "很焦虑", "很慌"]) else None,
-                    "focus_difficulty": True if any(word in clean for word in ["无法专注", "集中不了"]) else None,
-                },
-                "evidence_span": clean if blockers else None,
-                "hypotheses": [],
-                "needs_follow_up": bool(blockers),
-            }
+            llm_result = local_behavior_features(clean)
         explicit_state = llm_result.get("explicit_state") if isinstance(llm_result.get("explicit_state"), dict) else {}
+        intent_decision = classify_intent(clean, str(llm_result.get("intent") or "other"))
+        llm_result["intent"] = intent_decision.intent
+        llm_result["intent_decision"] = intent_decision.to_dict()
         evidence_span = str(llm_result.get("evidence_span") or "").strip()
         if evidence_span and any(value is not None for value in explicit_state.values()):
             self.add_memory(
@@ -2541,7 +2435,10 @@ class Store:
         chat_context = self.build_chat_context(user_id, text)
         chat_context["client_context"] = payload.get("client_context") or {}
         features = self.extract_behavior_features(user_id, text, chat_context)
-        intent = features.get("intent", "other")
+        intent_decision = classify_intent(text, str(features.get("intent") or "other"))
+        features["intent"] = intent_decision.intent
+        features["intent_decision"] = intent_decision.to_dict()
+        intent = intent_decision.intent
         response = {
             "intent": intent,
             "features": features,
@@ -2576,41 +2473,14 @@ class Store:
             response["reply"] = f"I understood this as an update to an existing item: {updates}. No duplicate task was created."
             intent = "reschedule"
             response["intent"] = intent
-        should_parse_tasks = (
-            any(
-                word in text
-                for word in [
-                "任务",
-                "写",
-                "读",
-                "阅读",
-                "整理",
-                "完成",
-                "复习",
-                "学习",
-                "开会",
-                "会议",
-                "取",
-                "拿",
-                "办",
-                "买",
-                "发",
-                "看",
-                "做",
-                "分钟",
-                "小时",
-                "点",
-                "时",
-                "明天",
-                "今天",
-                "周",
-                ]
-            )
-            or bool(self.english_task_segments(text))
-            or bool(re.search(r"\b(?:add|create|schedule)\s+(?:these\s+)?tasks?\b", text, re.I))
-        ) and (intent in {"add_task", "reschedule", "other"} or self.looks_like_compact_multi_task_list(text))
+        should_parse_tasks = should_parse_task_candidates(
+            text,
+            intent_decision,
+            compact_multi_task=self.looks_like_compact_multi_task_list(text),
+            english_multi_task=bool(self.english_task_segments(text)),
+        )
         if should_parse_tasks and not response["tasks"] and not context_update:
-            intent = "add_task" if intent == "progress_update" else intent
+            intent = normalized_chat_intent(intent_decision, has_task_preview=True)
             response["intent"] = intent
             response["tasks"] = self.parse_tasks_from_text(
                 user_id,
@@ -2618,15 +2488,11 @@ class Store:
                 chat_context,
                 create_tasks=False,
             )
-            response["reply"] = (
-                f"I identified {len(response['tasks'])} items. Review or edit them first; I will create and schedule them only after confirmation."
-                if len(response["tasks"]) > 1
-                else "I identified the item below. Review or edit it first; I will create and schedule it only after confirmation."
-            )
+            response["reply"] = task_preview_reply(text, len(response["tasks"]))
         elif intent == "progress_update":
-            response["reply"] = "Progress recorded. Add the next action, or ask me to replan from the current state."
+            response["reply"] = progress_reply(text)
         elif intent == "interruption":
-            response["reply"] = "Pause signal received. This does not mean the system inferred that your condition declined. Record the reason, progress, and first action for returning."
+            response["reply"] = interruption_reply(text)
             response["event_trigger"] = "open_pause_checkin"
         self.save_chat_turn(
             user_id=user_id,
