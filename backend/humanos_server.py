@@ -6184,12 +6184,15 @@ class Store:
         if complete_ai_candidates:
             valid_ai_candidates = complete_ai_candidates
         if valid_ai_candidates:
+            from app.application.rank_schedule_candidates import select_best_candidate
+
             for candidate in valid_ai_candidates:
                 candidate["parallel_suggestions"] = self.build_parallel_suggestions(state, candidate.get("plan_patch", []))
             decision["candidate_plans"] = valid_ai_candidates
             requested_id = global_plan_result.get("selected_candidate_id") if isinstance(global_plan_result, dict) else None
-            selected_ai = next((candidate for candidate in valid_ai_candidates if candidate.get("id") == requested_id), None)
-            selected_ai = selected_ai or min(valid_ai_candidates, key=lambda candidate: candidate.get("metrics", {}).get("total_score", float("inf")))
+            selected_ai = select_best_candidate(valid_ai_candidates, str(requested_id) if requested_id else None)
+            if selected_ai is None:
+                return decision
             decision["selected_candidate_id"] = selected_ai["id"]
             decision["plan_patch"] = selected_ai["plan_patch"]
             decision["validation"] = selected_ai["validation"]
