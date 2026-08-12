@@ -101,6 +101,24 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
         restored = Store(self.db).current_execution("u")
         self.assertEqual(("now", session["execution_session_id"]), (restored["mode"], restored["session"]["execution_session_id"]))
 
+    def test_08b_backend_time_continues_without_frontend_heartbeat(self):
+        session = self.current()["session"]
+        started_at = (datetime.now(ZoneInfo("Asia/Shanghai")) - timedelta(minutes=5)).isoformat()
+        self.store.start_execution_session("u", {
+            "execution_session_id": session["execution_session_id"],
+            "actual_start_at": started_at,
+            "request_id": "background-timer-start",
+        })
+        restored = Store(self.db).current_execution("u")
+        self.assertEqual("now", restored["mode"])
+        self.assertGreaterEqual(restored["session"]["live_active_minutes"], 5)
+
+    def test_08c_focus_page_treats_backend_now_as_running(self):
+        page = (ROOT / "frontend" / "src" / "app" / "app" / "focus" / "page.tsx").read_text(encoding="utf-8")
+        self.assertIn("mode === 'running' || mode === 'now'", page)
+        self.assertIn("setNow(Date.now())", page)
+        self.assertIn("now - activeSegmentStartedAt", page)
+
     def test_09_pause_accumulates_minutes_and_context_dump_is_preserved(self):
         session = self.start()
         paused = self.store.pause_execution_session("u", {"execution_session_id": session["execution_session_id"], "actual_minutes": 18, "request_id": "pause-1"})

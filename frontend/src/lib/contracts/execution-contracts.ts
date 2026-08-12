@@ -1,5 +1,5 @@
 export type ExecutionStatus = 'ready' | 'running' | 'paused' | 'ended' | 'completed' | 'superseded' | string
-export type ExecutionMode = 'up_next' | 'running' | 'paused' | 'empty' | 'none' | 'idle' | string
+export type ExecutionMode = 'up_next' | 'ready_to_start' | 'now' | 'running' | 'paused' | 'session_ended' | 'empty' | 'none' | 'idle' | string
 
 export interface ExecutionSession {
   accumulated_active_minutes?: number | null
@@ -13,6 +13,7 @@ export interface ExecutionSession {
   planned_end_at?: string
   planned_work_minutes?: number
   actual_minutes?: number
+  live_active_minutes?: number
   session_remaining_minutes?: number
   started_at?: string | number | null
   actual_start_at?: string | number | null

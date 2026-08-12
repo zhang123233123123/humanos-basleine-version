@@ -26,6 +26,14 @@ function durationLabel(totalSeconds: number) {
   return [hours, minutes, seconds].map((part) => String(part).padStart(2, '0')).join(':')
 }
 
+function isRunningExecution(mode: CurrentExecution['mode'] | null | undefined) {
+  // The backend uses `now` for the currently running execution card, while a
+  // just-started session is optimistically represented as `running` locally.
+  // Treat both as the same persisted execution state so a visibility refresh
+  // cannot stop or reset the timer.
+  return mode === 'running' || mode === 'now'
+}
+
 export default function FocusPage() {
   const { t, locale } = useTranslation()
   const [loading, setLoading] = useState(true)
@@ -54,6 +62,7 @@ export default function FocusPage() {
   const [stressAfter, setStressAfter] = useState(4)
   const [timingFit, setTimingFit] = useState('good')
   const [sessionLengthFit, setSessionLengthFit] = useState('appropriate')
+  const isRunning = isRunningExecution(current?.mode)
 
   const loadExecution = useCallback(async () => {
     setLoading(true)
@@ -76,7 +85,13 @@ export default function FocusPage() {
   }, [loadExecution])
 
   useEffect(() => {
-    const refreshExecution = () => void loadExecution()
+    const refreshExecution = () => {
+      // Browser timers may be throttled in a background tab. Refresh the
+      // display clock immediately and then restore the persisted session from
+      // the backend; elapsed time is derived from its start/resume timestamp.
+      setNow(Date.now())
+      void loadExecution()
+    }
     const refreshWhenVisible = () => {
       if (document.visibilityState === 'visible') refreshExecution()
     }
@@ -94,17 +109,17 @@ export default function FocusPage() {
   }, [loadExecution])
 
   useEffect(() => {
-    if (current?.mode !== 'running') return
+    if (!isRunning) return
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
-  }, [current?.mode])
+  }, [isRunning])
 
   const session = current?.session || null
   const task = current?.task || session?.task || null
   const title = session?.task_title || session?.title || task?.title || t('execution.untitledTask')
   const activeSegmentStartedAt = timestamp(session?.resumed_at ?? session?.actual_start_at ?? session?.started_at)
   const persistedMinutes = Number(session?.accumulated_active_minutes ?? session?.actual_minutes ?? 0)
-  const activeSegmentSeconds = current?.mode === 'running' && activeSegmentStartedAt
+  const activeSegmentSeconds = isRunning && activeSegmentStartedAt
     ? Math.max(Math.floor((now - activeSegmentStartedAt) / 1000), 0)
     : 0
   const elapsedSeconds = persistedMinutes * 60 + activeSegmentSeconds
@@ -188,7 +203,7 @@ export default function FocusPage() {
   }
 
   const takeBreak = async (minutes: number) => {
-    if (!session || current?.mode !== 'running') return
+    if (!session || !isRunning) return
     setSubmitting(true)
     try {
       const activeMinutes = Math.max(Math.floor(elapsedSeconds / 60), 0)
@@ -319,7 +334,7 @@ export default function FocusPage() {
                 <div className="rounded-2xl border bg-background p-6 text-center"><p className="font-mono text-5xl font-semibold tracking-tight md:text-7xl">{durationLabel(elapsedSeconds)}</p><p className="mt-2 text-sm text-muted-foreground">{t('execution.elapsed')}</p></div>
                 <div className="grid grid-cols-2 gap-3"><div className="rounded-xl bg-muted p-4"><p className="text-xs text-muted-foreground">{t('execution.planned')}</p><p className="mt-1 text-xl font-semibold">{plannedMinutes} min</p></div><div className="rounded-xl bg-muted p-4"><p className="text-xs text-muted-foreground">{t('execution.remaining')}</p><p className="mt-1 text-xl font-semibold">{displayRemaining} min</p></div></div>
                 {pausePrompt && <div className="rounded-2xl border bg-muted/40 p-5"><h3 className="font-semibold">{locale === 'zh' ? '暂停并保留恢复线索' : 'Pause and leave re-entry cues'}</h3><div className="mt-4 grid gap-3"><label className="block text-sm"><span>{locale === 'zh' ? '为什么暂停？' : 'Why are you pausing?'}</span><textarea value={pauseReason} onChange={(event) => setPauseReason(event.target.value)} className="mt-2 min-h-16 w-full rounded-xl border bg-background p-3" /></label><label className="block text-sm"><span>{locale === 'zh' ? '你停在了哪里？' : 'Where did you stop?'}</span><textarea value={pauseProgress} onChange={(event) => setPauseProgress(event.target.value)} className="mt-2 min-h-16 w-full rounded-xl border bg-background p-3" /></label><label className="block text-sm"><span>{locale === 'zh' ? '回来后第一步做什么？' : 'What should you do first when you return?'}</span><textarea value={pauseNextStep} onChange={(event) => setPauseNextStep(event.target.value)} className="mt-2 min-h-16 w-full rounded-xl border bg-background p-3" /></label></div><div className="mt-4 grid gap-2 sm:grid-cols-3">{([['soon', locale === 'zh' ? '10 分钟后' : 'In 10 minutes'], ['later_today', locale === 'zh' ? '今天稍后' : 'Later today'], ['unknown', locale === 'zh' ? '暂不确定' : 'Not sure']] as const).map(([value, label]) => <button key={value} onClick={() => setResumePreference(value)} className={`rounded-xl border px-3 py-2 text-sm ${resumePreference === value ? 'border-primary bg-primary/10' : 'bg-background'}`}>{label}</button>)}</div>{resumePreference === 'later_today' && <input type="datetime-local" value={preferredResumeAt} onChange={(event) => setPreferredResumeAt(event.target.value)} className="mt-3 w-full rounded-xl border bg-background px-3 py-2" />}<div className="mt-4 flex justify-end gap-2"><Button variant="ghost" onClick={() => setPausePrompt(false)}>{locale === 'zh' ? '取消' : 'Cancel'}</Button><Button onClick={() => void pauseSession()} disabled={submitting || !pauseReason.trim() || !pauseNextStep.trim() || (resumePreference === 'later_today' && !preferredResumeAt)}><Pause className="mr-2 h-4 w-4" />{locale === 'zh' ? '保存并暂停' : 'Save and pause'}</Button></div></div>}
-                <div className="flex flex-wrap justify-center gap-3">{current?.mode === 'running' ? <><div className="flex gap-1 rounded-xl border p-1">{[5,10,15].map((minutes) => <Button key={minutes} size="sm" variant="ghost" onClick={() => void takeBreak(minutes)} disabled={submitting}>{minutes}m {locale === 'zh' ? '休息' : 'break'}</Button>)}</div><Button variant="outline" onClick={() => setPausePrompt(true)} disabled={submitting || pausePrompt}><Pause className="mr-2 h-4 w-4" />{t('execution.pause')}</Button><Button onClick={endSession} disabled={submitting}><Square className="mr-2 h-4 w-4" />{t('execution.end')}</Button></> : <><Button onClick={() => void startSession()} disabled={submitting}><Play className="mr-2 h-4 w-4" />{current?.mode === 'paused' ? t('execution.resume') : t('execution.start')}</Button>{current?.mode === 'paused' && <Button variant="outline" onClick={endSession} disabled={submitting}><Square className="mr-2 h-4 w-4" />{t('execution.end')}</Button>}</>}</div>
+                <div className="flex flex-wrap justify-center gap-3">{isRunning ? <><div className="flex gap-1 rounded-xl border p-1">{[5,10,15].map((minutes) => <Button key={minutes} size="sm" variant="ghost" onClick={() => void takeBreak(minutes)} disabled={submitting}>{minutes}m {locale === 'zh' ? '休息' : 'break'}</Button>)}</div><Button variant="outline" onClick={() => setPausePrompt(true)} disabled={submitting || pausePrompt}><Pause className="mr-2 h-4 w-4" />{t('execution.pause')}</Button><Button onClick={endSession} disabled={submitting}><Square className="mr-2 h-4 w-4" />{t('execution.end')}</Button></> : <><Button onClick={() => void startSession()} disabled={submitting}><Play className="mr-2 h-4 w-4" />{current?.mode === 'paused' ? t('execution.resume') : t('execution.start')}</Button>{current?.mode === 'paused' && <Button variant="outline" onClick={endSession} disabled={submitting}><Square className="mr-2 h-4 w-4" />{t('execution.end')}</Button>}</>}</div>
                 {resumeImpact && <div className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-amber-950"><h3 className="font-semibold">{locale === 'zh' ? '恢复任务将影响后续安排' : 'Resuming will affect your schedule'}</h3><p className="mt-2 text-sm">{locale === 'zh' ? `按当前剩余时间，预计在 ${new Date(resumeImpact.estimated_end_at).toLocaleTimeString()} 完成。` : `With the remaining work, this task is expected to finish at ${new Date(resumeImpact.estimated_end_at).toLocaleTimeString()}.`}</p><div className="mt-3 space-y-2">{resumeImpact.affected_sessions.map((affected) => <div key={affected.execution_session_id} className="rounded-xl bg-white/70 px-3 py-2 text-sm"><strong>{affected.task_title || affected.task_id}</strong><span className="ml-2">{locale === 'zh' ? `重叠 ${affected.overlap_minutes} 分钟` : `${affected.overlap_minutes} min overlap`}</span></div>)}</div><div className="mt-4 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => void startSession(true)} disabled={submitting}>{locale === 'zh' ? '仍然恢复，保持原计划' : 'Resume without changes'}</Button><Button size="sm" asChild><Link href="/app/plan?adjust=execution-delay">{locale === 'zh' ? '重新生成今日计划' : 'Regenerate today'}</Link></Button><Button size="sm" variant="secondary" asChild><Link href="/app/plan?adjust=manual">{locale === 'zh' ? '我自己修改' : 'Edit manually'}</Link></Button><Button size="sm" variant="ghost" onClick={() => setResumeImpact(null)}>{locale === 'zh' ? '暂不恢复' : 'Not now'}</Button></div></div>}
               </CardContent>
             </Card>
