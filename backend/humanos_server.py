@@ -5933,6 +5933,9 @@ class Store:
             for item in state.get("ai_task_analysis", {}).get("task_demands", [])
             if isinstance(item, dict)
         }
+        from app.application.build_capacity_context import build_capacity_context
+
+        capacity_context = build_capacity_context(profile, runtime_state)
         global_plan_result = chat_completion(
             [
                 {
@@ -5991,24 +5994,7 @@ class Store:
                         "deep_work_window": profile.get("deep_work_window"),
                         "low_energy_window": profile.get("low_energy_window"),
                         "runtime_state_today_only": runtime_state,
-                        "capacity_policy": {
-                            "role": "soft_candidate_selection_not_hard_feasibility",
-                            "baseline": {
-                                "preferred_session_minutes": (profile.get("task_preferences") or {}).get("preferred_session_minutes", 45),
-                                "rest_between_tasks_minutes": (profile.get("task_preferences") or {}).get("rest_between_tasks_minutes", 15),
-                                "deep_work_window": profile.get("deep_work_window"),
-                                "low_energy_window": profile.get("low_energy_window"),
-                            },
-                            "current_state": runtime_state,
-                            "fit_levels": ["ideal", "acceptable", "risky", "unsuitable"],
-                            "rules": [
-                                "Compare each task_demand with the user's baseline and current capacity without collapsing the evidence into an unexplained score.",
-                                "Prefer ideal over acceptable, and acceptable over risky, after all hard constraints are satisfied.",
-                                "Use risky only when deadline pressure makes waiting worse; explain the tradeoff and shorten the session or increase recovery where possible.",
-                                "Never use unsuitable unless no complete feasible candidate exists; report it as unscheduled instead.",
-                                "Runtime state changes today's near-term sessions only; it must not rewrite the user's long-term profile.",
-                            ],
-                        },
+                        "capacity_policy": capacity_context,
                         "relevant_learned_patterns": list(profile.get("learned_patterns") or [])[:3],
                         "accepted_parallel_pairs": accepted_parallel_pairs,
                         "accepted_parallel_context_pairs": accepted_parallel_context_pairs,
