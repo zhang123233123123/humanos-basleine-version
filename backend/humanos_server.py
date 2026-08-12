@@ -812,6 +812,19 @@ class Store:
                   created_at INTEGER NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS pending_task_batches (
+                  id TEXT PRIMARY KEY,
+                  user_id TEXT NOT NULL,
+                  source_text TEXT NOT NULL,
+                  tasks_json TEXT NOT NULL,
+                  missing_fields_json TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  created_at INTEGER NOT NULL,
+                  updated_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_pending_task_batches_user_status
+                ON pending_task_batches(user_id,status,updated_at);
+
                 CREATE TABLE IF NOT EXISTS execution_feedback (
                   id TEXT PRIMARY KEY,
                   user_id TEXT NOT NULL,
@@ -2411,6 +2424,12 @@ class Store:
             raise ValueError("text is required")
         if payload.get("assistant_mode") == "calendar_advisor":
             return self.calendar_advisor_turn(user_id, text, payload)
+        pending_batch = self.latest_pending_task_batch(user_id)
+        if pending_batch and self.is_pending_task_batch_followup(text):
+            tasks = self.complete_pending_task_batch(user_id, pending_batch, text)
+            reply = task_preview_reply(text, len(tasks))
+            self.save_chat_turn(user_id, text, reply, "complete_pending_task_batch", {"intent": "complete_pending_task_batch", "pending_batch_id": pending_batch["id"]}, [])
+            return {"intent": "add_task", "reply": reply, "tasks": tasks, "pending_batch_id": pending_batch["id"], "resolved_pending_batch": True}
         chat_context = self.build_chat_context(user_id, text)
         chat_context["client_context"] = payload.get("client_context") or {}
         profile = self.ensure_profile(user_id)
@@ -2427,6 +2446,11 @@ class Store:
         intent = intent_decision.intent
         response = initial_planner_response(intent, features, chat_context)
         if intent_decision.requires_clarification:
+            if intent == "add_task":
+                candidates = self.parse_tasks_from_text(user_id, text, chat_context, create_tasks=False)
+                if candidates:
+                    batch = self.save_pending_task_batch(user_id, text, candidates)
+                    response["pending_batch_id"] = batch["id"]
             response["reply"] = intent_decision.clarification_question or "请补充你要操作的具体任务。"
             response["requires_clarification"] = True
             response["intent_decision"] = intent_decision.to_dict()
@@ -2470,6 +2494,52 @@ class Store:
             task_ids=[task["id"] for task in response["tasks"] if not task.get("is_preview")],
         )
         return response
+
+    def save_pending_task_batch(self, user_id: str, source_text: str, tasks: list[dict]) -> dict:
+        batch_id = new_id("taskbatch")
+        missing = sorted({str(field) for task in tasks for field in (task.get("missing_fields") or []) if str(field)})
+        timestamp = now_ms()
+        with self.connect() as conn:
+            conn.execute("UPDATE pending_task_batches SET status='superseded',updated_at=? WHERE user_id=? AND status='awaiting_clarification'", (timestamp, user_id))
+            conn.execute(
+                "INSERT INTO pending_task_batches (id,user_id,source_text,tasks_json,missing_fields_json,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                (batch_id, user_id, source_text, as_json(tasks), as_json(missing), "awaiting_clarification", timestamp, timestamp),
+            )
+        return {"id": batch_id, "tasks": tasks, "missing_fields": missing, "status": "awaiting_clarification"}
+
+    def latest_pending_task_batch(self, user_id: str) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM pending_task_batches WHERE user_id=? AND status='awaiting_clarification' ORDER BY updated_at DESC LIMIT 1", (user_id,)).fetchone()
+        if not row:
+            return None
+        return {"id": row["id"], "source_text": row["source_text"], "tasks": from_json(row["tasks_json"], []), "missing_fields": from_json(row["missing_fields_json"], []), "status": row["status"]}
+
+    @staticmethod
+    def is_pending_task_batch_followup(text: str) -> bool:
+        normalized = re.sub(r"\s+", "", text.lower())
+        confirms = any(token in normalized for token in ("需要", "确认", "全部", "都是", "都要", "yes", "confirm", "all"))
+        supplements = any(token in normalized for token in ("优先级", "备注", "高", "中", "低", "priority", "note"))
+        return confirms or supplements
+
+    def complete_pending_task_batch(self, user_id: str, batch: dict, text: str) -> list[dict]:
+        normalized = re.sub(r"\s+", "", text.lower())
+        priority = "高" if "优先级都是高" in normalized or "全部高" in normalized else "低" if "优先级都是低" in normalized or "全部低" in normalized else "中" if "优先级都是中" in normalized or "全部中" in normalized else None
+        no_notes = any(token in normalized for token in ("没有备注", "无备注", "no note", "no notes"))
+        completed = []
+        for raw in batch.get("tasks") or []:
+            task = dict(raw)
+            if priority:
+                task["priority"] = priority
+            if no_notes:
+                task["context"] = ""
+            missing = [field for field in (task.get("missing_fields") or []) if not (priority and field in {"priority", "user_priority"}) and not (no_notes and field in {"notes", "context", "remark"})]
+            task["missing_fields"] = missing
+            task["pending_batch_id"] = batch["id"]
+            task["is_preview"] = True
+            completed.append(task)
+        with self.connect() as conn:
+            conn.execute("UPDATE pending_task_batches SET tasks_json=?,missing_fields_json=?,status='resolved',updated_at=? WHERE id=? AND user_id=?", (as_json(completed), as_json(sorted({field for task in completed for field in task.get("missing_fields", [])})), now_ms(), batch["id"], user_id))
+        return completed
 
     def save_chat_turn(
         self,
