@@ -3864,7 +3864,10 @@ class Store:
             new_context = {
                 "week_id": new_week,
                 "week_of": new_week,
-                "weekly_available_windows": weekly.get("weekly_available_windows") if use_last else "",
+                # Availability is a Profile-owned capacity boundary established
+                # during onboarding. A fresh week clears transient commitments,
+                # not the person's normal working-time envelope.
+                "weekly_available_windows": weekly.get("weekly_available_windows", ""),
                 "context_items": [
                     item for item in (weekly.get("context_items") or [])
                     if use_last
