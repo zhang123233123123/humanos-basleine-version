@@ -28,7 +28,7 @@ def parse_with_validation_retry(
         timezone_name=timezone_name,
         chat_context=chat_context,
     )
-    first_errors = validate_task_candidates(first, expected_count)
+    first_errors = validate_task_candidates(first, expected_count, text)
     if not first_errors:
         return first
     record_event("task_parse_validation_failed", {
@@ -41,7 +41,7 @@ def parse_with_validation_retry(
         chat_context=chat_context,
         validation_feedback=first_errors,
     )
-    second_errors = validate_task_candidates(second, expected_count)
+    second_errors = validate_task_candidates(second, expected_count, text)
     if not second_errors:
         record_event("task_parse_validation_recovered", {
             "attempt": 2, "task_count": len(second or []), "text": text[:500],

@@ -1704,9 +1704,9 @@ class Store:
         # preview-* resources.
         task_id = new_id("task") if not requested_task_id or requested_task_id.startswith("preview-") else requested_task_id
         priority = payload.get("priority") or "中"
-        duration = infer_duration_minutes(f"{title} {context}") or int(
-            payload.get("estimated_duration") or payload.get("duration") or 60
-        )
+        # Structured AI/user input is authoritative. Never re-parse the shared
+        # conversation context because it may contain several other tasks.
+        duration = int(payload.get("estimated_duration") or payload.get("duration") or 60)
         status = payload.get("status", "queued")
         demand = payload.get("task_demand") or self.infer_task_demand(payload, domain_type)
         cognitive_load = payload.get("cognitive_load") or demand["estimated_cognitive_load"]
@@ -2842,7 +2842,7 @@ class Store:
             "start_at": context_window.get("startAt"),
             "deadline_at": context_window.get("deadlineAt"),
             "deadline_assumption": context_window.get("deadlineAssumption"),
-            "duration": infer_duration_minutes(f"{row['title']} {row['context']}") or row["duration"],
+            "duration": row["duration"],
             "estimated_duration": context_window.get("estimatedDuration") or row["duration"],
             "priority": row["priority"],
             "status": row["status"],

@@ -26,6 +26,14 @@ Rules:
   "high priority" to the task they describe.
 - Priority values are exactly 高, 中, or 低.
 - Record absent required fields in missing_fields.
+- Every task must include source_spans containing exact, non-overlapping quotes
+  from the user input that ground its title, duration and time fields.
+- Classify domain_type and resource usage in the same task object. Only use
+  visual/auditory/verbal/manual/mobility resource modalities.
+- Set parallelizable=true only when the task can safely be proposed for
+  concurrent execution; this is eligibility, not permission to overlap.
+- Never copy a duration, deadline, resource profile, or other field from a
+  neighboring task. Each object must be grounded by its own source_spans.
 """.strip()
 
 
