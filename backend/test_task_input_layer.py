@@ -16,6 +16,11 @@ class TaskInputLayerTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
+    def test_parse_rejects_more_than_twenty_tasks_before_ai(self) -> None:
+        text = "\n".join(f"{index}. Task {index}, 30 minutes, due Friday 18:00." for index in range(1, 22))
+        with self.assertRaisesRegex(ValueError, "maximum capacity of 20"):
+            self.store.parse_tasks_from_text("user-a", text, create_tasks=False)
+
     def test_duration_only_fragments_belong_to_previous_task(self) -> None:
         tasks = self.store.local_parse_tasks_from_text(
             "user-a",

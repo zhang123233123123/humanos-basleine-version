@@ -96,6 +96,7 @@ LOCAL_EMBEDDING_MODEL = "humanos-local-hash-embedding-v1"
 
 
 TEST_MODE = os.environ.get("HUMANOS_TEST_MODE", "").strip() == "1"
+MAX_TASKS_PER_PARSE_BATCH = 20
 QA_MODE = TEST_MODE and os.environ.get("HUMANOS_QA_DB", "").strip() == "1"
 QA_SCENARIO_DIR = Path(
     os.environ.get("HUMANOS_QA_SCENARIO_DIR", "").strip()
@@ -1851,6 +1852,8 @@ class Store:
         if not clean:
             raise ValueError("task text is required")
         expected_count = self.estimated_task_count(clean)
+        if expected_count > MAX_TASKS_PER_PARSE_BATCH:
+            raise ValueError(f"task batch exceeds maximum capacity of {MAX_TASKS_PER_PARSE_BATCH}")
         profile = self.ensure_profile(user_id)
         timezone_name = str(profile.get("timezone") or "Asia/Shanghai")
         typed_tasks = parse_with_validation_retry(
@@ -2453,6 +2456,23 @@ class Store:
         if should_parse_tasks and not response["tasks"] and not context_update:
             intent = normalized_chat_intent(intent_decision, has_task_preview=True)
             response["intent"] = intent
+            estimated_count = self.estimated_task_count(text)
+            if estimated_count > MAX_TASKS_PER_PARSE_BATCH:
+                locale = str((payload or {}).get("locale") or "zh")
+                response["reply"] = (
+                    f"这次包含约 {estimated_count} 个任务，单次最多处理 {MAX_TASKS_PER_PARSE_BATCH} 个。请分批发送，每批不超过 {MAX_TASKS_PER_PARSE_BATCH} 项；我会分别生成确认预览。"
+                    if locale == "zh"
+                    else f"This message contains about {estimated_count} tasks. I can process up to {MAX_TASKS_PER_PARSE_BATCH} per batch. Please send them in batches of no more than {MAX_TASKS_PER_PARSE_BATCH}; each batch will get its own confirmation preview."
+                )
+                response["requires_clarification"] = True
+                response["max_tasks_per_batch"] = MAX_TASKS_PER_PARSE_BATCH
+                response["estimated_task_count"] = estimated_count
+                self.log_event(user_id, "task_batch_capacity_exceeded", {
+                    "estimated_task_count": estimated_count,
+                    "max_tasks_per_batch": MAX_TASKS_PER_PARSE_BATCH,
+                })
+                self.save_chat_turn(user_id, text, response["reply"], intent, features, [])
+                return response
             response["tasks"] = self.parse_tasks_from_text(
                 user_id,
                 text,
