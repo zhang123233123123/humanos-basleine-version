@@ -52,17 +52,22 @@ function TaskInspectorWrapper() {
   const [hasProposedPlan, setHasProposedPlan] = useState(false)
 
   const refreshPendingTasks = useCallback(async () => {
-    const [envelope, proposedEnvelope] = await Promise.all([
+    const [envelope, proposedEnvelope, sessionEnvelope] = await Promise.all([
       apiRequest<any>('/api/tasks'),
       apiRequest<any>('/api/plans/proposed'),
+      apiRequest<any>('/api/execution-sessions'),
     ])
     const tasks = (envelope?.data?.tasks || []) as HumanOSTask[]
+    const scheduledTaskIds = new Set<string>(
+      (sessionEnvelope?.data?.execution_sessions || [])
+        .filter((session: any) => !['superseded', 'cancelled'].includes(String(session.status || '').toLowerCase()))
+        .map((session: any) => String(session.task_id || '')),
+    )
     setHasProposedPlan(Boolean(proposedEnvelope?.data?.plan || proposedEnvelope?.plan))
     setPendingTasks(tasks.filter((task) => {
       const status = String(task.status || 'queued').toLowerCase()
-      const sessions = Array.isArray(task.execution?.sessions) ? task.execution.sessions : []
       return !task.is_preview && !String(task.id || '').startsWith('preview-') &&
-        !['completed', 'terminated'].includes(status) && sessions.length === 0
+        !['completed', 'terminated'].includes(status) && !scheduledTaskIds.has(String(task.id || ''))
     }))
   }, [])
 

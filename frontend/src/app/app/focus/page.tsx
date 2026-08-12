@@ -10,6 +10,7 @@ import { requestId } from '@/lib/client/request-id'
 import type { CurrentExecution, ExecutionFeedbackResult, ExecutionImpact, ExecutionResourceEnvelope, ExecutionSession } from '@/lib/contracts/execution-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
+import { useRouter } from 'next/navigation'
 
 function timestamp(value: unknown): number | null {
   if (!value) return null
@@ -28,8 +29,10 @@ function durationLabel(totalSeconds: number) {
 
 export default function FocusPage() {
   const { t, locale } = useTranslation()
+  const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [replanning, setReplanning] = useState(false)
   const [current, setCurrent] = useState<CurrentExecution | null>(null)
   const [history, setHistory] = useState<ExecutionSession[]>([])
   const [endedSession, setEndedSession] = useState<ExecutionSession | null>(null)
@@ -121,6 +124,7 @@ export default function FocusPage() {
   const startSession = async (skipImpactCheck = false) => {
     if (!session) return
     setSubmitting(true)
+    setReplanning(true)
     try {
       if (current?.mode === 'paused' && !skipImpactCheck) {
         const analysis = await apiRequest<ExecutionResourceEnvelope<{ impact: ExecutionImpact }>>('/api/execution-sessions/impact', {
@@ -269,12 +273,23 @@ export default function FocusPage() {
     if (!session) return
     setSubmitting(true)
     try {
-      await apiRequest('/api/plans/replan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'today', trigger: 'execution_delay', affected_task_ids: [session.task_id] }) })
+      const accepted = await apiRequest<any>('/api/plans/replan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'today', trigger: 'execution_delay', affected_task_ids: [session.task_id] }) })
+      const job = accepted?.data?.replan?.job || accepted?.replan?.job || accepted?.job
+      if (!job?.job_id) throw new Error(locale === 'zh' ? '后端没有创建重排任务' : 'The backend did not create a replan job')
+      let latest = job
+      for (let attempt = 0; attempt < 180 && !['completed', 'failed'].includes(String(latest.status)); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        const result = await apiRequest<any>(`/api/background-jobs?job_id=${encodeURIComponent(job.job_id)}`)
+        latest = result?.job || result?.data?.job || latest
+      }
+      if (latest.status !== 'completed') throw new Error(latest.error || (locale === 'zh' ? '今日计划重排失败' : 'Today replan failed'))
       window.dispatchEvent(new CustomEvent('humanos:plan-revision'))
-      toast(locale === 'zh' ? '正在后台生成新的今日草案' : 'A revised draft is being generated in the background')
+      await loadExecution()
+      toast(locale === 'zh' ? '新的今日安排草案已生成，请确认后生效' : 'The revised draft is ready for confirmation')
       setResumeImpact(null)
+      router.push('/app?review=replan')
     } catch (error) { toast.error(error instanceof Error ? error.message : 'Replan failed') }
-    finally { setSubmitting(false) }
+    finally { setSubmitting(false); setReplanning(false) }
   }
 
   const resumeDeferred = async (deferred: ExecutionSession) => {
@@ -300,6 +315,7 @@ export default function FocusPage() {
 
   return (
     <main className="humanos-operating-page h-full min-h-0 overflow-y-auto overscroll-contain px-4 pb-28 pt-6 md:px-8">
+      {replanning && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 p-6 backdrop-blur-sm"><div className="w-full max-w-sm rounded-3xl border bg-card p-7 text-center shadow-2xl"><Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /><h2 className="mt-4 text-lg font-semibold">{locale === 'zh' ? '正在重新安排今天' : 'Replanning today'}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">{locale === 'zh' ? '正在根据已完成时间、剩余工作和后续任务生成新的计划草案。完成后将返回日历。' : 'Building a revised draft from completed time, remaining work, and later sessions. You will return to the calendar when it is ready.'}</p></div></div>}
       <div className="humanos-operating-container mx-auto max-w-6xl space-y-6">
         <header>
           <Link href="/app" className="mb-3 inline-flex items-center text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="mr-1 h-4 w-4" />{t('execution.workspace')}</Link>

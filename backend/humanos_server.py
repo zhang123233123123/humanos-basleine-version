@@ -4153,8 +4153,13 @@ class Store:
         mode = "now" if session["status"] == "running" else "paused" if session["status"] == "paused" else "session_ended" if session["status"] == "ended" else "up_next"
         if mode == "up_next" and session.get("planned_start_at"):
             try:
-                planned_start = datetime.fromisoformat(session["planned_start_at"])
-                if current >= planned_start:
+                planned_start = datetime.fromisoformat(str(session["planned_start_at"]).replace("Z", "+00:00"))
+                planned_end = datetime.fromisoformat(str(session.get("planned_end_at") or "").replace("Z", "+00:00")) if session.get("planned_end_at") else None
+                if planned_start.tzinfo is None:
+                    planned_start = planned_start.replace(tzinfo=current.tzinfo)
+                if planned_end and planned_end.tzinfo is None:
+                    planned_end = planned_end.replace(tzinfo=current.tzinfo)
+                if current >= planned_start and (planned_end is None or current < planned_end):
                     mode = "ready_to_start"
             except ValueError:
                 pass
