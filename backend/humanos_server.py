@@ -4206,9 +4206,6 @@ class Store:
         profile = self.ensure_profile(user_id)
         actual_start = str(payload.get("actual_start_at") or self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai").isoformat())
         with self.connect() as conn:
-            from app.repositories import TaskRepository
-
-            tasks = TaskRepository(conn)
             replay = self._execution_request_seen(conn, user_id, request_id)
             if replay:
                 return self.execution_session_row(replay)
@@ -4292,6 +4289,9 @@ class Store:
         preferred_resume_at = str(payload.get("preferred_resume_at") or "").strip() or None
         request_id = str(payload.get("request_id") or "").strip() or None
         with self.connect() as conn:
+            from app.repositories import TaskRepository
+
+            tasks = TaskRepository(conn)
             replay = self._execution_request_seen(conn, user_id, request_id)
             if replay:
                 return self.execution_session_row(replay)

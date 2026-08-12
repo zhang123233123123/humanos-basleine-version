@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-from app.domain.planning import PlanRevisionActivation, activate_plan_revision
+try:
+    from app.domain.planning import PlanRevisionActivation, activate_plan_revision
+except ImportError:
+    from ..domain.planning import PlanRevisionActivation, activate_plan_revision
 
 
 RESOURCE_PATHS = {
