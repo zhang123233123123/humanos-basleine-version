@@ -1649,25 +1649,8 @@ class Store:
             if duplicate:
                 self.log_event(user_id, "task_create_replayed", {"task_id": duplicate["id"], "request_id": create_request_id})
                 return self.task_row(duplicate)
-        # Exact duplicate protection is only a CREATE idempotency fallback.
-        # Reconciliation never uses these editable fields as task identity.
-        if not payload.get("id") and not payload.get("allow_duplicate"):
-            with self.connect() as conn:
-                candidates = conn.execute(
-                    "SELECT * FROM tasks WHERE user_id=? AND status NOT IN ('completed','terminated') AND removed_from_week=0",
-                    (user_id,),
-                ).fetchall()
-            duplicate = next(
-                (
-                    row for row in candidates
-                    if normalize_task_identity(row["title"]) == normalize_task_identity(title)
-                    and normalize_task_identity(row["due"]) == normalize_task_identity(deadline)
-                ),
-                None,
-            )
-            if duplicate:
-                self.log_event(user_id, "task_create_deduplicated", {"task_id": duplicate["id"], "title": title})
-                return self.task_row(duplicate)
+        # Mutable fields are not identity. Two Tasks may share a title and
+        # deadline; only replaying the same request_id may reuse a Task.
         task_id = payload.get("id") or new_id("task")
         priority = payload.get("priority") or "中"
         duration = infer_duration_minutes(f"{title} {context}") or int(
@@ -2679,6 +2662,20 @@ class Store:
             r"(第\s*[一二两三四五六七八九\d]+\s*个?|这个|那个|改成|变成|调整到|移到|挪到|提前到|推迟到)",
             text,
         )
+        strict_change = re.search(r"(改成|改为|变成|调整到|移到|挪到|提前到|推迟到|\bchange\b|\bmove\b|\breschedule\b)", text, re.I)
+        if not strict_change:
+            return []
+        ordinal_reference = re.search(r"第\s*([一二两三四五六七八九\d]+)\s*个?", text)
+        exact_title_matches = [
+            index for index, task in enumerate(recent_tasks)
+            if str(task.get("title") or "").strip()
+            and str(task.get("title") or "").strip().lower() in text.lower()
+        ]
+        # Modification requires a unique identity reference. Words such as
+        # "this/that", shared keywords, vector similarity, or a matching due
+        # time are never sufficient to select an existing Task.
+        if not ordinal_reference and len(exact_title_matches) != 1:
+            return []
         timed_action_parts = [
             part
             for part in re.split(r"(?:，|,|。|；|;|然后|再|接着|最后)", text)
