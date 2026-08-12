@@ -17,7 +17,7 @@ def normalize_parser_items(
     normalize_duration: DurationNormalizer,
 ) -> list[dict]:
     payloads: list[dict] = []
-    for item in raw_tasks[:8]:
+    for item in raw_tasks[:20]:
         if not isinstance(item, dict):
             continue
         duration_value = item.get("duration_minutes")

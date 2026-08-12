@@ -34,4 +34,4 @@ class ParsedTask(BaseModel):
 
 
 class ParsedTaskBatch(BaseModel):
-    tasks: list[ParsedTask] = Field(default_factory=list, max_length=8)
+    tasks: list[ParsedTask] = Field(default_factory=list, max_length=20)

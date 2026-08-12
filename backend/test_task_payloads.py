@@ -4,6 +4,17 @@ from backend.app.application.task_payloads import build_task_previews, normalize
 
 
 class TaskPayloadTests(unittest.TestCase):
+    def test_ten_task_batch_is_not_truncated(self) -> None:
+        payloads = normalize_parser_items(
+            [{"title": f"Task {index}", "duration_minutes": 30, "deadline_at": "2026-08-15T18:00:00+08:00"} for index in range(10)],
+            source_text="ten tasks",
+            timezone_name="Asia/Shanghai",
+            parser_name="pydantic_ai",
+            inferred_single_duration=None,
+            normalize_duration=lambda value: int(value),
+        )
+        self.assertEqual(10, len(payloads))
+
     def test_flexible_task_preserves_deadline_and_duration(self) -> None:
         payloads = normalize_parser_items(
             [{"title": "期末复习", "schedule_type": "flexible_task", "deadline_at": "2026-08-14T23:59:00+08:00", "duration_minutes": 180, "priority": "高"}],
