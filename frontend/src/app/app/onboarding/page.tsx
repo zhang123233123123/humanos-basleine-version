@@ -25,7 +25,7 @@ function stableId(prefix: string) {
 }
 
 function initialContext(type: ContextKind): ContextItem {
-  return { id: stableId('ctx'), type, title: '', day: 'Monday', start: '09:00', end: '10:00' }
+  return { id: stableId('ctx'), type, title: '', day: 'Monday', start: '', end: '' }
 }
 
 function initialTask(): TaskDraft {
@@ -33,7 +33,7 @@ function initialTask(): TaskDraft {
 }
 
 export default function OnboardingPage() {
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const router = useRouter()
   const [step, setStep] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -196,7 +196,7 @@ export default function OnboardingPage() {
           <Field label={t('onboarding.windowsLabel')}><textarea className="min-h-24 w-full rounded-xl border bg-background p-3 text-sm" value={availableWindows} onChange={(e) => setAvailableWindows(e.target.value)} placeholder={t('onboarding.windowsPlaceholder')} /></Field>
           <div className="space-y-3">{contextItems.map((item) => <div key={item.id} className="grid gap-2 rounded-xl border bg-[#fafaf6] p-3 md:grid-cols-[150px_1fr_110px_110px_110px_40px]">
             <select className="rounded-md border bg-white px-2 text-sm" value={item.type} onChange={(e) => patchContext(item.id, { type: e.target.value as ContextKind })}><option value="fixed_event">{t('onboarding.fixedTime')}</option><option value="recurring_routine">{t('onboarding.routineTime')}</option><option value="flexible_activity">{t('onboarding.flexibleTime')}</option></select>
-            <Input value={item.title} onChange={(e) => patchContext(item.id, { title: e.target.value })} placeholder={t('onboarding.activityName')} /><Input value={item.day} onChange={(e) => patchContext(item.id, { day: e.target.value })} /><Input type="time" value={item.start} onChange={(e) => patchContext(item.id, { start: e.target.value })} /><Input type="time" value={item.end} onChange={(e) => patchContext(item.id, { end: e.target.value })} /><Button size="icon" variant="ghost" onClick={() => setContextItems((items) => items.filter((entry) => entry.id !== item.id))}><Trash2 className="h-4 w-4" /></Button>
+            <Input value={item.title} onChange={(e) => patchContext(item.id, { title: e.target.value })} placeholder={t('onboarding.activityName')} /><select className="h-10 rounded-md border bg-white px-2 text-sm" value={item.day} onChange={(e) => patchContext(item.id, { day: e.target.value })}>{['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map((day, index) => <option key={day} value={day}>{locale === 'zh' ? ['周一','周二','周三','周四','周五','周六','周日'][index] : day}</option>)}</select><Input type="time" value={item.start} onChange={(e) => patchContext(item.id, { start: e.target.value })} /><Input type="time" value={item.end} onChange={(e) => patchContext(item.id, { end: e.target.value })} /><Button size="icon" variant="ghost" onClick={() => setContextItems((items) => items.filter((entry) => entry.id !== item.id))}><Trash2 className="h-4 w-4" /></Button>
           </div>)}<Button variant="outline" onClick={() => setContextItems([...contextItems, initialContext('fixed_event')])}><Plus className="mr-2 h-4 w-4" />{t('onboarding.addActivity')}</Button></div>
           <label className="flex items-center gap-3 rounded-xl border p-4 text-sm"><Checkbox checked={keepBuffer} onCheckedChange={(checked) => setKeepBuffer(checked === true)} /><span><strong>{t('onboarding.bufferLabel')}</strong><span className="block text-muted-foreground">{t('onboarding.bufferHint')}</span></span></label>
         </div>}

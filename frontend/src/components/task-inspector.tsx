@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { Button } from '@/components/ui/button'
+import { DateTimePicker } from '@/components/ui/date-time-picker'
 import { ArrowLeft, Check, Play, Save, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -187,7 +188,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
 
           {task.isPreview && <div className="grid grid-cols-2 gap-2">
             <label><span className={labelClass}>{t('taskDialog.durationLabel')}</span><input className={inputClass} type="number" min="1" value={duration || ''} onChange={(event) => setDuration(Number(event.target.value) || undefined)} /></label>
-            <label><span className={labelClass}>{t('taskDialog.dueLabel')}</span><input className={inputClass} value={due} onChange={(event) => setDue(event.target.value)} /></label>
+            <label><span className={labelClass}>{t('taskDialog.dueLabel')}</span><DateTimePicker value={due} onChange={setDue} className={inputClass} /></label>
             <label><span className={labelClass}>{t('workspace.difficulty')}</span><input className={inputClass} type="number" min="1" max="10" value={expectedDifficulty || ''} onChange={(event) => setExpectedDifficulty(Number(event.target.value) || undefined)} /></label>
             <label><span className={labelClass}>{t('workspace.dependency')}</span><input className={inputClass} value={dependency} onChange={(event) => setDependency(event.target.value)} /></label>
           </div>}

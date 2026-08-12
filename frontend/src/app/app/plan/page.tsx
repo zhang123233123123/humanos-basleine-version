@@ -13,16 +13,16 @@ import type { PlanBlock, PlanDecision, PlanResourceEnvelope, PlanValidation, Wee
 import type { ResourceEnvelope } from '@/lib/contracts/api-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
+import { DateTimePicker } from '@/components/ui/date-time-picker'
 
 type Stage = 'setup' | 'review'
 
-const DAYS_ZH = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
-const DAYS_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-
-function hourLabel(value: number) {
-  const hour = Math.floor(value)
-  const minute = Math.round((value - hour) * 60)
-  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+function blockDateTime(weekId: string, dayIndex: number, hour: number) {
+  const date = new Date(`${weekId}T00:00:00`)
+  date.setDate(date.getDate() + dayIndex)
+  date.setMinutes(Math.round(hour * 60))
+  const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+  return shifted.toISOString().slice(0, 16)
 }
 
 export default function WeeklyPlanPage() {
@@ -48,7 +48,6 @@ export default function WeeklyPlanPage() {
   const [keepBuffer, setKeepBuffer] = useState(true)
   const editSnapshot = useRef('')
 
-  const days = locale === 'zh' ? DAYS_ZH : DAYS_EN
   const weekId = weekStatus?.current_week_id || ''
 
   const loadPlanningState = useCallback(async () => {
@@ -194,10 +193,21 @@ export default function WeeklyPlanPage() {
     return () => window.clearTimeout(timer)
   }, [availableWindows, keepBuffer, loading, stage, tasks, temporaryConstraints, weeklyGoal, weekStatus?.new_week])
 
-  const updateBlock = (index: number, field: 'day_index' | 'start' | 'end', value: number) => {
+  const updateBlockDateTime = (index: number, field: 'start' | 'end', value: string) => {
+    const selected = new Date(value)
+    const monday = new Date(`${weekId}T00:00:00`)
+    if (Number.isNaN(selected.getTime()) || Number.isNaN(monday.getTime())) return
+    const dayIndex = Math.floor((new Date(selected.getFullYear(), selected.getMonth(), selected.getDate()).getTime() - monday.getTime()) / 86_400_000)
+    if (dayIndex < 0 || dayIndex > 6) {
+      toast(locale === 'zh' ? '请选择当前周内的时间' : 'Choose a time within this week')
+      return
+    }
+    const hour = selected.getHours() + selected.getMinutes() / 60
     setBlocks((current) => current.map((block, blockIndex) => {
       if (blockIndex !== index) return block
-      const updated = { ...block, [field]: value }
+      const updated = { ...block, day_index: dayIndex, [field]: hour }
+      updated.start_at = new Date(blockDateTime(weekId, updated.day_index, updated.start)).toISOString()
+      updated.end_at = new Date(blockDateTime(weekId, updated.day_index, updated.end)).toISOString()
       updated.session_minutes = Math.max(Math.round((updated.end - updated.start) * 60), 0)
       return updated
     }))
@@ -351,7 +361,7 @@ export default function WeeklyPlanPage() {
                 {tasks.map((task, index) => (
                   <div key={task.id || index} className="grid gap-2 rounded-xl border bg-background/70 p-3 md:grid-cols-[1fr_1fr_110px_100px_40px]">
                     <Input value={task.title || ''} onChange={(event) => updateTask(index, 'title', event.target.value)} placeholder={t('planning.taskTitle')} />
-                    <Input value={String(task.due || task.deadline || task.deadline_at || '')} onChange={(event) => updateTask(index, 'due', event.target.value)} placeholder={t('planning.deadline')} />
+                    <DateTimePicker value={String(task.due || task.deadline || task.deadline_at || '')} onChange={(value) => updateTask(index, 'due', value)} ariaLabel={t('planning.deadline')} />
                     <Input type="number" min={15} step={15} value={Number(task.duration || task.estimated_duration || 60)} onChange={(event) => updateTask(index, 'duration', Number(event.target.value))} />
                     <select className="rounded-md border bg-background px-2 text-sm" value={String(task.priority || 'medium')} onChange={(event) => updateTask(index, 'priority', event.target.value)}><option value="high">{t('taskDialog.priorityHigh')}</option><option value="medium">{t('taskDialog.priorityMedium')}</option><option value="low">{t('taskDialog.priorityLow')}</option></select>
                     <Button type="button" size="icon" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => void deleteTask(task)} aria-label={locale === 'zh' ? '删除任务' : 'Delete task'}><Trash2 className="h-4 w-4" /></Button>
@@ -369,12 +379,10 @@ export default function WeeklyPlanPage() {
               <CardHeader><CardTitle>{t('planning.reviewTitle')}</CardTitle><CardDescription>{decision.explanation || t('planning.reviewDescription')}</CardDescription></CardHeader>
               <CardContent className="space-y-3">
                 {blocks.map((block, index) => (
-                  <div key={block.block_id || `${block.task_id}-${index}`} className="grid items-center gap-2 rounded-xl border p-3 md:grid-cols-[1fr_120px_90px_90px]">
+                  <div key={block.block_id || `${block.task_id}-${index}`} className="grid items-center gap-3 rounded-xl border p-3 md:grid-cols-[1fr_1fr_1fr]">
                     <div><p className="font-medium">{block.title || taskName.get(block.task_id)}</p><p className="text-xs text-muted-foreground">{block.kind || 'task_session'}</p></div>
-                    <select className="h-10 rounded-md border bg-background px-2 text-sm" value={block.day_index} onChange={(event) => updateBlock(index, 'day_index', Number(event.target.value))}>{days.map((day, dayIndex) => <option key={day} value={dayIndex}>{day}</option>)}</select>
-                    <Input type="number" min={0} max={24} step={0.25} value={block.start} onChange={(event) => updateBlock(index, 'start', Number(event.target.value))} />
-                    <Input type="number" min={0} max={24} step={0.25} value={block.end} onChange={(event) => updateBlock(index, 'end', Number(event.target.value))} />
-                    <p className="text-xs text-muted-foreground md:col-start-2 md:col-span-3">{days[block.day_index]} {hourLabel(block.start)}–{hourLabel(block.end)}</p>
+                    <label className="grid gap-1 text-xs text-muted-foreground"><span>{locale === 'zh' ? '开始日期和时间' : 'Start date and time'}</span><DateTimePicker value={blockDateTime(weekId, block.day_index, block.start)} onChange={(value) => updateBlockDateTime(index, 'start', value)} /></label>
+                    <label className="grid gap-1 text-xs text-muted-foreground"><span>{locale === 'zh' ? '结束日期和时间' : 'End date and time'}</span><DateTimePicker value={blockDateTime(weekId, block.day_index, block.end)} onChange={(value) => updateBlockDateTime(index, 'end', value)} /></label>
                   </div>
                 ))}
                 <div className="flex justify-between pt-3"><Button variant="outline" onClick={() => setStage('setup')}>{t('planning.backToSetup')}</Button><div className="flex gap-2"><Button variant="outline" onClick={validatePlan} disabled={submitting}><ShieldCheck className="mr-2 h-4 w-4" />{t('planning.validate')}</Button><Button onClick={confirmPlan} disabled={submitting || validation?.valid === false}><CalendarCheck className="mr-2 h-4 w-4" />{t('planning.confirm')}</Button></div></div>
