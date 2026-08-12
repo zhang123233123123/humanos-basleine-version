@@ -1862,22 +1862,8 @@ class Store:
             parser=parse_tasks_with_agent,
             record_event=lambda event_type, details: self.log_event(user_id, event_type, details),
         )
-        explicit_schedule_tasks = [] if typed_tasks else self.parse_explicit_schedule_lines(user_id, clean, create_tasks=create_tasks)
-        if explicit_schedule_tasks:
-            return explicit_schedule_tasks
-        shared_time = re.search(
-            r"(?:然后)?(?:它们|这些|都是|每个|全部).*?((?:早上|上午|中午|下午|晚上)\s*\d{1,2}\s*(?:[:：]\s*\d{2}|点|时))",
-            clean,
-        )
-        if shared_time and not typed_tasks:
-            prefix = clean[:shared_time.start()].strip(" ，,。；;")
-            clauses = [part.strip() for part in re.split(r"(?:然后|，|,|。|；|;)", prefix) if part.strip()]
-            dated_clauses = [part for part in clauses if re.search(r"今天|今晚|明天|后天|周[一二三四五六日天]|星期[一二三四五六日天]", part)]
-            if len(dated_clauses) >= 2:
-                shared_hour = parse_clock_hour(shared_time.group(1))
-                shared_clock = format_clock_hour(shared_hour) if shared_hour is not None else shared_time.group(1)
-                expanded = "，".join(f"{part} {shared_clock}" for part in dated_clauses)
-                return self.local_parse_tasks_from_text(user_id, expanded, create_tasks=create_tasks)
+        # AI owns semantic extraction. Python starts at typed-schema validation
+        # and must not reinterpret task prose through regex or local heuristics.
         if typed_tasks:
             llm_result = {"tasks": typed_tasks}
             parser_name = "pydantic_ai"
@@ -1891,11 +1877,8 @@ class Store:
                 raw_tasks = llm_result.get("tasks") if isinstance(llm_result.get("tasks"), list) else [llm_result]
             else:
                 raw_tasks = []
-            # A single user intent must not be expanded into metadata-shaped
-            # pseudo tasks such as "three hours" or "deadline". The local
-            # parser is deterministic about attaching those fragments to the
-            # preceding task, so prefer it when the model over-splits one
-            # action into multiple objects.
+            # Reject model output that expands metadata such as duration or a
+            # deadline into standalone tasks. The AI retry layer owns repair.
             if expected_count == 1 and len(raw_tasks) > 1:
                 self.log_event(
                     user_id,
@@ -5610,7 +5593,7 @@ class Store:
         task_map = {str(task.get("id")): task for task in tasks}
         context = build_scheduling_context(profile)
         rest_minutes = int(context.get("rest_minutes") or 15)
-        validation_windows = context.get("movable_routine_windows") or context["windows"]
+        validation_windows = context.get("full_available_windows") or context.get("movable_routine_windows") or context["windows"]
         now = profile_now(profile)
         today_index = now.weekday()
         next_quarter = math.ceil((now.hour + now.minute / 60) * 4) / 4
@@ -6053,7 +6036,9 @@ class Store:
                         "today_index": planning_now.weekday(),
                         "now_iso": planning_now.isoformat(),
                         "current_time": planning_now.hour + planning_now.minute / 60,
-                        "available_windows_after_constraints_and_buffer": planning_context.get("movable_routine_windows") or planning_context.get("windows", []),
+                        "preferred_available_windows": planning_context.get("movable_routine_windows") or planning_context.get("windows", []),
+                        "full_available_windows": planning_context.get("full_available_windows") or planning_context.get("windows", []),
+                        "buffer_policy": "The difference between full_available_windows and preferred_available_windows is soft reserve. Use it only when preferred capacity cannot complete work before its deadline, and disclose its use in evidence.",
                         "hard_constraints": planning_context.get("hard_constraints", []),
                         "routine_soft_constraints": planning_context.get("routine_blocks", []),
                         "ai_arranged_activities": [item for item in planning_context.get("flexible_activity_blocks", []) if item.get("source_type") == "flexible_activity"],

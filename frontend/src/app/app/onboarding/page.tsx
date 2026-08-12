@@ -186,8 +186,8 @@ export default function OnboardingPage() {
         </div>}
 
         {step === 1 && <div className="mt-7 grid gap-6 md:grid-cols-2">
-          <Field label={t('onboarding.deepWorkLabel')}><Input value={deepWorkWindow} onChange={(e) => setDeepWorkWindow(e.target.value)} /></Field>
-          <Field label={t('onboarding.lowEnergyLabel')}><Input value={lowEnergyWindow} onChange={(e) => setLowEnergyWindow(e.target.value)} /></Field>
+          <Field label={t('onboarding.deepWorkLabel')}><TimeRangeInput value={deepWorkWindow} onChange={setDeepWorkWindow} /></Field>
+          <Field label={t('onboarding.lowEnergyLabel')}><TimeRangeInput value={lowEnergyWindow} onChange={setLowEnergyWindow} /></Field>
           <Field label={t('onboarding.sessionLengthLabel')}><NumberChoices value={sessionMinutes} values={[25,45,60,90]} onChange={setSessionMinutes} /></Field>
           <Field label={t('onboarding.breakLengthLabel')}><NumberChoices value={breakMinutes} values={[5,10,15,20]} onChange={setBreakMinutes} /></Field>
           {(['morning','afternoon','evening'] as const).map((period) => <Field key={period} label={t(`onboarding.${period}Energy`)}><input type="range" min="1" max="7" value={dayEnergy[period]} onChange={(e) => setDayEnergy({ ...dayEnergy, [period]: Number(e.target.value) })} className="w-full" /><span className="text-sm font-medium">{dayEnergy[period]}/7</span></Field>)}
@@ -226,3 +226,4 @@ export default function OnboardingPage() {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="grid gap-2 text-sm font-medium text-[#25302a]">{label}<div className="flex items-center gap-3 font-normal text-[#25302a]">{children}</div></label> }
 function NumberChoices({ value, values, onChange }: { value: number; values: number[]; onChange: (value: number) => void }) { return <div className="flex flex-wrap gap-2">{values.map((item) => <button type="button" key={item} onClick={() => onChange(item)} className={`rounded-lg border px-3 py-2 text-sm ${value === item ? 'border-primary bg-primary/10 text-primary' : ''}`}>{item} min</button>)}</div> }
+function TimeRangeInput({ value, onChange }: { value: string; onChange: (value: string) => void }) { const [start = '09:00', end = '17:00'] = String(value || '').split('-'); return <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-2"><input aria-label="Start time" type="time" className="h-10 rounded-md border bg-background px-3 text-sm" value={start} onChange={(event) => onChange(`${event.target.value}-${end}`)} /><span className="text-muted-foreground">-</span><input aria-label="End time" type="time" className="h-10 rounded-md border bg-background px-3 text-sm" value={end} onChange={(event) => onChange(`${start}-${event.target.value}`)} /></div> }

@@ -129,6 +129,12 @@ def build_deterministic_plan(
         for item in fixed_constraints
     )
     available_segments = [WeeklySegment(start, end) for start, end in windows]
+    full_windows = context.get("full_available_windows") or raw_windows
+    full_available_segments = [
+        WeeklySegment(_axis(int(item["day_index"]), float(item["start"])), _axis(int(item["day_index"]), float(item["end"])))
+        for item in full_windows
+        if int(item.get("day_index", -1)) in range(7) and float(item.get("end", 0)) > float(item.get("start", 0))
+    ]
     occupied_segments = [WeeklySegment(start, end) for start, end in occupied]
     initial_free_segments = WeeklyTimeAxis.subtract(available_segments, occupied_segments)
     active_tasks = {
@@ -221,6 +227,18 @@ def build_deterministic_plan(
                 rest_after_minutes=rest_minutes,
                 grid_minutes=GRID_MINUTES,
             )
+            used_buffer = False
+            if chosen_segment is None and context.get("keep_buffer"):
+                chosen_segment = WeeklyTimeAxis.find_slot(
+                    full_available_segments,
+                    [WeeklySegment(start, end) for start, end in occupied],
+                    duration_minutes=work,
+                    not_before=max(current_axis, dependency_ready),
+                    deadline=deadline,
+                    rest_after_minutes=rest_minutes,
+                    grid_minutes=GRID_MINUTES,
+                )
+                used_buffer = chosen_segment is not None
             chosen = (chosen_segment.start, chosen_segment.end) if chosen_segment else None
             if not chosen:
                 remaining_free = WeeklyTimeAxis.subtract(
@@ -268,7 +286,9 @@ def build_deterministic_plan(
                     f"Profile focus-session length: {session_minutes} minutes",
                     f"Profile protected rest after session: {rest_minutes} minutes",
                     "Allocated by deterministic Python weekly timeline",
+                    *( ["Protected buffer was used because preferred capacity before the deadline was insufficient."] if used_buffer else [] ),
                 ],
+                "used_buffer": used_buffer,
                 "state_scope": "weekly_skeleton",
                 "week_id": week_id,
                 "plan_status": "proposed",

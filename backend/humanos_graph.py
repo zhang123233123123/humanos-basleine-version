@@ -587,6 +587,7 @@ def build_scheduling_context(profile: dict[str, Any]) -> dict[str, Any]:
     windows = parse_available_windows(profile)
     for busy in [*intervals, *flexible_blocks]:
         windows = [part for window in windows for part in (subtract_interval(window, busy) if window["day_index"] == busy["day_index"] else [window])]
+    full_available_windows = [dict(window) for window in windows]
     keep_buffer = weekly.get("keep_buffer") is not False
     buffer_blocks: list[dict[str, Any]] = []
     if keep_buffer:
@@ -626,6 +627,7 @@ def build_scheduling_context(profile: dict[str, Any]) -> dict[str, Any]:
         movable_routine_windows = [part for window in movable_routine_windows for part in (subtract_interval(window, busy) if window["day_index"] == busy["day_index"] else [window])]
     return {
         "windows": windows,
+        "full_available_windows": full_available_windows,
         "movable_routine_windows": movable_routine_windows,
         "hard_constraints": intervals,
         "flexible_activity_blocks": flexible_blocks,
