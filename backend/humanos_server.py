@@ -418,11 +418,12 @@ def schedule_task_kind(task: dict) -> str:
     )
 
 
-PARALLEL_RESOURCE_MODALITIES = {"visual", "auditory", "verbal", "language", "manual", "mobility"}
+PARALLEL_RESOURCE_MODALITIES = {"visual", "auditory", "verbal", "manual", "mobility", "cognitive", "social", "environment"}
+RESOURCE_LEVEL_SCORE = {"none": 0, "low": 1, "medium": 2, "high": 3}
 
 
 def normalize_resource_modalities(value: object) -> list[str]:
-    aliases = {"语言": "verbal", "language": "verbal", "听觉": "auditory", "视觉": "visual", "手部": "manual", "行动": "mobility"}
+    aliases = {"语言": "verbal", "language": "verbal", "听觉": "auditory", "视觉": "visual", "手部": "manual", "肢体": "mobility", "行动": "mobility", "认知": "cognitive", "社交": "social", "环境": "environment"}
     raw = value if isinstance(value, list) else [value] if value else []
     normalized: list[str] = []
     for item in raw:
@@ -447,10 +448,25 @@ def local_resource_profile(task: dict) -> dict:
             modalities.append("visual")
         if re.search(r"写|论文|汇报|课程|做题|write|paper|course|assignment", title):
             modalities.append("verbal")
+        if re.search(r"分析|研究|复习|编程|设计|analy|research|review|code|design", title):
+            modalities.append("cognitive")
+        if re.search(r"会议|组会|访谈|电话|meeting|interview|call", title):
+            modalities.extend(["social", "verbal"])
+    modalities = list(dict.fromkeys(modalities))
+    loads = {dimension: "none" for dimension in PARALLEL_RESOURCE_MODALITIES}
+    for dimension in modalities:
+        loads[dimension] = "medium"
+    if re.search(r"分析|研究|复习|编程|写|论文|analy|research|review|code|write|paper", title):
+        loads["cognitive"] = "high"
+    if re.search(r"播客|听力|podcast|audio|listen", title):
+        loads["auditory"] = "high"; loads["cognitive"] = "low"
+    if re.search(r"洗衣|整理|打扫|做饭|laundry|clean|cook", title):
+        loads["manual"] = "high"; loads["cognitive"] = "low"
     parallelizable = bool(task.get("parallelizable")) or bool(set(modalities) & {"manual", "mobility", "auditory"})
     return {
         "task_id": task.get("id"),
         "resource_modality": modalities,
+        "resource_loads": loads,
         "parallelizable": parallelizable,
         "evidence": ["Conservative initial classification from the task title and the user's saved resource types"],
         "confidence_level": "low",
@@ -466,6 +482,16 @@ def parallel_pair_rule(primary: dict, secondary: dict, demand_map: dict[str, dic
         return False, "At least one activity is not eligible for a parallel suggestion."
     if not primary_modalities or not secondary_modalities:
         return False, "The resource types are not specific enough to validate this pair."
+    primary_loads = dict(primary.get("resource_loads") or {})
+    secondary_loads = dict(secondary.get("resource_loads") or {})
+    shared_conflicts = []
+    for dimension in PARALLEL_RESOURCE_MODALITIES:
+        first = RESOURCE_LEVEL_SCORE.get(str(primary_loads.get(dimension) or ("medium" if dimension in primary_modalities else "none")), 2)
+        second = RESOURCE_LEVEL_SCORE.get(str(secondary_loads.get(dimension) or ("medium" if dimension in secondary_modalities else "none")), 2)
+        if first >= 2 and second >= 2:
+            shared_conflicts.append(dimension)
+    if shared_conflicts:
+        return False, f"The activities compete for: {', '.join(sorted(shared_conflicts))}."
     complementary = (
         bool(primary_modalities & {"manual", "mobility"}) and "auditory" in secondary_modalities
     ) or (
@@ -473,15 +499,13 @@ def parallel_pair_rule(primary: dict, secondary: dict, demand_map: dict[str, dic
     )
     if not complementary:
         return False, "This prototype only permits a physical or manual activity paired with low-demand auditory input."
-    if ("verbal" in primary_modalities and "verbal" in secondary_modalities) or ("visual" in primary_modalities and "visual" in secondary_modalities):
-        return False, "The activities compete for the same sustained cognitive resource."
     levels = {
         str(demand_map.get(str(primary.get("task_id")), {}).get("level") or "medium"),
         str(demand_map.get(str(secondary.get("task_id")), {}).get("level") or "medium"),
     }
     if "low" not in levels:
         return False, "At least one activity must have low cognitive demand."
-    return True, "A low-demand physical or manual activity is compatible with auditory input."
+    return True, "The resource matrix permits one low-demand auditory task with one physical or manual task."
 
 
 def confirmed_parallel_overlap_allowed(first: dict, second: dict) -> bool:
@@ -3521,6 +3545,42 @@ class Store:
             decision,
             {"week_id": row["week_id"], "request_id": request_id},
         )
+
+    def decide_parallel_suggestion(self, user_id: str, payload: dict) -> dict:
+        plan_id = str(payload.get("plan_id") or "")
+        suggestion_id = str(payload.get("suggestion_id") or "")
+        action = str(payload.get("action") or "keep_separate")
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM plans WHERE id=? AND user_id=? AND plan_status='proposed'", (plan_id, user_id)).fetchone()
+            if not row:
+                raise KeyError(plan_id)
+            plan = from_json(row["plan_json"], {})
+            suggestions = [dict(item) for item in (plan.get("parallel_suggestions") or [])]
+            suggestion = next((item for item in suggestions if str(item.get("id")) == suggestion_id), None)
+            if not suggestion:
+                raise KeyError(suggestion_id)
+            suggestion["status"] = "accepted" if action == "combine" else "rejected"
+            if action == "combine":
+                block_ids = {str(suggestion.get("primary_block_id")), str(suggestion.get("secondary_block_id"))}
+                task_ids = [str(suggestion.get("primary_task_id")), str(suggestion.get("secondary_task_id"))]
+                overlap = int(suggestion.get("suggested_overlap_minutes") or 30)
+                start = float(suggestion.get("start") or 0)
+                end = start + overlap / 60.0
+                found = 0
+                for block in plan.get("plan_patch") or []:
+                    if str(block.get("block_id")) not in block_ids:
+                        continue
+                    found += 1
+                    block.update({"day_index": int(suggestion.get("day_index") or 0), "start": start, "end": end, "session_minutes": overlap, "planned_work_minutes": min(overlap, int(block.get("planned_work_minutes") or overlap)), "parallel_group_id": suggestion["parallel_group_id"], "parallel_user_confirmed": True, "parallel_task_ids": task_ids, "allowed_overlap_minutes": overlap, "parallel_role": "primary" if str(block.get("task_id")) == task_ids[0] else "secondary"})
+                if found != 2:
+                    raise ValueError("Parallel suggestion no longer matches the current draft")
+                plan["accepted_parallel_pairs"] = [*(plan.get("accepted_parallel_pairs") or []), {**suggestion, "user_confirmed": True}]
+            plan["parallel_suggestions"] = suggestions
+            plan["validation"] = self.validate_confirmed_schedule(user_id, {**plan, "accepted_parallel_pairs": plan.get("accepted_parallel_pairs") or []})
+            if action == "combine" and not plan["validation"].get("valid"):
+                raise ValueError(f"Parallel combination failed Python validation: {plan['validation'].get('violations', [])[:1]}")
+            conn.execute("UPDATE plans SET plan_json=?,updated_at=? WHERE id=?", (as_json(plan), now_ms(), plan_id))
+        return plan
 
     def adjust_scheduled_task(self, user_id: str, payload: dict) -> dict:
         task_id = str(payload.get("task_id") or "").strip()
@@ -6624,6 +6684,13 @@ class Handler(BaseHTTPRequestHandler):
                 user_id = payload.get("user_id", "demo")
                 store.ensure_profile(user_id)
                 self.send_json(store.adjust_scheduled_task(user_id, payload), status=201)
+                return
+
+            if path == "/api/plans/parallel-decision" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                store.ensure_profile(user_id)
+                self.send_json({"plan": store.decide_parallel_suggestion(user_id, payload)}, status=200)
                 return
 
             if path == "/api/auth/register" and method == "POST":

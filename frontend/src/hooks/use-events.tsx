@@ -33,6 +33,8 @@ async function fetchDraftEvents(): Promise<EventInput[]> {
       taskId: block.task_id,
       planId: plan.plan_id,
       planRevision: plan.plan_revision,
+      parallelGroupId: block.parallel_group_id,
+      parallelRole: block.parallel_role,
     },
   }))
 }
