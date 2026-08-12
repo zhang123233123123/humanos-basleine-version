@@ -1078,10 +1078,19 @@ class Store:
 
     def request_replan(self, user_id: str, *, scope: str, trigger: str, affected_task_ids: list[str] | None = None, week_id: str | None = None) -> dict:
         """Queue a Plan Revision without mutating the confirmed calendar."""
+        from app.application.plan_revision import build_replan_request, replan_response
+
         profile = self.ensure_profile(user_id)
         target_week = str(week_id or profile.get("active_week_id") or (profile.get("weekly_context") or {}).get("week_id") or iso_week_id(timezone_name=profile.get("timezone")))
-        job = self.create_background_job(user_id, "schedule_plan", {"week_id": target_week, "source": "mutation_replan", "adjustment_trigger": trigger, "replan_scope": scope if scope in {"local", "full", "today"} else "local", "affected_task_ids": sorted({str(item) for item in (affected_task_ids or []) if item}), "request_id": new_id("replan")})
-        return {"required": True, "scope": scope, "trigger": trigger, "affected_task_ids": sorted({str(item) for item in (affected_task_ids or []) if item}), "job": job, "confirmation_required": True}
+        command = build_replan_request(
+            week_id=target_week,
+            scope=scope,
+            trigger=trigger,
+            affected_task_ids=affected_task_ids,
+            request_id=new_id("replan"),
+        )
+        job = self.create_background_job(user_id, "schedule_plan", command)
+        return replan_response(command, job)
 
     def get_background_job(self, user_id: str, job_id: str) -> dict | None:
         with self.connect() as conn:
@@ -3517,6 +3526,8 @@ class Store:
         return {"task": updated_task, "plan": result.get("plan"), "validation": result.get("validation"), "revision_created": True}
 
     def confirm_plan(self, user_id: str, payload: dict) -> dict:
+        from app.application.plan_revision import activation_event_payload, activation_resources, revision_activation
+
         plan_id = str(payload.get("plan_id") or "")
         plan_patch = list(payload.get("plan_patch") or [])
         validation = self.validate_confirmed_schedule(user_id, {**payload, "plan_patch": plan_patch})
@@ -3584,6 +3595,7 @@ class Store:
             else:
                 revision = int(row["plan_revision"])
                 week_id = str(row["week_id"])
+            activation = revision_activation(week_id=week_id, revision=revision, plan_id=plan_id)
             decorated = self._decorate_plan_blocks(plan_patch, week_id, revision, timezone_name)
             blocks_by_task: dict[str, list[dict]] = {}
             for block in decorated:
@@ -3658,7 +3670,7 @@ class Store:
                 )
             conn.execute(
                 "UPDATE plans SET plan_status='superseded',updated_at=? WHERE user_id=? AND week_id=? AND id<>? AND plan_status IN ('confirmed','needs_update','proposed')",
-                (timestamp,user_id,week_id,plan_id),
+                (timestamp,user_id,activation.week_id,activation.plan_id),
             )
             # A confirmed revision is the single source of future calendar
             # truth. Keep completed/ended/running history, but retire unstarted
@@ -3666,7 +3678,7 @@ class Store:
             # in Now / Up Next after the user confirms a replacement plan.
             conn.execute(
                 "UPDATE execution_sessions SET status='superseded',completion_outcome=CASE WHEN status='paused' THEN 'replaced_by_revision' ELSE completion_outcome END,updated_at=? WHERE user_id=? AND week_id=? AND plan_revision<>? AND status IN ('ready','paused')",
-                (timestamp, user_id, week_id, revision),
+                (timestamp, user_id, activation.week_id, activation.revision),
             )
             conn.execute(
                 "UPDATE plans SET plan_status='confirmed',plan_json=?,confirmed_at=?,updated_at=? WHERE id=? AND user_id=?",
@@ -3678,7 +3690,7 @@ class Store:
             )
             conn.execute(
                 "INSERT INTO events (id,user_id,type,payload_json,created_at) VALUES (?,?,?,?,?)",
-                (new_id("evt"),user_id,"plan_confirmed",as_json({"plan_id":plan_id,"week_id":week_id,"plan_revision":revision}),timestamp),
+                (new_id("evt"),user_id,"plan_confirmed",as_json(activation_event_payload(activation)),timestamp),
             )
         return {
             "plan": stored,
@@ -3687,11 +3699,7 @@ class Store:
             "requires_rationale": False,
             "edit_episode_id": episode_id or None,
             "canonical_diff": canonical_diff,
-            "resources": {
-                "profile": "/api/profile",
-                "tasks": "/api/tasks",
-                "execution_sessions": "/api/execution-sessions",
-            },
+            "resources": activation_resources(activation),
         }
 
     def active_plan(self, user_id: str, week_id: str | None = None) -> dict | None:
