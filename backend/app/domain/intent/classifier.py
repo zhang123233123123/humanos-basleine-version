@@ -27,7 +27,7 @@ DEADLINE = re.compile(
     re.I,
 )
 ESTIMATED_DURATION = re.compile(
-    r"(?:大概|大约|预计|需要|持续)?\s*(?:\d+(?:\.\d+)?|[一二两三四五六七八九十半]+)\s*(?:分钟|小时)|"
+    r"(?:大概|大约|预计|需要|持续)*\s*(?:\d+(?:\.\d+)?|[一二两三四五六七八九十半]+)\s*(?:个\s*)?(?:分钟|小时)|"
     r"\b(?:about|roughly|approximately|estimated?)\s+\d+(?:\.\d+)?\s*(?:minutes?|hours?)\b",
     re.I,
 )

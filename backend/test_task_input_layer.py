@@ -188,7 +188,7 @@ class TaskInputLayerTests(unittest.TestCase):
         self.assertEqual(1, len(updated))
         self.assertEqual("明天 14:00", updated[0]["due"])
 
-    def test_exact_dedup_is_user_scoped(self) -> None:
+    def test_same_task_facts_create_distinct_user_owned_tasks(self) -> None:
         payload = {"title": "完成  论文", "due": "周三", "duration": 90}
         first = self.store.create_task("user-a", payload)
         duplicate = self.store.create_task(
@@ -197,9 +197,9 @@ class TaskInputLayerTests(unittest.TestCase):
         )
         other_user = self.store.create_task("user-b", payload)
 
-        self.assertEqual(first["id"], duplicate["id"])
+        self.assertNotEqual(first["id"], duplicate["id"])
         self.assertNotEqual(first["id"], other_user["id"])
-        self.assertEqual(1, len(self.store.list_tasks("user-a")))
+        self.assertEqual(2, len(self.store.list_tasks("user-a")))
 
     def test_task_reads_writes_and_deletes_require_owner(self) -> None:
         task = self.store.create_task(

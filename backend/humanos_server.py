@@ -30,18 +30,24 @@ try:
     from .app.application.chat_replies import interruption_reply, progress_reply, task_preview_reply
     from .app.application.chat_routing import normalized_chat_intent, should_parse_task_candidates
     from .app.application.behavior_features import local_behavior_features
+    from .app.application.chat_response import apply_existing_task_updates, apply_weekly_context_update, initial_planner_response
+    from .app.application.calendar_advisor import advisor_requires_planner_handoff, fallback_calendar_summary, sessions_for_local_date
     from .app.application.task_parse_coordinator import parse_with_validation_retry
     from .app.application.task_payloads import build_task_previews, normalize_parser_items
     from .app.domain.intent import classify_intent
+    from .app.domain.task.change_policy import exact_task_reference_indexes, has_unique_task_identity, is_explicit_change_request, matching_context_item
 except ImportError:
     try:
         from app.application.parse_task import parse_structured_tasks as parse_tasks_with_agent
         from app.application.chat_replies import interruption_reply, progress_reply, task_preview_reply
         from app.application.chat_routing import normalized_chat_intent, should_parse_task_candidates
         from app.application.behavior_features import local_behavior_features
+        from app.application.chat_response import apply_existing_task_updates, apply_weekly_context_update, initial_planner_response
+        from app.application.calendar_advisor import advisor_requires_planner_handoff, fallback_calendar_summary, sessions_for_local_date
         from app.application.task_parse_coordinator import parse_with_validation_retry
         from app.application.task_payloads import build_task_previews, normalize_parser_items
         from app.domain.intent import classify_intent
+        from app.domain.task.change_policy import exact_task_reference_indexes, has_unique_task_identity, is_explicit_change_request, matching_context_item
     except ImportError as parser_import_error:
         print(f"PydanticAI parser import fallback: {parser_import_error}", flush=True)
         parse_tasks_with_agent = None
@@ -1824,6 +1830,8 @@ class Store:
             record_event=lambda event_type, details: self.log_event(user_id, event_type, details),
         )
         prefer_local_parser = self.looks_like_compact_multi_task_list(clean) or bool(self.english_task_segments(clean))
+        if prefer_local_parser:
+            return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
         explicit_schedule_tasks = [] if typed_tasks else self.parse_explicit_schedule_lines(user_id, clean, create_tasks=create_tasks)
         if explicit_schedule_tasks:
             return explicit_schedule_tasks
@@ -2227,13 +2235,7 @@ class Store:
         return llm_result
 
     def update_weekly_context_from_chat(self, user_id: str, text: str) -> dict | None:
-        change_request = re.search(r"改成|变成|调整到|移到|挪到|提前到|推迟到|改为", text)
-        english_change_request = re.search(
-            r"\b(?:has\s+moved\s+to|moved\s+to|move(?:d)?\b.*?\bto|has\s+changed\s+to|changed\s+to|change(?:d)?\b.*?\bto|rescheduled\s+to|is\s+now|will\s+be\s+at)\b",
-            text,
-            re.IGNORECASE,
-        )
-        if not change_request and not english_change_request:
+        if not is_explicit_change_request(text):
             return None
         normalized = normalize_chinese_clock(text)
         start = parse_clock_hour(normalized)
@@ -2244,14 +2246,7 @@ class Store:
         items = [dict(item) for item in weekly.get("context_items", []) if isinstance(item, dict)]
         if not items:
             return None
-        matched = None
-        lowered_text = text.lower()
-        for item in items:
-            title = str(item.get("title") or "").strip()
-            title_tokens = re.findall(r"[A-Za-z0-9]{2,}|[\u4e00-\u9fff]{2,}", title)
-            if title and (title.lower() in lowered_text or any(token.lower() in lowered_text for token in title_tokens)):
-                matched = item
-                break
+        matched = matching_context_item(text, items)
         if not matched:
             return None
         raw_type = str(matched.get("type") or matched.get("category") or "")
@@ -2324,9 +2319,7 @@ class Store:
 
     def calendar_advisor_turn(self, user_id: str, text: str, payload: dict) -> dict:
         locale = str(payload.get("locale") or "zh")
-        query_markers = re.search(r"查看|总结|查询|解释|为什么|哪些|什么|空闲|下一个|show|summarize|what|why|when|free|next", text, re.I)
-        write_markers = re.search(r"创建|新增|帮我安排|调整|移动|删除|改到|推迟|提前|create|add|schedule|move|reschedule|delete", text, re.I)
-        if write_markers and not query_markers:
+        if advisor_requires_planner_handoff(text):
             reply = "这是一个会修改任务或计划的操作。我不会在日程顾问中直接执行，已准备转交给任务规划助手生成预览。" if locale == "zh" else "This would change your tasks or plan. I will not execute it in Calendar Advisor; hand it to Task Planner to create a reviewable preview."
             response = {"intent": "planner_handoff", "assistant_mode": "calendar_advisor", "reply": reply, "tasks": [], "handoff_required": True, "handoff_text": text, "read_only": True}
             self.save_chat_turn(user_id, text, reply, "planner_handoff", {"intent": "planner_handoff", "assistant_mode": "calendar_advisor"}, [])
@@ -2334,43 +2327,9 @@ class Store:
         profile = self.ensure_profile(user_id)
         current = self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai")
         tasks = self.list_tasks(user_id)
-        task_map = {str(task.get("id")): task for task in tasks}
         sessions = self.list_execution_sessions(user_id)
-        today_sessions = []
-        for session in sessions:
-            try:
-                start = datetime.fromisoformat(str(session.get("planned_start_at") or "").replace("Z", "+00:00"))
-                if start.tzinfo is None:
-                    start = start.replace(tzinfo=current.tzinfo)
-                if start.astimezone(current.tzinfo).date() == current.date() and session.get("status") != "superseded":
-                    task = task_map.get(str(session.get("task_id"))) or {}
-                    today_sessions.append({**session, "task_title": task.get("title") or session.get("task_id")})
-            except (TypeError, ValueError):
-                continue
-        today_sessions.sort(key=lambda item: str(item.get("planned_start_at") or ""))
-        running = next((item for item in today_sessions if item.get("status") == "running"), None)
-        upcoming = next((item for item in today_sessions if item.get("status") in {"ready", "paused"}), None)
-        if locale == "zh":
-            lines = [f"今天共有 {len(today_sessions)} 个执行时段。"]
-            if running:
-                lines.append(f"当前正在进行：{running['task_title']}。")
-            if upcoming:
-                start_label = datetime.fromisoformat(str(upcoming["planned_start_at"]).replace("Z", "+00:00")).astimezone(current.tzinfo).strftime("%H:%M")
-                lines.append(f"下一项：{start_label} {upcoming['task_title']}（{upcoming['status']}）。")
-            if not today_sessions:
-                standalone_today = [task for task in tasks if str(task.get("start_at") or "").startswith(current.date().isoformat())]
-                lines.append(f"当前没有计划 Session；日历中有 {len(standalone_today)} 个独立任务。")
-            reply = "\n".join(lines)
-        else:
-            lines = [f"You have {len(today_sessions)} execution sessions today."]
-            if running:
-                lines.append(f"In progress: {running['task_title']}.")
-            if upcoming:
-                start_label = datetime.fromisoformat(str(upcoming["planned_start_at"]).replace("Z", "+00:00")).astimezone(current.tzinfo).strftime("%H:%M")
-                lines.append(f"Next: {upcoming['task_title']} at {start_label} ({upcoming['status']}).")
-            if not today_sessions:
-                lines.append("There are no planned execution sessions today.")
-            reply = "\n".join(lines)
+        today_sessions = sessions_for_local_date(sessions, tasks, current)
+        reply = fallback_calendar_summary(today_sessions, tasks, current, locale)
         active_plan = self.active_plan(user_id)
         advisor_result = chat_completion([
             {
@@ -2439,40 +2398,15 @@ class Store:
         features["intent"] = intent_decision.intent
         features["intent_decision"] = intent_decision.to_dict()
         intent = intent_decision.intent
-        response = {
-            "intent": intent,
-            "features": features,
-            "reply": "I recorded this information and will use it in later scheduling decisions.",
-            "tasks": [],
-            "context": {
-                "recent_task_count": len(chat_context.get("recent_tasks", [])),
-                "memory_count": len(chat_context.get("retrieved_memories", [])),
-                "embedding_model": "humanos-local-hash-embedding-v1",
-            },
-        }
+        response = initial_planner_response(intent, features, chat_context)
         context_update = self.update_weekly_context_from_chat(user_id, text)
         if context_update:
-            item = context_update["item"]
-            display_day = {
-                "周一": "Monday", "周二": "Tuesday", "周三": "Wednesday", "周四": "Thursday",
-                "周五": "Friday", "周六": "Saturday", "周日": "Sunday",
-            }.get(str(item.get("day")), str(item.get("day") or ""))
-            response["intent"] = "update_weekly_context"
+            response = apply_weekly_context_update(response, context_update, format_clock_hour)
             intent = "update_weekly_context"
-            response["weekly_context"] = context_update["weekly_context"]
-            response["context_event_updated"] = item
-            response["reply"] = (
-                f"Updated “{item.get('title')}” to {display_day} "
-                f"{format_clock_hour(float(item.get('start')))}–{format_clock_hour(float(item.get('end')))}. "
-                + ("This is a routine window. I will preserve it when possible and may shift it by at most 30 minutes for urgent work." if item.get("type") == "recurring_routine" else "This is fixed time. I will not search for another position; I will keep it there, check conflicts, and generate one revised draft plan around it.")
-            )
         followup_tasks = [] if context_update else self.parse_time_followup_for_recent_tasks(user_id, text, chat_context)
         if followup_tasks:
-            response["tasks"] = followup_tasks
-            updates = "; ".join(f"{task.get('title')} → {task.get('due')}" for task in followup_tasks)
-            response["reply"] = f"I understood this as an update to an existing item: {updates}. No duplicate task was created."
+            response = apply_existing_task_updates(response, followup_tasks)
             intent = "reschedule"
-            response["intent"] = intent
         should_parse_tasks = should_parse_task_candidates(
             text,
             intent_decision,
@@ -2593,19 +2527,14 @@ class Store:
             r"(第\s*[一二两三四五六七八九\d]+\s*个?|这个|那个|改成|变成|调整到|移到|挪到|提前到|推迟到)",
             text,
         )
-        strict_change = re.search(r"(改成|改为|变成|调整到|移到|挪到|提前到|推迟到|\bchange\b|\bmove\b|\breschedule\b)", text, re.I)
-        if not strict_change:
+        if not is_explicit_change_request(text):
             return []
         ordinal_reference = re.search(r"第\s*([一二两三四五六七八九\d]+)\s*个?", text)
-        exact_title_matches = [
-            index for index, task in enumerate(recent_tasks)
-            if str(task.get("title") or "").strip()
-            and str(task.get("title") or "").strip().lower() in text.lower()
-        ]
+        exact_title_matches = exact_task_reference_indexes(text, recent_tasks)
         # Modification requires a unique identity reference. Words such as
         # "this/that", shared keywords, vector similarity, or a matching due
         # time are never sufficient to select an existing Task.
-        if not ordinal_reference and len(exact_title_matches) != 1:
+        if not has_unique_task_identity(text, recent_tasks):
             return []
         timed_action_parts = [
             part

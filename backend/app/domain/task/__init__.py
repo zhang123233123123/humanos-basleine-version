@@ -7,6 +7,7 @@ from .models import ParsedTask, ParsedTaskBatch
 from .update import TaskPatchDecision, decide_task_patch, status_after_schedule_change
 from .validator import validate_enriched_task
 from .boundary_validator import validate_task_candidates
+from .change_policy import exact_task_reference_indexes, has_unique_task_identity, is_explicit_change_request, matching_context_item
 
 __all__ = [
     "ParsedTask",
@@ -27,4 +28,8 @@ __all__ = [
     "status_after_schedule_change",
     "validate_enriched_task",
     "validate_task_candidates",
+    "is_explicit_change_request",
+    "exact_task_reference_indexes",
+    "has_unique_task_identity",
+    "matching_context_item",
 ]
