@@ -3565,10 +3565,11 @@ class Store:
         week_id = str(payload.get("week_id") or profile.get("active_week_id") or iso_week_id(timezone_name=timezone_name))
         timestamp = now_ms()
         with self.connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM plans WHERE id=? AND user_id=?",
-                (plan_id,user_id),
-            ).fetchone() if plan_id else None
+            from app.repositories import ExecutionSessionRepository, PlanRepository
+
+            plans = PlanRepository(conn)
+            execution_sessions = ExecutionSessionRepository(conn)
+            row = plans.get_for_user(plan_id=plan_id, user_id=user_id) if plan_id else None
             if row and row["plan_status"] == "confirmed":
                 result = from_json(row["plan_json"], {})
                 return {
@@ -3582,15 +3583,16 @@ class Store:
                     },
                 }
             if not row:
-                max_row = conn.execute(
-                    "SELECT COALESCE(MAX(plan_revision),0) AS revision FROM plans WHERE user_id=? AND week_id=?",
-                    (user_id,week_id),
-                ).fetchone()
-                revision = int(max_row["revision"] or 0) + 1
+                revision = plans.next_revision(user_id=user_id, week_id=week_id)
                 plan_id = new_id("plan")
-                conn.execute(
-                    "INSERT INTO plans (id,user_id,week_id,plan_revision,plan_status,request_id,plan_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                    (plan_id,user_id,week_id,revision,"proposed",payload.get("request_id"),as_json({}),timestamp,timestamp),
+                plans.insert_proposed(
+                    plan_id=plan_id,
+                    user_id=user_id,
+                    week_id=week_id,
+                    revision=revision,
+                    request_id=payload.get("request_id"),
+                    plan_json=as_json({}),
+                    timestamp=timestamp,
                 )
             else:
                 revision = int(row["plan_revision"])
@@ -3603,16 +3605,23 @@ class Store:
                 blocks_by_task.setdefault(str(block.get("task_id")), []).append(block)
                 execution_id = new_id("exec")
                 planned_minutes = int(block.get("planned_work_minutes") or block.get("session_minutes") or round((float(block["end"]) - float(block["start"])) * 60))
-                paused_source = conn.execute(
-                    "SELECT id FROM execution_sessions WHERE user_id=? AND task_id=? AND status='paused' ORDER BY updated_at DESC LIMIT 1",
-                    (user_id, str(block.get("task_id") or "")),
-                ).fetchone()
-                conn.execute(
-                    "INSERT INTO execution_sessions (id,user_id,task_id,block_id,week_id,plan_revision,planned_start_at,planned_end_at,planned_work_minutes,resumed_from_session_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,block_id,plan_revision) DO UPDATE SET planned_start_at=excluded.planned_start_at,planned_end_at=excluded.planned_end_at,planned_work_minutes=excluded.planned_work_minutes,resumed_from_session_id=excluded.resumed_from_session_id,updated_at=excluded.updated_at",
-                    (execution_id, user_id, str(block.get("task_id") or ""), str(block.get("block_id") or execution_id), week_id, revision, str(block.get("start_at") or ""), str(block.get("end_at") or ""), planned_minutes, paused_source["id"] if paused_source else None, "ready", timestamp, timestamp),
+                block_task_id = str(block.get("task_id") or "")
+                paused_source = execution_sessions.latest_paused_for_task(user_id=user_id, task_id=block_task_id)
+                execution_sessions.upsert_ready(
+                    execution_id=execution_id,
+                    user_id=user_id,
+                    task_id=block_task_id,
+                    block_id=str(block.get("block_id") or execution_id),
+                    week_id=week_id,
+                    revision=revision,
+                    planned_start_at=str(block.get("start_at") or ""),
+                    planned_end_at=str(block.get("end_at") or ""),
+                    planned_work_minutes=planned_minutes,
+                    resumed_from_session_id=paused_source["id"] if paused_source else None,
+                    timestamp=timestamp,
                 )
                 if paused_source:
-                    conn.execute("UPDATE execution_sessions SET status='superseded',completion_outcome='continued_in_revision',updated_at=? WHERE id=?", (timestamp, paused_source["id"]))
+                    execution_sessions.mark_continued_in_revision(session_id=paused_source["id"], timestamp=timestamp)
             active_rows = conn.execute(
                 "SELECT * FROM tasks WHERE user_id=? AND week_id=? AND removed_from_week=0 AND status NOT IN ('completed','terminated')",
                 (user_id,week_id),
@@ -3668,21 +3677,27 @@ class Store:
                     "UPDATE plan_edit_episodes SET final_plan_json=?,final_plan_hash=?,canonical_diff_json=?,status='confirmed',confirmed_at=?,updated_at=? WHERE id=? AND user_id=?",
                     (as_json(final_snapshot), final_hash, as_json(canonical_diff), timestamp, timestamp, episode_id, user_id),
                 )
-            conn.execute(
-                "UPDATE plans SET plan_status='superseded',updated_at=? WHERE user_id=? AND week_id=? AND id<>? AND plan_status IN ('confirmed','needs_update','proposed')",
-                (timestamp,user_id,activation.week_id,activation.plan_id),
+            plans.supersede_other_revisions(
+                user_id=user_id,
+                week_id=activation.week_id,
+                active_plan_id=activation.plan_id,
+                timestamp=timestamp,
             )
             # A confirmed revision is the single source of future calendar
             # truth. Keep completed/ended/running history, but retire unstarted
             # and paused Sessions from earlier revisions so they cannot reappear
             # in Now / Up Next after the user confirms a replacement plan.
-            conn.execute(
-                "UPDATE execution_sessions SET status='superseded',completion_outcome=CASE WHEN status='paused' THEN 'replaced_by_revision' ELSE completion_outcome END,updated_at=? WHERE user_id=? AND week_id=? AND plan_revision<>? AND status IN ('ready','paused')",
-                (timestamp, user_id, activation.week_id, activation.revision),
+            execution_sessions.supersede_older_future_sessions(
+                user_id=user_id,
+                week_id=activation.week_id,
+                active_revision=activation.revision,
+                timestamp=timestamp,
             )
-            conn.execute(
-                "UPDATE plans SET plan_status='confirmed',plan_json=?,confirmed_at=?,updated_at=? WHERE id=? AND user_id=?",
-                (as_json(stored),timestamp,timestamp,plan_id,user_id),
+            plans.confirm(
+                plan_id=plan_id,
+                user_id=user_id,
+                plan_json=as_json(stored),
+                timestamp=timestamp,
             )
             conn.execute(
                 "UPDATE profiles SET active_week_id=?,active_plan_revision=?,updated_at=? WHERE user_id=?",
