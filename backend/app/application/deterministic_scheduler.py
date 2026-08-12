@@ -119,10 +119,14 @@ def build_deterministic_plan(
         for item in raw_windows
         if int(item.get("day_index", -1)) in range(7) and float(item.get("end", 0)) > float(item.get("start", 0))
     )
-    occupied: list[tuple[int, int]] = sorted(
-        (_axis(int(item["day_index"]), float(item["start"])), _axis(int(item["day_index"]), float(item["end"])))
+    fixed_constraints = [
+        dict(item)
         for item in context.get("hard_constraints") or []
         if int(item.get("day_index", -1)) in range(7) and float(item.get("end", 0)) > float(item.get("start", 0))
+    ]
+    occupied: list[tuple[int, int]] = sorted(
+        (_axis(int(item["day_index"]), float(item["start"])), _axis(int(item["day_index"]), float(item["end"])))
+        for item in fixed_constraints
     )
     available_segments = [WeeklySegment(start, end) for start, end in windows]
     occupied_segments = [WeeklySegment(start, end) for start, end in occupied]
@@ -137,6 +141,32 @@ def build_deterministic_plan(
         and _remaining_minutes(task) > 0
     }
     blocks: list[dict[str, Any]] = []
+    for index, item in enumerate(fixed_constraints):
+        start = _axis(int(item["day_index"]), float(item["start"]))
+        end = _axis(int(item["day_index"]), float(item["end"]))
+        blocks.append({
+            "block_id": str(item.get("id") or item.get("context_id") or f"fixed-event-{index}"),
+            "source_id": str(item.get("id") or item.get("context_id") or "") or None,
+            "task_id": str(item.get("task_id") or "") or None,
+            "title": str(item.get("label") or item.get("title") or "Fixed event"),
+            "day_index": int(item["day_index"]),
+            "start": float(item["start"]),
+            "end": float(item["end"]),
+            "start_at": (week_start + timedelta(minutes=start)).isoformat(),
+            "end_at": (week_start + timedelta(minutes=end)).isoformat(),
+            "week_start_minute": start,
+            "week_end_minute": end,
+            "kind": "fixed_event",
+            "mode": "protected",
+            "movable": False,
+            "session_minutes": end - start,
+            "planned_work_minutes": 0,
+            "constraint_evidence": ["User-provided fixed event on the weekly timeline"],
+            "state_scope": "weekly_hard_constraint",
+            "week_id": week_id,
+            "plan_status": "proposed",
+            "scheduler": "python_timeline_v2",
+        })
     allocated: dict[str, int] = {task_id: 0 for task_id in active_tasks}
     task_end: dict[str, int] = {}
 
