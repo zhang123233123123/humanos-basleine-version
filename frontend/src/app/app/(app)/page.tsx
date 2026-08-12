@@ -754,7 +754,6 @@ function AppContent({
       const turn = job.result
       const data = { turn }
       if (turn?.schedule_decision) {
-        setActiveEvent(null)
         setPreviewTasks([])
         setRightOpen(true)
         await refetchEvents(currentStart, currentEnd)
@@ -809,9 +808,8 @@ function AppContent({
             createRequestId: task.create_request_id || `task-import-${task.id || `${Date.now()}-${index}`}`,
           }
         })
-        // New AI results must replace any previously selected task detail so
-        // the preview list and its bulk-confirm action are immediately visible.
-        setActiveEvent(null)
+        // Background parsing must not dismiss a task the user is inspecting.
+        // The preview list becomes visible after the user explicitly returns.
         setPreviewTasks(allPreviewTasks)
         setRightOpen(true)
       }
