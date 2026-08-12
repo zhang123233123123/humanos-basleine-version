@@ -1056,7 +1056,6 @@ class Store:
         self.start_background_job(job_id)
         return self.get_background_job(user_id, job_id) or {}
 
-    def get_background_job(self, user_id: str, job_id: str) -> dict | None:
     def request_replan(self, user_id: str, *, scope: str, trigger: str, affected_task_ids: list[str] | None = None, week_id: str | None = None) -> dict:
         """Queue a Plan Revision without mutating the confirmed calendar."""
         profile = self.ensure_profile(user_id)
