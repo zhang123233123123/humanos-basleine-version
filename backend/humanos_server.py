@@ -5860,25 +5860,20 @@ class Store:
             for block in task_sessions:
                 block["session_count"] = counts.get(block["task_id"], 1)
             fit_scores = []
+            from app.domain.capacity import capacity_penalty, validate_capacity_assessment
+
             capacity_fit_counts = {"ideal": 0, "acceptable": 0, "risky": 0, "unsuitable": 0}
             daily_load = {day: sum(block["session_minutes"] for block in task_sessions if block["day_index"] == day) for day in range(7)}
             for block in task_sessions:
                 level = (demand_map.get(block["task_id"]) or {}).get("level", "medium")
                 preferred = low_start if level == "low" else deep_start
                 fit_scores.append(max(0.0, 1.0 - abs(block["start"] - preferred) / 6.0))
-                capacity_fit = str(block.get("capacity_fit") or "acceptable").lower()
-                if capacity_fit not in capacity_fit_counts:
-                    violations.append({"type": "invalid_capacity_fit", "task_id": block.get("task_id"), "capacity_fit": capacity_fit})
-                    capacity_fit = "unsuitable"
-                    block["capacity_fit"] = capacity_fit
-                capacity_evidence = [str(item).strip() for item in (block.get("capacity_evidence") or []) if str(item).strip()]
-                if not capacity_evidence:
-                    violations.append({"type": "missing_capacity_evidence", "task_id": block.get("task_id")})
-                if capacity_fit == "risky" and not str(block.get("capacity_tradeoff") or "").strip():
-                    violations.append({"type": "missing_capacity_tradeoff", "task_id": block.get("task_id")})
-                if capacity_fit == "unsuitable":
-                    violations.append({"type": "unsuitable_capacity_assignment", "task_id": block.get("task_id")})
-                capacity_fit_counts[capacity_fit] += 1
+                assessment, capacity_violations = validate_capacity_assessment(block)
+                block["capacity_fit"] = assessment.level
+                block["capacity_evidence"] = list(assessment.evidence)
+                block["capacity_tradeoff"] = assessment.tradeoff
+                violations.extend(capacity_violations)
+                capacity_fit_counts[assessment.level] += 1
             active_loads = [value for value in daily_load.values() if value] or [0]
             mean_load = sum(active_loads) / len(active_loads)
             load_variance = sum((value - mean_load) ** 2 for value in active_loads) / len(active_loads)
@@ -5889,23 +5884,19 @@ class Store:
             )
             remaining_total = sum(item["remaining_minutes"] for item in unscheduled)
             cognitive_fit = sum(fit_scores) / len(fit_scores) if fit_scores else 1.0
-            capacity_penalty = (
-                capacity_fit_counts["acceptable"] * 8
-                + capacity_fit_counts["risky"] * 40
-                + capacity_fit_counts["unsuitable"] * 200
-            )
+            candidate_capacity_penalty = capacity_penalty(capacity_fit_counts)
             metrics = {
                 "remaining_minutes": remaining_total,
                 "deadline_risk_minutes": remaining_total,
                 "cognitive_fit_score": round(cognitive_fit, 3),
                 "capacity_fit_counts": capacity_fit_counts,
-                "capacity_penalty": capacity_penalty,
+                "capacity_penalty": candidate_capacity_penalty,
                 "daily_load_variance": round(load_variance, 2),
                 "daily_peak_minutes": max(active_loads),
                 "context_switch_count": context_switches,
                 "fragmentation_score": 0.0,
                 "hard_violation_count": len(violations),
-                "total_score": round(remaining_total * 1000 + len(violations) * 100000 + capacity_penalty + (1 - cognitive_fit) * 120 + load_variance * 0.02 + context_switches * 5, 2),
+                "total_score": round(remaining_total * 1000 + len(violations) * 100000 + candidate_capacity_penalty + (1 - cognitive_fit) * 120 + load_variance * 0.02 + context_switches * 5, 2),
             }
             validated.append({
                 "id": candidate_id,
