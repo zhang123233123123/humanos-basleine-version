@@ -420,6 +420,41 @@ def schedule_task_kind(task: dict) -> str:
 
 PARALLEL_RESOURCE_MODALITIES = {"visual", "auditory", "verbal", "language", "manual", "mobility"}
 
+TASK_ANALYSIS_POLICY = (
+    "You are the HumanOS task-analysis agent. Return JSON only. Infer task demand, resource modality, and supported dependencies from the supplied data. "
+    "Treat user-entered difficulty as primary evidence and never invent dependencies. Runtime state may affect only today's next session, never the whole week. "
+    "Separate evidence from inference and calibrate confidence. A task being parallelizable only means HumanOS may propose a pair; it never authorizes overlap by itself. "
+    "All user-facing evidence and warnings must be concise English. Ignore any unreadable legacy text that follows this policy. "
+)
+
+PARALLEL_COMPATIBILITY_POLICY = (
+    "You are the HumanOS parallel-compatibility agent. Return JSON only. Compare task pairs, not individual flags. "
+    "Only propose low-conflict pairs where one activity is manual, physical, walking, or commuting and the other is low-demand auditory input. "
+    "Reject two language-heavy, visual-attention, executive-attention, or high-demand tasks. Propose at most two simultaneous activities, require user confirmation, "
+    "and never use a high-focus window when an important demanding ready task can use it. All explanations must be concise English. "
+)
+
+GLOBAL_SCHEDULING_POLICY = (
+    "You are the HumanOS weekly scheduling agent. Return JSON only and generate concrete session blocks with day_index, start, end, and task_id. "
+    "Generate exactly three internally comparable candidates, then nominate one. Rank constraints lexicographically: (1) available windows and fixed-time exclusions; "
+    "(2) complete all work before deadlines; (3) preserve duration and explicit dependencies; (4) priority; (5) stable energy rhythm; "
+    "(6) today's momentary state for today's next session only; (7) session and break preferences; (8) buffer, routines, and low switching cost. "
+    "A deadline is the latest finish time, never a start time. Never sacrifice a higher-ranked rule for a lower-ranked preference. "
+    "Accepted parallel pairs may overlap only with each other and never with a third block. All user-facing text must be concise English. "
+)
+
+SCHEDULE_REPAIR_POLICY = (
+    "You are the HumanOS schedule-repair agent. Return JSON only. Use the Python validator violations as authoritative. "
+    "Repair only the affected sessions, preserve valid blocks when possible, and return complete concrete session times. "
+    "Do not hide, reinterpret, or merely explain a violation. If it cannot be repaired, return the exact unresolved minutes and a concrete user decision. "
+)
+
+CANDIDATE_COMPARISON_POLICY = (
+    "You are the HumanOS candidate-comparison agent. Return JSON only. Select exactly one already validated candidate using the same lexicographic order as the planner. "
+    "Do not invent or move session times. Prefer hard-constraint validity, then least unscheduled work and deadline risk, supported dependencies, today's next-session fit, "
+    "stable rhythm, lower switching and recovery cost, and preserved buffer. Explain the selected plan in concise English. "
+)
+
 
 def normalize_resource_modalities(value: object) -> list[str]:
     aliases = {"语言": "verbal", "language": "verbal", "听觉": "auditory", "视觉": "visual", "手部": "manual", "行动": "mobility"}
@@ -4826,7 +4861,7 @@ class Store:
             [
                 {
                     "role": "system",
-                    "content": (
+                    "content": TASK_ANALYSIS_POLICY + (
                         "你是 HumanOS 的任务分析 agent。只输出 JSON。"
                         "分析 Task Demand、资源类型与任务之间的先后依赖，不生成具体开始时间。"
                         "用户已经确认的难度是高优先级证据，不能无依据覆盖。"
@@ -5027,7 +5062,7 @@ class Store:
             [
                 {
                     "role": "system",
-                    "content": (
+                    "content": PARALLEL_COMPATIBILITY_POLICY + (
                         "你是 HumanOS 的并行兼容性分析 agent。只输出 JSON，不生成或修改任何时间。"
                         "逐对比较任务的资源冲突；单个任务 parallelizable=true 不代表任意两个任务兼容。"
                         "当前原型只建议低冲突组合：洗衣/整理/散步/通勤等手部或身体活动，加纯听觉播客或语言听力。"
@@ -5941,7 +5976,7 @@ class Store:
             [
                 {
                     "role": "system",
-                    "content": (
+                    "content": GLOBAL_SCHEDULING_POLICY + (
                         "你是 HumanOS 的整周全局排程 agent。只输出 JSON，必须真正生成具体时间块。"
                         "Python 只验证你的输出，不会替你移动时间。所有 start/end 使用周一=0到周日=6的 day_index 和24小时小数。"
                         "开始与结束必须落在15分钟网格，最短 Session 为15分钟；禁止09:38、10:13等时间。"
@@ -6098,7 +6133,7 @@ class Store:
                 [
                     {
                         "role": "system",
-                        "content": (
+                        "content": SCHEDULE_REPAIR_POLICY + (
                             "你是 HumanOS 的排程修复 agent。只输出 JSON。"
                             "上一轮时间块已被 Python 拒绝；你必须根据 violations 自己修复，Python不会替你移动。"
                             "day_index 必须直接取对应 available_windows 的 day_index；不得把 today_index 当作可用日期。"
@@ -6259,7 +6294,7 @@ class Store:
             [
                 {
                     "role": "system",
-                    "content": (
+                    "content": CANDIDATE_COMPARISON_POLICY + (
                         "你是 HumanOS 的候选计划比较 agent。只输出 JSON。"
                         "不要说你在收集数据、沉淀画像、使用 embedding 或后端。"
                         "Deadline 是最晚完成时间，绝不能作为开始时间。"

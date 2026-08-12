@@ -13,11 +13,20 @@ import { useTranslation } from '@/i18n/LanguageProvider'
 import { useEvents } from '@/hooks/use-events'
 
 type ContextKind = 'fixed_event' | 'recurring_routine' | 'flexible_activity'
-type ContextItem = { id: string; type: ContextKind; title: string; day: string; start: string; end: string }
+type ContextItem = { id: string; type: ContextKind; title: string; day: string; start: string; end: string; durationMinutes: number }
+type AvailableWindow = { id: string; day: string; start: string; end: string }
 type TaskDraft = { id: string; title: string; due: string; duration: number; priority: string; expected_difficulty: number; dependency: string }
 
 const STORAGE_KEY = 'humanos:onboarding-draft:v2'
 const STEPS = ['context', 'rhythm', 'week', 'tasks'] as const
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] as const
+const MOODS = [
+  { value: 'great', label: '😊 Great' },
+  { value: 'steady', label: '🙂 Okay' },
+  { value: 'flat', label: '😐 Flat' },
+  { value: 'tired', label: '😴 Tired' },
+  { value: 'stressed', label: '😟 Stressed' },
+] as const
 
 function stableId(prefix: string) {
   const uuid = globalThis.crypto?.randomUUID?.()
@@ -25,7 +34,11 @@ function stableId(prefix: string) {
 }
 
 function initialContext(type: ContextKind): ContextItem {
-  return { id: stableId('ctx'), type, title: '', day: 'Monday', start: '09:00', end: '10:00' }
+  return { id: stableId('ctx'), type, title: '', day: 'Monday', start: '', end: '', durationMinutes: 45 }
+}
+
+function initialWindow(): AvailableWindow {
+  return { id: stableId('window'), day: 'Weekdays', start: '', end: '' }
 }
 
 function initialTask(): TaskDraft {
@@ -47,7 +60,7 @@ export default function OnboardingPage() {
   const [sessionMinutes, setSessionMinutes] = useState(45)
   const [breakMinutes, setBreakMinutes] = useState(10)
   const [dayEnergy, setDayEnergy] = useState({ morning: 5, afternoon: 4, evening: 3 })
-  const [availableWindows, setAvailableWindows] = useState('Monday-Sunday 08:00-21:00')
+  const [availableWindows, setAvailableWindows] = useState<AvailableWindow[]>([initialWindow()])
   const [contextItems, setContextItems] = useState<ContextItem[]>([])
   const [keepBuffer, setKeepBuffer] = useState(true)
   const [weeklyGoal, setWeeklyGoal] = useState('')
@@ -64,8 +77,9 @@ export default function OnboardingPage() {
         setFailureReasons(saved.failureReasons || []); setRecentFailure(saved.recentFailure || '')
         setDeepWorkWindow(saved.deepWorkWindow || deepWorkWindow); setLowEnergyWindow(saved.lowEnergyWindow || lowEnergyWindow)
         setSessionMinutes(Number(saved.sessionMinutes) || 45); setBreakMinutes(Number(saved.breakMinutes) || 10)
-        setDayEnergy(saved.dayEnergy || dayEnergy); setAvailableWindows(saved.availableWindows || availableWindows)
-        setContextItems(saved.contextItems || []); setKeepBuffer(saved.keepBuffer !== false); setWeeklyGoal(saved.weeklyGoal || '')
+        setDayEnergy(saved.dayEnergy || dayEnergy)
+        setAvailableWindows(Array.isArray(saved.availableWindows) ? saved.availableWindows : [initialWindow()])
+        setContextItems((saved.contextItems || []).map((item: Partial<ContextItem>) => ({ ...initialContext(item.type || 'fixed_event'), ...item }))); setKeepBuffer(saved.keepBuffer !== false); setWeeklyGoal(saved.weeklyGoal || '')
         setTasks(saved.tasks?.length ? saved.tasks : [initialTask()]); setMomentary(saved.momentary || momentary)
       }
     } catch { localStorage.removeItem(STORAGE_KEY) }
@@ -79,6 +93,7 @@ export default function OnboardingPage() {
   }, [draft, restored])
 
   const patchContext = (id: string, patch: Partial<ContextItem>) => setContextItems((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item))
+  const patchWindow = (id: string, patch: Partial<AvailableWindow>) => setAvailableWindows((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item))
   const patchTask = (id: string, patch: Partial<TaskDraft>) => setTasks((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item))
   const toggleFailure = (value: string) => setFailureReasons((items) => items.includes(value) ? items.filter((item) => item !== value) : [...items, value])
 
@@ -108,7 +123,8 @@ export default function OnboardingPage() {
 
   async function finish() {
     const readyTasks = tasks.filter((task) => task.title.trim())
-    if (!availableWindows.trim() || !weeklyGoal.trim() || readyTasks.length === 0) {
+    const readyWindows = availableWindows.filter((window) => window.start && window.end && window.start < window.end)
+    if (readyWindows.length === 0 || !weeklyGoal.trim() || readyTasks.length === 0) {
       toast.error(t('onboarding.requiredError')); return
     }
     setLoading(true)
@@ -119,7 +135,13 @@ export default function OnboardingPage() {
       const weekResponse = await fetch('/api/weekly-setup/reconcile', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          profile: { ...profilePayload(3), weekly_context: { weekly_goal: weeklyGoal, weekly_available_windows: availableWindows, context_items: contextItems.filter((item) => item.title.trim()), keep_buffer: keepBuffer } },
+          profile: { ...profilePayload(3), weekly_context: {
+            weekly_goal: weeklyGoal,
+            weekly_available_windows: windowsAsText(readyWindows),
+            available_windows: expandAvailableWindows(readyWindows),
+            context_items: normalizeContextItems(contextItems, readyWindows),
+            keep_buffer: keepBuffer,
+          } },
           tasks: readyTasks.map((task) => ({
             title: task.title.trim(),
             due: task.due.trim() || null,
@@ -185,18 +207,18 @@ export default function OnboardingPage() {
         </div>}
 
         {step === 1 && <div className="mt-7 grid gap-6 md:grid-cols-2">
-          <Field label={t('onboarding.deepWorkLabel')}><Input value={deepWorkWindow} onChange={(e) => setDeepWorkWindow(e.target.value)} /></Field>
-          <Field label={t('onboarding.lowEnergyLabel')}><Input value={lowEnergyWindow} onChange={(e) => setLowEnergyWindow(e.target.value)} /></Field>
+          <Field label={t('onboarding.deepWorkLabel')}><TimeRangeInput value={deepWorkWindow} onChange={setDeepWorkWindow} /></Field>
+          <Field label={t('onboarding.lowEnergyLabel')}><TimeRangeInput value={lowEnergyWindow} onChange={setLowEnergyWindow} /></Field>
           <Field label={t('onboarding.sessionLengthLabel')}><NumberChoices value={sessionMinutes} values={[25,45,60,90]} onChange={setSessionMinutes} /></Field>
           <Field label={t('onboarding.breakLengthLabel')}><NumberChoices value={breakMinutes} values={[5,10,15,20]} onChange={setBreakMinutes} /></Field>
           {(['morning','afternoon','evening'] as const).map((period) => <Field key={period} label={t(`onboarding.${period}Energy`)}><input type="range" min="1" max="7" value={dayEnergy[period]} onChange={(e) => setDayEnergy({ ...dayEnergy, [period]: Number(e.target.value) })} className="w-full" /><span className="text-sm font-medium">{dayEnergy[period]}/7</span></Field>)}
         </div>}
 
         {step === 2 && <div className="mt-7 grid gap-6">
-          <Field label={t('onboarding.windowsLabel')}><textarea className="min-h-24 w-full rounded-xl border bg-background p-3 text-sm" value={availableWindows} onChange={(e) => setAvailableWindows(e.target.value)} placeholder={t('onboarding.windowsPlaceholder')} /></Field>
-          <div className="space-y-3">{contextItems.map((item) => <div key={item.id} className="grid gap-2 rounded-xl border bg-[#fafaf6] p-3 md:grid-cols-[150px_1fr_110px_110px_110px_40px]">
+          <div className="space-y-3 rounded-2xl border p-4"><div className="flex items-center justify-between"><div><h3 className="font-medium">When may HumanOS schedule work?</h3><p className="text-xs text-muted-foreground">Choose days and times. Use 24-hour time.</p></div><Button variant="outline" size="sm" onClick={() => setAvailableWindows([...availableWindows, initialWindow()])}><Plus className="mr-1 h-4 w-4" />Time range</Button></div>{availableWindows.map((window) => <div key={window.id} className="grid gap-2 md:grid-cols-[160px_1fr_auto_1fr_40px]"><DaySelect value={window.day} includeGroups onChange={(day) => patchWindow(window.id, { day })} /><Input type="time" value={window.start} onChange={(e) => patchWindow(window.id, { start: e.target.value })} /><span className="self-center text-sm text-muted-foreground">to</span><Input type="time" value={window.end} onChange={(e) => patchWindow(window.id, { end: e.target.value })} /><Button size="icon" variant="ghost" disabled={availableWindows.length === 1} onClick={() => setAvailableWindows((items) => items.filter((entry) => entry.id !== window.id))}><Trash2 className="h-4 w-4" /></Button></div>)}</div>
+          <div className="space-y-3"><div><h3 className="font-medium">What already uses some of that time?</h3><p className="text-xs text-muted-foreground">Cannot move = meetings; Usually around this time = routines; HumanOS may choose the time = flexible activities.</p></div>{contextItems.map((item) => <div key={item.id} className={`grid gap-2 rounded-xl border bg-[#fafaf6] p-3 ${item.type === 'flexible_activity' ? 'md:grid-cols-[180px_1fr_150px_40px]' : 'md:grid-cols-[180px_1fr_140px_1fr_1fr_40px]'}`}>
             <select className="rounded-md border bg-white px-2 text-sm" value={item.type} onChange={(e) => patchContext(item.id, { type: e.target.value as ContextKind })}><option value="fixed_event">{t('onboarding.fixedTime')}</option><option value="recurring_routine">{t('onboarding.routineTime')}</option><option value="flexible_activity">{t('onboarding.flexibleTime')}</option></select>
-            <Input value={item.title} onChange={(e) => patchContext(item.id, { title: e.target.value })} placeholder={t('onboarding.activityName')} /><Input value={item.day} onChange={(e) => patchContext(item.id, { day: e.target.value })} /><Input type="time" value={item.start} onChange={(e) => patchContext(item.id, { start: e.target.value })} /><Input type="time" value={item.end} onChange={(e) => patchContext(item.id, { end: e.target.value })} /><Button size="icon" variant="ghost" onClick={() => setContextItems((items) => items.filter((entry) => entry.id !== item.id))}><Trash2 className="h-4 w-4" /></Button>
+            <Input value={item.title} onChange={(e) => patchContext(item.id, { title: e.target.value })} placeholder={t('onboarding.activityName')} />{item.type === 'flexible_activity' ? <label className="flex items-center gap-2 rounded-md border bg-white px-3"><Input className="border-0 px-0 shadow-none" type="number" min="15" step="15" value={item.durationMinutes} onChange={(e) => patchContext(item.id, { durationMinutes: Number(e.target.value) })} /><span className="text-xs text-muted-foreground">min</span></label> : <><DaySelect value={item.day} includeEveryDay={item.type === 'recurring_routine'} onChange={(day) => patchContext(item.id, { day })} /><Input type="time" value={item.start} onChange={(e) => patchContext(item.id, { start: e.target.value })} /><Input type="time" value={item.end} onChange={(e) => patchContext(item.id, { end: e.target.value })} /></>}<Button size="icon" variant="ghost" onClick={() => setContextItems((items) => items.filter((entry) => entry.id !== item.id))}><Trash2 className="h-4 w-4" /></Button>
           </div>)}<Button variant="outline" onClick={() => setContextItems([...contextItems, initialContext('fixed_event')])}><Plus className="mr-2 h-4 w-4" />{t('onboarding.addActivity')}</Button></div>
           <label className="flex items-center gap-3 rounded-xl border p-4 text-sm"><Checkbox checked={keepBuffer} onCheckedChange={(checked) => setKeepBuffer(checked === true)} /><span><strong>{t('onboarding.bufferLabel')}</strong><span className="block text-muted-foreground">{t('onboarding.bufferHint')}</span></span></label>
         </div>}
@@ -210,11 +232,11 @@ export default function OnboardingPage() {
               <Field label={t('onboarding.deadline')}><Input type="datetime-local" value={task.due} onChange={(e) => patchTask(task.id, { due: e.target.value })} /></Field>
               <Field label={t('onboarding.totalWork')}><div className="w-full"><Input type="number" min="15" step="15" value={task.duration} onChange={(e) => patchTask(task.id, { duration: Number(e.target.value) })} /><p className="mt-1 text-xs text-muted-foreground">{t('onboarding.totalWorkHint')}</p></div></Field>
               <Field label={t('onboarding.priority')}><select className="h-10 w-full rounded-md border bg-white px-3 text-sm" value={task.priority} onChange={(e) => patchTask(task.id, { priority: e.target.value })}><option value="high">{t('taskDialog.priorityHigh')}</option><option value="medium">{t('taskDialog.priorityMedium')}</option><option value="low">{t('taskDialog.priorityLow')}</option></select></Field>
-              <Field label={t('onboarding.difficulty')}><div className="w-full"><Input type="number" min="1" max="10" value={task.expected_difficulty} onChange={(e) => patchTask(task.id, { expected_difficulty: Number(e.target.value) })} /><p className="mt-1 text-xs text-muted-foreground">{t('onboarding.difficultyHint')}</p></div></Field>
+              <Field label={t('onboarding.difficulty')}><div className="flex w-full items-center gap-3"><input className="w-full" type="range" min="1" max="7" value={task.expected_difficulty} onChange={(e) => patchTask(task.id, { expected_difficulty: Number(e.target.value) })} /><span className="min-w-8 text-sm font-medium">{task.expected_difficulty}/7</span></div></Field>
               <Field label={t('onboarding.dependency')}><Input value={task.dependency} onChange={(e) => patchTask(task.id, { dependency: e.target.value })} placeholder={t('onboarding.dependency')} /></Field>
             </div>
           </div>)}</div>
-          <div className="grid gap-4 rounded-xl border p-4 md:grid-cols-4">{(['focus','energy','stress'] as const).map((key) => <Field key={key} label={t(`onboarding.${key}`)}><input type="range" min="1" max="7" value={momentary[key]} onChange={(e) => setMomentary({ ...momentary, [key]: Number(e.target.value) })} className="w-full" /><span className="text-sm">{momentary[key]}/7</span></Field>)}<Field label={t('onboarding.mood')}><Input value={momentary.mood} onChange={(e) => setMomentary({ ...momentary, mood: e.target.value })} /></Field></div>
+          <div className="grid gap-4 rounded-xl border p-4 md:grid-cols-4">{(['focus','energy','stress'] as const).map((key) => <Field key={key} label={t(`onboarding.${key}`)}><input type="range" min="1" max="7" value={momentary[key]} onChange={(e) => setMomentary({ ...momentary, [key]: Number(e.target.value) })} className="w-full" /><span className="text-sm">{momentary[key]}/7</span></Field>)}<Field label={t('onboarding.mood')}><select className="h-10 w-full rounded-md border bg-white px-3 text-sm" value={momentary.mood} onChange={(e) => setMomentary({ ...momentary, mood: e.target.value })}>{MOODS.map((mood) => <option key={mood.value} value={mood.value}>{mood.label}</option>)}</select></Field></div>
         </div>}
 
         <div className="mt-8 flex justify-between border-t pt-5"><Button variant="outline" disabled={step === 0 || loading} onClick={() => setStep(step - 1)}>{t('onboarding.back')}</Button>{step < 3 ? <Button disabled={loading} onClick={() => saveProgress(step + 1)}>{loading ? t('onboarding.saving') : t('onboarding.next')}</Button> : <Button disabled={loading} onClick={finish}>{loading ? t('onboarding.buildingPlan') : t('onboarding.finish')}</Button>}</div>
@@ -225,3 +247,45 @@ export default function OnboardingPage() {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="grid gap-2 text-sm font-medium">{label}<div className="flex items-center gap-3 font-normal">{children}</div></label> }
 function NumberChoices({ value, values, onChange }: { value: number; values: number[]; onChange: (value: number) => void }) { return <div className="flex flex-wrap gap-2">{values.map((item) => <button type="button" key={item} onClick={() => onChange(item)} className={`rounded-lg border px-3 py-2 text-sm ${value === item ? 'border-primary bg-primary/10 text-primary' : ''}`}>{item} min</button>)}</div> }
+
+function TimeRangeInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const [start = '', end = ''] = value.split('-')
+  return <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-2"><Input type="time" value={start} onChange={(event) => onChange(`${event.target.value}-${end}`)} /><span className="text-muted-foreground">to</span><Input type="time" value={end} onChange={(event) => onChange(`${start}-${event.target.value}`)} /></div>
+}
+
+function DaySelect({ value, onChange, includeGroups = false, includeEveryDay = false }: { value: string; onChange: (value: string) => void; includeGroups?: boolean; includeEveryDay?: boolean }) {
+  return <select className="h-10 rounded-md border bg-white px-3 text-sm" value={value} onChange={(event) => onChange(event.target.value)}>{includeGroups && <option value="Weekdays">Weekdays</option>}{includeGroups && <option value="Weekend">Weekend</option>}{includeEveryDay && <option value="Every day">Every day</option>}{DAYS.map((day) => <option key={day} value={day}>{day}</option>)}</select>
+}
+
+function clockToHour(value: string) {
+  const [hours, minutes] = value.split(':').map(Number)
+  return hours + minutes / 60
+}
+
+function selectedDayIndexes(day: string) {
+  if (day === 'Weekdays') return [0, 1, 2, 3, 4]
+  if (day === 'Weekend') return [5, 6]
+  if (day === 'Every day') return [0, 1, 2, 3, 4, 5, 6]
+  const index = DAYS.indexOf(day as typeof DAYS[number])
+  return index >= 0 ? [index] : []
+}
+
+function expandAvailableWindows(windows: AvailableWindow[]) {
+  return windows.flatMap((window) => selectedDayIndexes(window.day).map((dayIndex) => ({ id: `${window.id}_${dayIndex}`, day_index: dayIndex, start: clockToHour(window.start), end: clockToHour(window.end), source: 'user_selected' })))
+}
+
+function windowsAsText(windows: AvailableWindow[]) {
+  return windows.map((window) => `${window.day} ${window.start}-${window.end}`).join('; ')
+}
+
+function normalizeContextItems(items: ContextItem[], windows: AvailableWindow[]) {
+  const availableDays = Array.from(new Set(expandAvailableWindows(windows).map((window) => window.day_index)))
+  const normalized: Array<Record<string, unknown>> = []
+  items.filter((item) => item.title.trim()).forEach((item) => {
+    const days = item.type === 'flexible_activity' ? availableDays : selectedDayIndexes(item.day)
+    const common = { id: item.id, type: item.type, category: item.type, title: item.title.trim(), day: item.type === 'flexible_activity' ? 'Any available day' : item.day, days, confirmed: true, confidence: 'high', source: 'onboarding' }
+    if (item.type === 'flexible_activity') normalized.push({ ...common, duration_minutes: Math.max(15, Number(item.durationMinutes) || 45), occurrence_mode: 'once_this_week' })
+    else if (item.start && item.end && item.start < item.end) normalized.push({ ...common, start: clockToHour(item.start), end: clockToHour(item.end), duration_minutes: Math.round((clockToHour(item.end) - clockToHour(item.start)) * 60), shift_minutes: item.type === 'recurring_routine' ? 30 : 0 })
+  })
+  return normalized
+}
