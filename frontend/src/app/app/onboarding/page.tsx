@@ -166,16 +166,16 @@ export default function OnboardingPage() {
     finally { setLoading(false) }
   }
 
-  const selectClass = (selected: boolean) => `rounded-xl border px-3 py-2 text-sm transition ${selected ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:border-primary/50'}`
+  const selectClass = (selected: boolean) => `rounded-xl border px-3 py-2 text-sm font-medium transition ${selected ? 'border-[#165dff] bg-[#edf3ff] text-[#165dff]' : 'border-[#59616c] bg-white text-[#25302a] hover:border-[#315b42] hover:bg-[#f4f7f2]'}`
 
   return <main className="h-full min-h-0 overflow-y-auto overscroll-contain bg-[radial-gradient(circle_at_top_left,_#eef5e8,_transparent_38%),linear-gradient(135deg,#faf8f1,#f0f4ef)] p-4 pb-12 md:p-10 md:pb-16">
-    <Card className="mx-auto max-w-4xl border-[#d5d7cc] bg-white/90 shadow-xl shadow-[#52614c]/10">
+    <Card className="onboarding-light mx-auto max-w-4xl border-[#d5d7cc] bg-white/95 text-[#17211b] shadow-xl shadow-[#52614c]/10 [&_input]:border-[#aeb6ad] [&_input]:bg-white [&_input]:text-[#17211b] [&_input]:placeholder:text-[#778279] [&_select]:border-[#aeb6ad] [&_select]:bg-white [&_select]:text-[#17211b] [&_textarea]:border-[#aeb6ad] [&_textarea]:bg-white [&_textarea]:text-[#17211b] [&_textarea]:placeholder:text-[#778279]">
       <CardHeader className="border-b border-[#e3e3da]">
         <div className="flex items-start justify-between gap-4"><div><CardTitle className="text-2xl">{t('onboarding.title')}</CardTitle><p className="mt-2 text-sm text-muted-foreground">{t('onboarding.subtitle')}</p></div><Badge variant="secondary">{t(`onboarding.step${step + 1}of`)}</Badge></div>
         <div className="mt-5 grid grid-cols-4 gap-2">{STEPS.map((item, index) => <div key={item} className={`h-1.5 rounded-full ${index <= step ? 'bg-[#315b42]' : 'bg-[#e5e5dd]'}`} />)}</div>
       </CardHeader>
       <CardContent className="p-6 md:p-8">
-        <h2 className="text-xl font-semibold">{t(`onboarding.step${step + 1}Title`)}</h2><p className="mt-1 text-sm text-muted-foreground">{t(`onboarding.step${step + 1}Desc`)}</p>
+        <h2 className="text-xl font-semibold text-[#17211b]">{t(`onboarding.step${step + 1}Title`)}</h2><p className="mt-1 text-sm text-[#617067]">{t(`onboarding.step${step + 1}Desc`)}</p>
 
         {step === 0 && <div className="mt-7 grid gap-7">
           <Field label={t('onboarding.roleLabel')}><div className="flex flex-wrap gap-2">{['research_student','coursework_student','thesis_stage','project_stage'].map((value, index) => <button key={value} className={selectClass(role === value)} onClick={() => setRole(value)}>{t(`onboarding.role${['Graduate','Coursework','Thesis','Project'][index]}`)}</button>)}</div></Field>
@@ -223,5 +223,5 @@ export default function OnboardingPage() {
   </main>
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="grid gap-2 text-sm font-medium">{label}<div className="flex items-center gap-3 font-normal">{children}</div></label> }
+function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="grid gap-2 text-sm font-medium text-[#25302a]">{label}<div className="flex items-center gap-3 font-normal text-[#25302a]">{children}</div></label> }
 function NumberChoices({ value, values, onChange }: { value: number; values: number[]; onChange: (value: number) => void }) { return <div className="flex flex-wrap gap-2">{values.map((item) => <button type="button" key={item} onClick={() => onChange(item)} className={`rounded-lg border px-3 py-2 text-sm ${value === item ? 'border-primary bg-primary/10 text-primary' : ''}`}>{item} min</button>)}</div> }
