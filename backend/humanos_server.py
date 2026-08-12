@@ -5694,6 +5694,9 @@ class Store:
                         "This time block was proposed by the DeepSeek global scheduling prompt.",
                         str(raw_block.get("reason") or "The model did not provide an additional reason."),
                     ],
+                    "capacity_fit": str(raw_block.get("capacity_fit") or "acceptable"),
+                    "capacity_evidence": [str(item) for item in (raw_block.get("capacity_evidence") or []) if str(item).strip()],
+                    "capacity_tradeoff": str(raw_block.get("capacity_tradeoff") or "").strip() or None,
                     "state_scope": "ai_global_weekly_plan",
                     **parallel_fields,
                 })
@@ -5855,11 +5858,17 @@ class Store:
             for block in task_sessions:
                 block["session_count"] = counts.get(block["task_id"], 1)
             fit_scores = []
+            capacity_fit_counts = {"ideal": 0, "acceptable": 0, "risky": 0, "unsuitable": 0}
             daily_load = {day: sum(block["session_minutes"] for block in task_sessions if block["day_index"] == day) for day in range(7)}
             for block in task_sessions:
                 level = (demand_map.get(block["task_id"]) or {}).get("level", "medium")
                 preferred = low_start if level == "low" else deep_start
                 fit_scores.append(max(0.0, 1.0 - abs(block["start"] - preferred) / 6.0))
+                capacity_fit = str(block.get("capacity_fit") or "acceptable").lower()
+                if capacity_fit not in capacity_fit_counts:
+                    capacity_fit = "acceptable"
+                    block["capacity_fit"] = capacity_fit
+                capacity_fit_counts[capacity_fit] += 1
             active_loads = [value for value in daily_load.values() if value] or [0]
             mean_load = sum(active_loads) / len(active_loads)
             load_variance = sum((value - mean_load) ** 2 for value in active_loads) / len(active_loads)
@@ -5870,16 +5879,23 @@ class Store:
             )
             remaining_total = sum(item["remaining_minutes"] for item in unscheduled)
             cognitive_fit = sum(fit_scores) / len(fit_scores) if fit_scores else 1.0
+            capacity_penalty = (
+                capacity_fit_counts["acceptable"] * 8
+                + capacity_fit_counts["risky"] * 40
+                + capacity_fit_counts["unsuitable"] * 200
+            )
             metrics = {
                 "remaining_minutes": remaining_total,
                 "deadline_risk_minutes": remaining_total,
                 "cognitive_fit_score": round(cognitive_fit, 3),
+                "capacity_fit_counts": capacity_fit_counts,
+                "capacity_penalty": capacity_penalty,
                 "daily_load_variance": round(load_variance, 2),
                 "daily_peak_minutes": max(active_loads),
                 "context_switch_count": context_switches,
                 "fragmentation_score": 0.0,
                 "hard_violation_count": len(violations),
-                "total_score": round(remaining_total * 1000 + len(violations) * 100000 + (1 - cognitive_fit) * 120 + load_variance * 0.02 + context_switches * 5, 2),
+                "total_score": round(remaining_total * 1000 + len(violations) * 100000 + capacity_penalty + (1 - cognitive_fit) * 120 + load_variance * 0.02 + context_switches * 5, 2),
             }
             validated.append({
                 "id": candidate_id,
@@ -5974,6 +5990,24 @@ class Store:
                         "deep_work_window": profile.get("deep_work_window"),
                         "low_energy_window": profile.get("low_energy_window"),
                         "runtime_state_today_only": runtime_state,
+                        "capacity_policy": {
+                            "role": "soft_candidate_selection_not_hard_feasibility",
+                            "baseline": {
+                                "preferred_session_minutes": (profile.get("task_preferences") or {}).get("preferred_session_minutes", 45),
+                                "rest_between_tasks_minutes": (profile.get("task_preferences") or {}).get("rest_between_tasks_minutes", 15),
+                                "deep_work_window": profile.get("deep_work_window"),
+                                "low_energy_window": profile.get("low_energy_window"),
+                            },
+                            "current_state": runtime_state,
+                            "fit_levels": ["ideal", "acceptable", "risky", "unsuitable"],
+                            "rules": [
+                                "Compare each task_demand with the user's baseline and current capacity without collapsing the evidence into an unexplained score.",
+                                "Prefer ideal over acceptable, and acceptable over risky, after all hard constraints are satisfied.",
+                                "Use risky only when deadline pressure makes waiting worse; explain the tradeoff and shorten the session or increase recovery where possible.",
+                                "Never use unsuitable unless no complete feasible candidate exists; report it as unscheduled instead.",
+                                "Runtime state changes today's near-term sessions only; it must not rewrite the user's long-term profile.",
+                            ],
+                        },
                         "relevant_learned_patterns": list(profile.get("learned_patterns") or [])[:3],
                         "accepted_parallel_pairs": accepted_parallel_pairs,
                         "accepted_parallel_context_pairs": accepted_parallel_context_pairs,
@@ -6135,7 +6169,7 @@ class Store:
                                     "label": "Repaired global plan",
                                     "rationale": "English explanation of how violations were repaired",
                                     "override_reason": "null or a concrete hard constraint",
-                                    "blocks": [{"task_id": "existing id", "day_index": "0-6", "start": "decimal hour", "end": "decimal hour", "reason": "evidence", "parallel_group_id": "accepted group id or null", "parallel_role": "primary/secondary or null"}],
+                                    "blocks": [{"task_id": "existing id", "day_index": "0-6", "start": "decimal hour", "end": "decimal hour", "reason": "time and priority evidence", "capacity_fit": "ideal/acceptable/risky/unsuitable", "capacity_evidence": ["specific Profile, runtime state, and task-demand evidence"], "capacity_tradeoff": "required when risky", "parallel_group_id": "accepted group id or null", "parallel_role": "primary/secondary or null"}],
                                 }],
                                 "selected_candidate_id": "repaired_global_plan",
                                 "warnings": [],
