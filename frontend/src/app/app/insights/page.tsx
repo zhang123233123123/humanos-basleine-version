@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, BookOpenText, BrainCircuit, Check, CheckCircle2, Database, Loader2, LockKeyhole, Pencil, Search, Sparkles, Trash2, X } from 'lucide-react'
+import { ArrowLeft, BookOpenText, BrainCircuit, Check, CheckCircle2, Database, Loader2, Pencil, Search, Sparkles, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -35,11 +35,12 @@ export default function InsightsPage() {
     setLoading(true)
     try {
       const [patternData, profileData] = await Promise.all([
-        apiRequest<LearningResourceEnvelope<{ patterns: PatternCandidate[] }>>('/api/patterns/candidates'),
+        apiRequest<LearningResourceEnvelope<{ patterns: PatternCandidate[]; learned_patterns?: LearnedPattern[] }>>('/api/patterns/candidates'),
         apiRequest<ResourceEnvelope<{ profile: { learned_patterns?: LearnedPattern[] } }>>('/api/profile'),
       ])
       setCandidates(patternData.data.patterns || [])
-      setLearned((profileData.data.profile.learned_patterns || []).filter((pattern) => pattern.user_confirmed))
+      const learnedPatterns = patternData.data.learned_patterns || profileData.data.profile.learned_patterns || []
+      setLearned(learnedPatterns.filter((pattern) => pattern.active !== false && (pattern.auto_learned || pattern.user_confirmed)))
     } catch (error) {
       toast(error instanceof Error ? error.message : t('insights.loadFailed'))
     } finally {
@@ -59,34 +60,13 @@ export default function InsightsPage() {
     return () => { active = false }
   }, [])
 
-  const promote = async (candidate: PatternCandidate) => {
-    if (candidate.status !== 'candidate' || !candidate.can_suggest_update) return
-    setPromoting(candidate.pattern_label)
-    try {
-      const result = await apiRequest<LearningResourceEnvelope<{ learned_patterns: LearnedPattern[] }>>('/api/patterns/promote', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pattern_label: candidate.pattern_label,
-          evidence_count: candidate.episode_count,
-          user_confirmed: true,
-        }),
-      })
-      setLearned(result.data.learned_patterns.filter((pattern) => pattern.user_confirmed))
-      toast(t('insights.patternConfirmed'))
-    } catch (error) {
-      toast(error instanceof Error ? error.message : t('insights.promoteFailed'))
-    } finally {
-      setPromoting('')
-    }
-  }
-
   const manage = async (action: 'dismiss' | 'forget' | 'edit', patternLabel: string) => {
     const replacement = action === 'edit' ? window.prompt(t('insights.editPrompt'), patternLabel)?.trim() : undefined
     if (action === 'edit' && !replacement) return
     setPromoting(patternLabel)
     try {
       const result = await apiRequest<LearningResourceEnvelope<{ learned_patterns: LearnedPattern[] }>>('/api/patterns/manage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, pattern_label: patternLabel, replacement_label: replacement }) })
-      setLearned((result.data.learned_patterns || []).filter((pattern) => pattern.user_confirmed))
+      setLearned((result.data.learned_patterns || []).filter((pattern) => pattern.active !== false && (pattern.auto_learned || pattern.user_confirmed)))
       if (action === 'dismiss') setCandidates((items) => items.filter((item) => item.pattern_label !== patternLabel))
       toast(t(`insights.${action}Saved`))
     } catch (error) { toast(error instanceof Error ? error.message : t('insights.manageFailed')) }
@@ -124,21 +104,20 @@ export default function InsightsPage() {
 
         <section className="grid gap-6 lg:grid-cols-2">
           <Card className="border-emerald-500/30 bg-emerald-500/5">
-            <CardHeader><div className="mb-2 grid h-10 w-10 place-items-center rounded-xl bg-emerald-500 text-white"><CheckCircle2 className="h-5 w-5" /></div><CardTitle>Confirmed preferences</CardTitle><CardDescription>Patterns you explicitly approved for future plans.</CardDescription></CardHeader>
+            <CardHeader><div className="mb-2 grid h-10 w-10 place-items-center rounded-xl bg-emerald-500 text-white"><CheckCircle2 className="h-5 w-5" /></div><CardTitle>Learned preferences</CardTitle><CardDescription>After three similar observations, HumanOS uses a preference in future plans. You can edit or remove it at any time.</CardDescription></CardHeader>
             <CardContent className="space-y-3">
-              {learned.length === 0 ? <p className="text-sm text-muted-foreground">{t('insights.noConfirmed')}</p> : learned.map((pattern) => (
-                <div key={pattern.pattern_label} className="rounded-xl border bg-background/80 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-medium">{pattern.pattern_label}</p><p className="mt-1 text-xs text-muted-foreground">{t('insights.evidenceCount')}: {pattern.evidence_count}</p></div><Check className="h-5 w-5 text-emerald-600" /></div>{pattern.confirmed_at && <p className="mt-3 text-xs text-muted-foreground">{t('insights.confirmedOn')} {confirmedDate(pattern.confirmed_at)}</p>}<div className="mt-3 flex gap-2"><Button size="sm" variant="outline" onClick={() => void manage('edit', pattern.pattern_label)} disabled={promoting === pattern.pattern_label}><Pencil className="mr-1 h-3.5 w-3.5" />{t('insights.editPattern')}</Button><Button size="sm" variant="ghost" className="text-destructive" onClick={() => void manage('forget', pattern.pattern_label)} disabled={promoting === pattern.pattern_label}><Trash2 className="mr-1 h-3.5 w-3.5" />{t('insights.forgetPattern')}</Button></div></div>
+              {learned.length === 0 ? <p className="text-sm text-muted-foreground">No learned preferences yet. HumanOS will apply a pattern after three similar observations.</p> : learned.map((pattern) => (
+                <div key={pattern.pattern_label} className="rounded-xl border bg-background/80 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-medium">{pattern.pattern_label}</p><p className="mt-1 text-xs text-muted-foreground">Learned from {pattern.evidence_count} similar observations</p></div><Check className="h-5 w-5 text-emerald-600" /></div>{(pattern.learned_at || pattern.confirmed_at) && <p className="mt-3 text-xs text-muted-foreground">Applied since {confirmedDate(pattern.learned_at || pattern.confirmed_at)}</p>}<div className="mt-3 flex gap-2"><Button size="sm" variant="outline" onClick={() => void manage('edit', pattern.pattern_label)} disabled={promoting === pattern.pattern_label}><Pencil className="mr-1 h-3.5 w-3.5" />Edit</Button><Button size="sm" variant="ghost" className="text-destructive" onClick={() => void manage('forget', pattern.pattern_label)} disabled={promoting === pattern.pattern_label}><Trash2 className="mr-1 h-3.5 w-3.5" />Remove</Button></div></div>
               ))}
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader><div className="mb-2 grid h-10 w-10 place-items-center rounded-xl bg-primary text-primary-foreground"><BrainCircuit className="h-5 w-5" /></div><CardTitle>Emerging patterns</CardTitle><CardDescription>Repeated observations HumanOS is still checking. They remain suggestions until you confirm them.</CardDescription></CardHeader>
+            <CardHeader><div className="mb-2 grid h-10 w-10 place-items-center rounded-xl bg-primary text-primary-foreground"><BrainCircuit className="h-5 w-5" /></div><CardTitle>Emerging patterns</CardTitle><CardDescription>Early signals only. They do not affect planning until the same pattern appears three times.</CardDescription></CardHeader>
             <CardContent className="space-y-3">
               {candidates.length === 0 ? <p className="text-sm text-muted-foreground">{t('insights.noCandidates')}</p> : candidates.map((candidate) => {
-                const eligible = candidate.status === 'candidate' && candidate.can_suggest_update
-                const alreadyConfirmed = learned.some((pattern) => pattern.pattern_label === candidate.pattern_label)
-                return <div key={candidate.pattern_label} className="rounded-xl border bg-background/80 p-4"><div className="flex items-start justify-between gap-4"><div><p className="font-medium">{candidate.pattern_label}</p><p className="mt-1 text-xs text-muted-foreground">{candidate.episode_count} {t('insights.episodes')} · {candidate.status}</p></div><span className={`rounded-full px-2.5 py-1 text-[11px] ${eligible ? 'bg-amber-500/15 text-amber-700' : 'bg-muted text-muted-foreground'}`}>{eligible ? t('insights.readyForReview') : t('insights.gatheringEvidence')}</span></div><div className="mt-4 flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-muted-foreground">{eligible ? t('insights.confirmationNotice') : t('insights.moreDaysRequired')}</p><div className="flex gap-2"><Button size="sm" variant="ghost" onClick={() => void manage('dismiss', candidate.pattern_label)} disabled={promoting === candidate.pattern_label}><X className="mr-1 h-3.5 w-3.5" />{t('insights.dismissPattern')}</Button><Button size="sm" disabled={!eligible || alreadyConfirmed || promoting === candidate.pattern_label} onClick={() => promote(candidate)}>{!eligible && <LockKeyhole className="mr-1 h-3.5 w-3.5" />}{alreadyConfirmed ? t('insights.confirmed') : t('insights.confirmPattern')}</Button></div></div></div>
+                const progress = Math.min(candidate.episode_count, 3)
+                return <div key={candidate.pattern_label} className="rounded-xl border bg-background/80 p-4"><div className="flex items-start justify-between gap-4"><div><p className="font-medium">{candidate.pattern_label}</p><p className="mt-1 text-xs text-muted-foreground">Observed {progress} of 3 times</p></div><span className="rounded-full bg-muted px-2.5 py-1 text-[11px] text-muted-foreground">Still observing</span></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${(progress / 3) * 100}%` }} /></div></div>
               })}
             </CardContent>
           </Card>

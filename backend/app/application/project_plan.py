@@ -56,7 +56,10 @@ def project_plan_for_persistence(
         "learned_pattern_labels": [
             item.get("pattern_label")
             for item in (profile.get("learned_patterns") or [])
-            if isinstance(item, dict) and item.get("user_confirmed") and item.get("pattern_label")
+            if isinstance(item, dict)
+            and (item.get("user_confirmed") or item.get("auto_learned"))
+            and item.get("active", True)
+            and item.get("pattern_label")
         ],
     }
 

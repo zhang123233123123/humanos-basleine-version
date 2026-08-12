@@ -3,6 +3,7 @@ export interface PatternCandidate {
   episode_count: number
   status: 'candidate' | 'insufficient_evidence' | string
   can_suggest_update: boolean
+  auto_apply?: boolean
   requires_user_confirmation: boolean
 }
 
@@ -10,6 +11,9 @@ export interface LearnedPattern {
   pattern_label: string
   evidence_count: number
   user_confirmed: boolean
+  auto_learned?: boolean
+  active?: boolean
+  learned_at?: string | number
   confirmed_at?: string | number
 }
 

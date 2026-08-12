@@ -22,6 +22,35 @@ def _rounded_preference(value: Any, default: int, *, minimum: int = 15, maximum:
     return min(max(round(minutes / GRID_MINUTES) * GRID_MINUTES, minimum), maximum)
 
 
+def _active_learned_labels(profile: dict[str, Any]) -> list[str]:
+    """Return only preferences that are currently allowed to affect planning."""
+    return [
+        str(item.get("pattern_label") or "").strip()
+        for item in profile.get("learned_patterns") or []
+        if isinstance(item, dict)
+        and item.get("active", True)
+        and (item.get("auto_learned") is True or item.get("user_confirmed") is True)
+        and str(item.get("pattern_label") or "").strip()
+    ]
+
+
+def _session_minutes_with_learning(base_minutes: int, labels: list[str]) -> tuple[int, list[str]]:
+    """Apply repeated session-length feedback without mutating explicit Profile input."""
+    normalized = {label.casefold() for label in labels}
+    applied: list[str] = []
+    result = base_minutes
+    if "prefers shorter focus sessions" in normalized:
+        result = max(GRID_MINUTES, base_minutes - GRID_MINUTES)
+        applied.append("Prefers shorter focus sessions")
+    elif "prefers longer focus sessions" in normalized:
+        result = min(180, base_minutes + GRID_MINUTES)
+        applied.append("Prefers longer focus sessions")
+    if "demanding tasks benefit from smaller steps" in normalized:
+        result = min(result, 30)
+        applied.append("Demanding tasks benefit from smaller steps")
+    return result, applied
+
+
 def _week_start(week_id: str, timezone_name: str) -> datetime:
     try:
         timezone = ZoneInfo(timezone_name)
@@ -107,7 +136,12 @@ def build_deterministic_plan(
     week_id = str(payload.get("week_id") or profile.get("active_week_id") or (profile.get("weekly_context") or {}).get("week_id") or (now - timedelta(days=now.weekday())).date().isoformat())
     week_start = _week_start(week_id, timezone_name)
     preferences = profile.get("task_preferences") or {}
-    session_minutes = _rounded_preference(preferences.get("preferred_session_minutes"), 45)
+    explicit_session_minutes = _rounded_preference(preferences.get("preferred_session_minutes"), 45)
+    learned_pattern_labels = _active_learned_labels(profile)
+    session_minutes, directly_applied_patterns = _session_minutes_with_learning(
+        explicit_session_minutes,
+        learned_pattern_labels,
+    )
     rest_minutes = _rounded_preference(preferences.get("rest_between_tasks_minutes"), 15, maximum=60)
     context = build_scheduling_context(profile)
     raw_windows = context.get("movable_routine_windows") or context.get("windows") or []
@@ -223,6 +257,7 @@ def build_deterministic_plan(
                     f"Profile focus-session length: {session_minutes} minutes",
                     f"Profile protected rest after session: {rest_minutes} minutes",
                     "Allocated by deterministic Python weekly timeline",
+                    *[f"Auto-learned preference applied: {label}" for label in directly_applied_patterns],
                 ],
                 "state_scope": "weekly_skeleton",
                 "week_id": week_id,
@@ -247,8 +282,8 @@ def build_deterministic_plan(
         "control_mode": "python_scheduled_user_confirmed",
         "explanation": f"Python allocated {len(blocks)} focus sessions on the weekly timeline using {session_minutes}-minute sessions and {rest_minutes}-minute protected breaks. AI analysis is retained for demand, dependency, and soft-risk review.",
         "confidence": {"level": "high" if not unscheduled else "medium", "evidence": ["Profile", "Weekly Context", "Task deadlines", "Task dependencies", "Python timeline allocation"]},
-        "constraint_summary": {**context, "preferred_session_minutes": session_minutes, "rest_minutes": rest_minutes},
-        "scheduler": {"engine": "python_timeline_v1", "grid_minutes": GRID_MINUTES, "session_minutes": session_minutes, "rest_minutes": rest_minutes, "ai_role": "task_analysis_and_soft_review"},
+        "constraint_summary": {**context, "preferred_session_minutes": session_minutes, "rest_minutes": rest_minutes, "learned_patterns_applied": learned_pattern_labels},
+        "scheduler": {"engine": "python_timeline_v1", "grid_minutes": GRID_MINUTES, "session_minutes": session_minutes, "explicit_session_minutes": explicit_session_minutes, "rest_minutes": rest_minutes, "learned_patterns_applied": learned_pattern_labels, "directly_applied_patterns": directly_applied_patterns, "ai_role": "task_analysis_and_soft_review"},
         "task_ids": sorted(active_tasks),
         "week_id": week_id,
     }

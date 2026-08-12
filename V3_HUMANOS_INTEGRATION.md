@@ -29,7 +29,7 @@ Parallel compatibility is evaluated between task pairs. A task-level flag alone 
 - Flexible activities ask only for a name and approximate duration; HumanOS chooses their time inside availability.
 - The draft is confirmed once as a whole. Individual ordinary tasks do not require separate approval.
 - Session-end feedback uses automatically tracked time and shows only outcomes compatible with the real execution state.
-- Insights are grouped into recent observations, emerging patterns, and confirmed preferences. Technical memory search remains available to the backend but is hidden from the normal product view.
+- Insights are grouped into recent observations, emerging patterns, and learned preferences. Three matching episodes automatically activate a preference for future plans; the user can still edit or remove it. Technical memory search remains available to the backend but is hidden from the normal product view.
 
 ## Source of truth
 

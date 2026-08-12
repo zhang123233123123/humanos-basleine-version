@@ -1845,6 +1845,11 @@ class Store:
             chat_context=chat_context,
         ) if parse_tasks_with_agent else None
         prefer_local_parser = self.looks_like_compact_multi_task_list(clean) or bool(self.english_task_segments(clean))
+        if prefer_local_parser:
+            # Explicit lists contain task-local durations and deadlines.  Keep
+            # those spans authoritative instead of accepting a model response
+            # that copied one task's value across the whole list.
+            return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
         explicit_schedule_tasks = [] if typed_tasks else self.parse_explicit_schedule_lines(user_id, clean, create_tasks=create_tasks)
         if explicit_schedule_tasks:
             return explicit_schedule_tasks
@@ -4478,6 +4483,50 @@ class Store:
             updated = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (session_id,)).fetchone()
         return self.execution_session_row(updated)
 
+    def feedback_pattern_label(self, user_id: str, feedback: dict, task: dict) -> str | None:
+        """Turn repeated execution feedback into a meaningful preference label."""
+        explicit = str(feedback.get("pattern_label") or "").strip()
+        if explicit:
+            return explicit
+        parallel = feedback.get("parallel_evaluation") or {}
+        parallel_fit = str(parallel.get("fit") or parallel.get("experience") or parallel.get("interference") or "").lower()
+        if parallel_fit in {"good", "helpful", "low", "low_interference", "worked_well"}:
+            return "Parallel work feels low interference"
+        if parallel_fit in {"bad", "distracting", "high", "high_interference", "not_suitable"}:
+            return "Parallel work causes interference"
+
+        recommendation = feedback.get("recommendation_evaluation") or {}
+        timing_fit = str(recommendation.get("timing_fit") or "").lower()
+        if timing_fit == "too_early":
+            return "Prefers work sessions later than originally suggested"
+        if timing_fit == "too_late":
+            return "Prefers work sessions earlier than originally suggested"
+        length_fit = str(recommendation.get("session_length_fit") or "").lower()
+        if length_fit == "too_long":
+            return "Prefers shorter focus sessions"
+        if length_fit == "too_short":
+            return "Prefers longer focus sessions"
+
+        task_evaluation = feedback.get("task_evaluation") or {}
+        if str(task_evaluation.get("completion") or "").lower() == "no_progress" and int(task_evaluation.get("perceived_difficulty") or 0) >= 6:
+            return "Demanding tasks benefit from smaller steps"
+
+        state = feedback.get("state_evaluation") or {}
+        if timing_fit == "good" and int(state.get("focus_after") or 0) >= 5 and feedback.get("execution_session_id"):
+            with self.connect() as conn:
+                session = conn.execute(
+                    "SELECT planned_start_at FROM execution_sessions WHERE id=? AND user_id=?",
+                    (feedback["execution_session_id"], user_id),
+                ).fetchone()
+            if session and session["planned_start_at"]:
+                try:
+                    hour = datetime.fromisoformat(str(session["planned_start_at"]).replace("Z", "+00:00")).hour
+                    period = "Morning" if hour < 12 else "Afternoon" if hour < 17 else "Evening"
+                    return f"{period} work sessions fit focus well"
+                except ValueError:
+                    pass
+        return None
+
     def save_execution_feedback(self, user_id: str, payload: dict) -> dict:
         """Store three feedback targets separately and preserve the same task identity."""
         task_id = payload["task_id"]
@@ -4595,6 +4644,7 @@ class Store:
                     "UPDATE profiles SET active_plan_revision=NULL,updated_at=? WHERE user_id=?",
                     (feedback["created_at"], user_id),
                 )
+        pattern_label = self.feedback_pattern_label(user_id, {**feedback, "pattern_label": payload.get("pattern_label")}, task)
         self.add_memory(
             user_id=user_id,
             source_type="episodic_memory",
@@ -4608,13 +4658,15 @@ class Store:
             ),
             metadata={
                 "kind": "parallel_execution_episode" if feedback["parallel_evaluation"] else "execution_episode",
-                "eligible_for_pattern": True,
-                "pattern_label": payload.get("pattern_label") or ("parallel_pair_experience" if feedback["parallel_evaluation"] else feedback["trigger"]),
+                "eligible_for_pattern": bool(pattern_label),
+                "pattern_label": pattern_label,
                 "parallel_group_id": (feedback["parallel_evaluation"] or {}).get("parallel_group_id"),
                 "partner_task_ids": (feedback["parallel_evaluation"] or {}).get("partner_task_ids", []),
             },
         )
+        learning_result = self.auto_learn_patterns(user_id)
         feedback["task"] = self.get_task(task_id, user_id)
+        feedback["auto_learned_patterns"] = learning_result.get("newly_learned", [])
         feedback["requires_plan_adjustment"] = requires_plan_adjustment
         feedback["schedule_action"] = schedule_action
         self.log_event(user_id, "execution_feedback_saved", feedback)
@@ -4652,7 +4704,7 @@ class Store:
         return transition
 
     def pattern_candidates(self, user_id: str) -> list[dict]:
-        """Three similar episodes create a candidate; static profile still needs confirmation."""
+        """Return observations that have not yet become active preferences."""
         profile = self.ensure_profile(user_id)
         with self.connect() as conn:
             rows = conn.execute(
@@ -4665,11 +4717,51 @@ class Store:
             [
                 {"metadata": from_json(row["metadata_json"], {}), "created_at": row["created_at"]}
                 for row in rows
+                if from_json(row["metadata_json"], {}).get("eligible_for_pattern") is True
             ],
             timezone_name=profile.get("timezone") or "Asia/Shanghai",
         )
-        dismissed = set((profile.get("research_context") or {}).get("dismissed_pattern_labels") or [])
-        return [{**item, "evidence_role": "profile_learning_evidence", "user_confirmed": False, "plan_write_allowed": False} for item in candidates if item.get("pattern_label") not in dismissed]
+        research = profile.get("research_context") or {}
+        dismissed = set(research.get("dismissed_pattern_labels") or [])
+        suppressed = set(research.get("suppressed_auto_pattern_labels") or [])
+        learned = {
+            item.get("pattern_label")
+            for item in profile.get("learned_patterns") or []
+            if isinstance(item, dict) and item.get("active", True)
+        }
+        return [
+            {**item, "evidence_role": "profile_learning_evidence", "user_confirmed": False, "plan_write_allowed": False}
+            for item in candidates
+            if item.get("pattern_label") not in dismissed | suppressed | learned
+        ]
+
+    def auto_learn_patterns(self, user_id: str) -> dict:
+        """Apply a repeated pattern after three episodes without another prompt."""
+        profile = self.ensure_profile(user_id)
+        from app.domain.profile import promote_automatic_pattern
+
+        eligible = [
+            item for item in self.pattern_candidates(user_id)
+            if item.get("status") == "candidate" and item.get("auto_apply")
+        ]
+        if not eligible:
+            return {"profile": profile, "newly_learned": []}
+        patterns = list(profile.get("learned_patterns") or [])
+        learned_at = now_ms()
+        newly_learned = []
+        for candidate in eligible:
+            patterns = promote_automatic_pattern(
+                patterns,
+                pattern_label=str(candidate["pattern_label"]),
+                evidence_count=int(candidate.get("episode_count") or 0),
+                learned_at=learned_at,
+            )
+            newly_learned.append(str(candidate["pattern_label"]))
+        profile["learned_patterns"] = patterns
+        updated = self.upsert_profile(profile)
+        for label in newly_learned:
+            self.log_event(user_id, "pattern_auto_learned", {"pattern_label": label, "threshold": 3, "applies_to_future_plans": True})
+        return {"profile": updated, "newly_learned": newly_learned}
 
     def promote_pattern(self, user_id: str, payload: dict) -> dict:
         profile = self.ensure_profile(user_id)
@@ -4716,6 +4808,9 @@ class Store:
             if not any(item.get("pattern_label") == label for item in patterns):
                 raise ValueError("confirmed pattern does not exist")
             patterns = [item for item in patterns if item.get("pattern_label") != label]
+            suppressed = set(research.get("suppressed_auto_pattern_labels") or [])
+            suppressed.add(label)
+            research["suppressed_auto_pattern_labels"] = sorted(suppressed)
         else:
             replacement = str(payload.get("replacement_label") or "").strip()
             if not replacement:
@@ -4728,6 +4823,9 @@ class Store:
                     found = True
             if not found:
                 raise ValueError("confirmed pattern does not exist")
+            suppressed = set(research.get("suppressed_auto_pattern_labels") or [])
+            suppressed.add(label)
+            research["suppressed_auto_pattern_labels"] = sorted(suppressed)
         profile["learned_patterns"] = patterns
         profile["research_context"] = research
         updated = self.upsert_profile(profile)
@@ -4887,6 +4985,12 @@ class Store:
                             "deep_work_window": profile.get("deep_work_window"),
                             "low_energy_window": profile.get("low_energy_window"),
                             "weekly_goal": profile.get("weekly_context", {}).get("weekly_goal"),
+                            "active_learned_preferences": [
+                                item for item in profile.get("learned_patterns", [])
+                                if isinstance(item, dict)
+                                and item.get("active", True)
+                                and (item.get("auto_learned") is True or item.get("user_confirmed") is True)
+                            ],
                         },
                         "tasks": [
                             {
@@ -5486,7 +5590,8 @@ class Store:
         with self.schedule_request_lock:
             if cache_key and cache_key in self.schedule_request_cache:
                 return json.loads(json.dumps(self.schedule_request_cache[cache_key]))
-            profile = self.ensure_profile(user_id)
+            # Repeated observations become active before the next plan is built.
+            profile = self.auto_learn_patterns(user_id)["profile"]
             all_tasks = payload.get("tasks") or self.list_tasks(user_id)
             week_id = str(payload.get("week_id") or profile.get("active_week_id") or (profile.get("weekly_context") or {}).get("week_id") or "")
             tasks = [
@@ -5530,6 +5635,12 @@ class Store:
                 "unscheduled_tasks": decision.get("unscheduled_tasks", []),
                 "task_demands": analysis.get("task_demands", []),
                 "dependencies": analysis.get("dependencies", []),
+                "active_learned_preferences": [
+                    item for item in profile.get("learned_patterns", [])
+                    if isinstance(item, dict)
+                    and item.get("active", True)
+                    and (item.get("auto_learned") is True or item.get("user_confirmed") is True)
+                ],
             }
             ai_soft_review = chat_completion([
                 {"role": "system", "content": "Review this Python-generated weekly schedule for soft risks only. Do not change exact times. Return JSON with status, risks, strengths, and user_message. Consider cognitive load, context switching, buffer, deadline pressure, and profile rhythm."},
@@ -6904,7 +7015,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/patterns/candidates" and method == "GET":
                 user_id = query.get("user_id", ["demo"])[0]
                 store.ensure_profile(user_id)
-                self.send_json({"data": {"patterns": store.pattern_candidates(user_id)}, "resources": {"profile": "/api/profile", "memories": "/api/memories/search"}, "meta": {"resource": "pattern_candidates", "aggregate_root": "profile", "read_only": True, "confirmation_required": True, "plan_write_allowed": False}})
+                learning = store.auto_learn_patterns(user_id)
+                self.send_json({"data": {"patterns": store.pattern_candidates(user_id), "learned_patterns": learning["profile"].get("learned_patterns", []), "newly_learned": learning["newly_learned"]}, "resources": {"profile": "/api/profile", "memories": "/api/memories/search"}, "meta": {"resource": "pattern_candidates", "aggregate_root": "profile", "read_only": False, "confirmation_required": False, "auto_apply_threshold": 3, "plan_write_allowed": False}})
                 return
 
             if path == "/api/patterns/promote" and method == "POST":

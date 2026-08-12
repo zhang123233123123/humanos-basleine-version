@@ -8,7 +8,6 @@ from zoneinfo import ZoneInfo
 
 
 CANDIDATE_EPISODE_THRESHOLD = 3
-SUGGEST_UPDATE_DAY_THRESHOLD = 5
 
 
 def build_pattern_candidates(
@@ -40,8 +39,9 @@ def build_pattern_candidates(
                 if len(timestamps) >= CANDIDATE_EPISODE_THRESHOLD
                 else "insufficient_evidence"
             ),
-            "can_suggest_update": len(evidence_days) >= SUGGEST_UPDATE_DAY_THRESHOLD,
-            "requires_user_confirmation": True,
+            "can_suggest_update": len(timestamps) >= CANDIDATE_EPISODE_THRESHOLD,
+            "auto_apply": len(timestamps) >= CANDIDATE_EPISODE_THRESHOLD,
+            "requires_user_confirmation": False,
         })
     return sorted(candidates, key=lambda item: (-item["episode_count"], item["pattern_label"]))
 
@@ -72,5 +72,40 @@ def promote_confirmed_pattern(
             "evidence_count": max(evidence_count, 1),
             "user_confirmed": True,
             "confirmed_at": confirmed_at,
+        })
+    return result
+
+
+def promote_automatic_pattern(
+    learned_patterns: list[dict[str, Any]],
+    *,
+    pattern_label: str,
+    evidence_count: int,
+    learned_at: int,
+) -> list[dict[str, Any]]:
+    """Promote a repeated observation without asking for another confirmation.
+
+    The evidence threshold is enforced by ``build_pattern_candidates``.  The
+    resulting preference remains editable and removable by the user.
+    """
+    label = pattern_label.strip()
+    if not label:
+        raise ValueError("pattern_label is required")
+
+    result = [dict(item) for item in learned_patterns]
+    existing = next((item for item in result if item.get("pattern_label") == label), None)
+    if existing:
+        existing["evidence_count"] = max(int(existing.get("evidence_count") or 0), evidence_count)
+        existing["auto_learned"] = True
+        existing["active"] = True
+        existing.setdefault("learned_at", learned_at)
+    else:
+        result.append({
+            "pattern_label": label,
+            "evidence_count": max(evidence_count, CANDIDATE_EPISODE_THRESHOLD),
+            "user_confirmed": False,
+            "auto_learned": True,
+            "active": True,
+            "learned_at": learned_at,
         })
     return result
