@@ -20,6 +20,10 @@ Rules:
 - Resolve relative dates against the supplied current time and timezone.
 - Return ISO-8601 datetimes with timezone offsets when a date and clock exist.
 - Do not invent missing duration, deadline, priority, or task details.
+- A task must describe an executable action or outcome. Never create a task
+  whose title is only a duration, date, time, deadline label, or priority.
+- Attach metadata phrases such as "three hours", "due Friday", and
+  "high priority" to the task they describe.
 - Priority values are exactly 高, 中, or 低.
 - Record absent required fields in missing_fields.
 """.strip()
@@ -33,6 +37,7 @@ class PydanticAITaskParser:
         current_time: str,
         timezone_name: str,
         chat_context: dict | None = None,
+        validation_feedback: list[str] | None = None,
     ) -> ParsedTaskBatch | None:
         model = build_deepseek_model()
         if model is None:
@@ -42,6 +47,8 @@ class PydanticAITaskParser:
             f"Current time: {current_time}\n"
             f"Timezone: {timezone_name}\n"
             f"Recent context: {chat_context or {}}\n"
+            f"Validation feedback from the previous attempt: {validation_feedback or []}\n"
+            "If feedback is present, correct every listed issue without changing the user's facts.\n"
             f"User input:\n{text}"
         )
         try:

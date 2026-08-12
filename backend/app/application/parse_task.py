@@ -13,12 +13,14 @@ def parse_structured_tasks(
     current_time: str,
     timezone_name: str,
     chat_context: dict | None = None,
+    validation_feedback: list[str] | None = None,
 ) -> list[dict] | None:
     result = PydanticAITaskParser().parse(
         text,
         current_time=current_time,
         timezone_name=timezone_name,
         chat_context=chat_context,
+        validation_feedback=validation_feedback,
     )
     if result is None:
         return None

@@ -10,17 +10,23 @@ function draftDate(weekId: string, dayIndex: number, hour: number) {
 }
 
 async function fetchDraftEvents(): Promise<EventInput[]> {
-  const [planResponse, taskResponse] = await Promise.all([
+  const [planResponse, activeResponse, taskResponse] = await Promise.all([
     fetch('/api/plans/proposed', { cache: 'no-store' }),
+    fetch('/api/plans/active', { cache: 'no-store' }),
     fetch('/api/tasks', { cache: 'no-store' }),
   ])
   if (!planResponse.ok) return []
   const planBody = await planResponse.json()
+  const activeBody = activeResponse.ok ? await activeResponse.json() : {}
   const taskBody = taskResponse.ok ? await taskResponse.json() : {}
   const plan = planBody?.data?.plan
   if (!plan?.week_id || !Array.isArray(plan.plan_patch)) return []
+  const activePlan = activeBody?.data?.plan
+  const blockKey = (block: any) => [block.task_id, block.day_index, block.start, block.end, block.planned_work_minutes || block.session_minutes || 0].join('|')
+  const activeKeys = new Set((activePlan?.plan_patch || []).map(blockKey))
+  const changedBlocks = plan.plan_patch.filter((block: any) => !activeKeys.has(blockKey(block)))
   const titles = new Map<string, string>((taskBody?.data?.tasks || []).map((task: any) => [String(task.id), String(task.title || '')]))
-  return plan.plan_patch.map((block: any, index: number) => ({
+  return changedBlocks.map((block: any, index: number) => ({
     id: `draft-${plan.plan_id}-${block.block_id || index}`,
     title: block.title || titles.get(String(block.task_id)) || (block.task_id ? String(block.task_id) : 'Draft session'),
     start: draftDate(String(plan.week_id), Number(block.day_index || 0), Number(block.start || 0)),

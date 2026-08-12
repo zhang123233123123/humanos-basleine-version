@@ -1823,6 +1823,54 @@ class Store:
             timezone_name=timezone_name,
             chat_context=chat_context,
         ) if parse_tasks_with_agent else None
+        def candidate_errors(tasks: list[dict] | None) -> list[str]:
+            if not tasks:
+                return ["No tasks were returned."]
+            errors: list[str] = []
+            if len(tasks) != expected_count:
+                errors.append(f"Expected {expected_count} independent task(s), but returned {len(tasks)}.")
+            metadata_only = re.compile(
+                r"^\s*(?:"
+                r"(?:大概|约|预计|需要|持续)?\s*(?:\d+(?:\.\d+)?|[一二两三四五六七八九十半]+)\s*(?:分钟|小时|天)|"
+                r"(?:deadline|due|截止(?:日期|时间)?|截止|日期|时间|优先级|高优先级|中优先级|低优先级)"
+                r")\s*[。.!！]?\s*$",
+                re.I,
+            )
+            for index, task in enumerate(tasks):
+                title = str(task.get("title") or "").strip()
+                if not title:
+                    errors.append(f"Task {index + 1} has no title.")
+                elif metadata_only.fullmatch(title):
+                    errors.append(f'Task {index + 1} title "{title}" is metadata, not an executable task.')
+                schedule_type = str(task.get("schedule_type") or task.get("task_type") or "flexible_task")
+                if schedule_type == "fixed_event" and not task.get("start_at"):
+                    errors.append(f"Task {index + 1} is fixed_event but has no start_at.")
+                if schedule_type != "fixed_event" and task.get("start_at") and not task.get("deadline_at"):
+                    errors.append(f"Task {index + 1} is flexible work but incorrectly uses start_at instead of deadline_at.")
+            return errors
+        first_errors = candidate_errors(typed_tasks)
+        if typed_tasks and first_errors and parse_tasks_with_agent:
+            self.log_event(user_id, "task_parse_validation_failed", {
+                "attempt": 1, "errors": first_errors, "text": clean[:500],
+            })
+            retried_tasks = parse_tasks_with_agent(
+                clean,
+                current_time=self.user_clock_now(user_id, timezone_name).isoformat(),
+                timezone_name=timezone_name,
+                chat_context=chat_context,
+                validation_feedback=first_errors,
+            )
+            second_errors = candidate_errors(retried_tasks)
+            if retried_tasks and not second_errors:
+                typed_tasks = retried_tasks
+                self.log_event(user_id, "task_parse_validation_recovered", {
+                    "attempt": 2, "task_count": len(retried_tasks), "text": clean[:500],
+                })
+            else:
+                self.log_event(user_id, "task_parse_validation_failed", {
+                    "attempt": 2, "errors": second_errors, "text": clean[:500],
+                })
+                typed_tasks = None
         prefer_local_parser = self.looks_like_compact_multi_task_list(clean) or bool(self.english_task_segments(clean))
         explicit_schedule_tasks = [] if typed_tasks else self.parse_explicit_schedule_lines(user_id, clean, create_tasks=create_tasks)
         if explicit_schedule_tasks:
@@ -1853,6 +1901,23 @@ class Store:
                 raw_tasks = llm_result.get("tasks") if isinstance(llm_result.get("tasks"), list) else [llm_result]
             else:
                 raw_tasks = []
+            # A single user intent must not be expanded into metadata-shaped
+            # pseudo tasks such as "three hours" or "deadline". The local
+            # parser is deterministic about attaching those fragments to the
+            # preceding task, so prefer it when the model over-splits one
+            # action into multiple objects.
+            if expected_count == 1 and len(raw_tasks) > 1:
+                self.log_event(
+                    user_id,
+                    "task_parse_fallback",
+                    {
+                        "reason": "llm_over_split",
+                        "expected_count": expected_count,
+                        "llm_count": len(raw_tasks),
+                        "text": clean[:500],
+                    },
+                )
+                return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
             payloads = []
             for item in raw_tasks[:8]:
                 if not isinstance(item, dict):
