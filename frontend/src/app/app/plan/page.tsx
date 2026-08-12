@@ -14,6 +14,7 @@ import type { ResourceEnvelope } from '@/lib/contracts/api-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 import { DateTimePicker } from '@/components/ui/date-time-picker'
+import { WeeklyAvailabilityPicker } from '@/components/weekly-availability-picker'
 
 type Stage = 'setup' | 'review'
 
@@ -349,7 +350,7 @@ export default function WeeklyPlanPage() {
               <CardHeader><CardTitle>{t('planning.weekContext')}</CardTitle><CardDescription>{t('planning.weekContextDescription')}</CardDescription></CardHeader>
               <CardContent className="space-y-4">
                 <label className="grid gap-1.5 text-sm"><span>{t('planning.weeklyGoal')}</span><Input value={weeklyGoal} onChange={(event) => setWeeklyGoal(event.target.value)} /></label>
-                <label className="grid gap-1.5 text-sm"><span>{t('planning.availableWindows')}</span><textarea className="min-h-24 rounded-md border bg-background p-3 text-sm" value={availableWindows} onChange={(event) => setAvailableWindows(event.target.value)} /></label>
+                <label className="grid gap-1.5 text-sm"><span>{t('planning.availableWindows')}</span><WeeklyAvailabilityPicker value={availableWindows} onChange={setAvailableWindows} /></label>
                 <label className="grid gap-1.5 text-sm"><span>{t('planning.temporaryConstraints')}</span><textarea className="min-h-24 rounded-md border bg-background p-3 text-sm" value={temporaryConstraints} onChange={(event) => setTemporaryConstraints(event.target.value)} /></label>
                 <label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={keepBuffer} onChange={(event) => setKeepBuffer(event.target.checked)} />{t('planning.keepBuffer')}</label>
               </CardContent>

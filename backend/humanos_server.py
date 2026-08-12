@@ -1862,9 +1862,6 @@ class Store:
             parser=parse_tasks_with_agent,
             record_event=lambda event_type, details: self.log_event(user_id, event_type, details),
         )
-        prefer_local_parser = self.looks_like_compact_multi_task_list(clean) or bool(self.english_task_segments(clean))
-        if prefer_local_parser:
-            return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
         explicit_schedule_tasks = [] if typed_tasks else self.parse_explicit_schedule_lines(user_id, clean, create_tasks=create_tasks)
         if explicit_schedule_tasks:
             return explicit_schedule_tasks
@@ -1910,7 +1907,7 @@ class Store:
                         "text": clean[:500],
                     },
                 )
-                return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
+                return []
             payloads = normalize_parser_items(
                 raw_tasks,
                 source_text=clean,
@@ -1930,11 +1927,11 @@ class Store:
                         "text": clean[:500],
                     },
                 )
-                return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
+                return []
             if payloads:
                 return self.materialize_parsed_tasks(user_id, payloads, parser_name, create_tasks)
 
-        return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
+        return []
 
     def estimated_task_count(self, text: str) -> int:
         compact = re.sub(r"\s+", "", text)

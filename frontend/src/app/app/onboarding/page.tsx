@@ -11,6 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { useEvents } from '@/hooks/use-events'
+import { WeeklyAvailabilityPicker } from '@/components/weekly-availability-picker'
 
 type ContextKind = 'fixed_event' | 'recurring_routine' | 'flexible_activity'
 type ContextItem = { id: string; type: ContextKind; title: string; day: string; start: string; end: string }
@@ -193,7 +194,7 @@ export default function OnboardingPage() {
         </div>}
 
         {step === 2 && <div className="mt-7 grid gap-6">
-          <Field label={t('onboarding.windowsLabel')}><textarea className="min-h-24 w-full rounded-xl border bg-background p-3 text-sm" value={availableWindows} onChange={(e) => setAvailableWindows(e.target.value)} placeholder={t('onboarding.windowsPlaceholder')} /></Field>
+          <Field label={t('onboarding.windowsLabel')}><WeeklyAvailabilityPicker value={availableWindows} onChange={setAvailableWindows} /></Field>
           <div className="space-y-3">{contextItems.map((item) => <div key={item.id} className="grid gap-2 rounded-xl border bg-[#fafaf6] p-3 md:grid-cols-[150px_1fr_110px_110px_110px_40px]">
             <select className="rounded-md border bg-white px-2 text-sm" value={item.type} onChange={(e) => patchContext(item.id, { type: e.target.value as ContextKind })}><option value="fixed_event">{t('onboarding.fixedTime')}</option><option value="recurring_routine">{t('onboarding.routineTime')}</option><option value="flexible_activity">{t('onboarding.flexibleTime')}</option></select>
             <Input value={item.title} onChange={(e) => patchContext(item.id, { title: e.target.value })} placeholder={t('onboarding.activityName')} /><select className="h-10 rounded-md border bg-white px-2 text-sm" value={item.day} onChange={(e) => patchContext(item.id, { day: e.target.value })}>{['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map((day, index) => <option key={day} value={day}>{locale === 'zh' ? ['周一','周二','周三','周四','周五','周六','周日'][index] : day}</option>)}</select><Input type="time" value={item.start} onChange={(e) => patchContext(item.id, { start: e.target.value })} /><Input type="time" value={item.end} onChange={(e) => patchContext(item.id, { end: e.target.value })} /><Button size="icon" variant="ghost" onClick={() => setContextItems((items) => items.filter((entry) => entry.id !== item.id))}><Trash2 className="h-4 w-4" /></Button>
