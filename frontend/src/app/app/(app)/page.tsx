@@ -202,11 +202,14 @@ function TaskInspectorWrapper() {
     if (previewId) removeFromPreviewTasks(previewId)
   }
 
-  const handleDelete = async (task: { id: string }) => {
-    await apiRequest('/api/tasks', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_id: task.id }) })
-    setEvents(useEvents.getState().events.filter((event) => String(event.id) !== task.id))
+  const handleDelete = async (task: { id: string; taskId?: string }) => {
+    const taskId = String(task.taskId || task.id || '').trim()
+    if (!taskId) throw new Error('Task id is required')
+    await apiRequest('/api/tasks', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_id: taskId }) })
+    setEvents(useEvents.getState().events.filter((event) => String((event as any).taskId || event.id) !== taskId))
     setActiveEvent(null)
     await refetchEvents(currentStart, currentEnd)
+    window.dispatchEvent(new CustomEvent('humanos:plan-revision', { detail: { source: 'task-deleted', taskId } }))
     toast('Task deleted. The weekly plan needs regeneration.')
   }
 
@@ -291,12 +294,13 @@ function TaskInspectorWrapper() {
     nextStep?: string
     openQuestions?: string
   }) => {
-    if (!activeEvent?.id) return
+    const taskId = String(activeEvent?.taskId || activeEvent?.id || '').trim()
+    if (!taskId) return
     const result = await apiRequest<PlanResourceEnvelope<{ revision_created: boolean; plan?: PlanDecision; execution_sessions: ExecutionSession[] }>>('/api/plans/adjust-task', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        task_id: activeEvent.id,
+        task_id: taskId,
         start_at: task.start?.toISOString(),
         end_at: task.end?.toISOString(),
         request_id: requestId('task-adjust'),
@@ -359,7 +363,8 @@ function TaskInspectorWrapper() {
     return (
       <TaskInspector
         task={{
-          id: activeEvent.id || activeEvent.uniqueId,
+          id: activeEvent.taskId || activeEvent.id || activeEvent.uniqueId,
+          taskId: activeEvent.taskId,
           title: activeEvent.title,
           status: activeEvent.status,
           priority: activeEvent.priority,

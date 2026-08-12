@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 
 interface TaskDetail {
   id: string
+  taskId?: string
   title: string
   status?: string
   priority?: string
@@ -261,7 +262,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
             <Save className="w-3.5 h-3.5 mr-1" />
             {t('workspace.saveChanges')}
           </Button>
-          {onDelete && <Button variant="outline" size="sm" className="mt-2 h-8 w-full border-destructive/40 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={deleting} onClick={async () => { if (!window.confirm(`Delete “${title}”?`)) return; setDeleting(true); try { await onDelete(buildTask()) } finally { setDeleting(false) } }}><Trash2 className="mr-1 h-3.5 w-3.5" />{deleting ? 'Deleting...' : 'Delete task'}</Button>}
+          {onDelete && <Button variant="outline" size="sm" className="mt-2 h-8 w-full border-destructive/40 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={deleting} onClick={async () => { if (!window.confirm(`Delete “${title}”?`)) return; setDeleting(true); try { await onDelete(buildTask()) } catch (error) { toast.error(error instanceof Error ? error.message : 'Failed to delete task') } finally { setDeleting(false) } }}><Trash2 className="mr-1 h-3.5 w-3.5" />{deleting ? 'Deleting...' : 'Delete task'}</Button>}
         </div>
       )}
 
