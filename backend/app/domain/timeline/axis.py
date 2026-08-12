@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import math
 
 from .normalizer import week_bounds
 
@@ -106,3 +107,32 @@ class WeeklyTimeAxis:
     def capacity(segments: list[WeeklySegment], *, before: int | None = None, after: int = 0) -> int:
         boundary = WEEK_MINUTES if before is None else min(max(before, 0), WEEK_MINUTES)
         return sum(max(min(item.end, boundary) - max(item.start, after), 0) for item in WeeklyTimeAxis.merge(segments))
+
+    @staticmethod
+    def find_slot(
+        available: list[WeeklySegment],
+        occupied: list[WeeklySegment],
+        *,
+        duration_minutes: int,
+        not_before: int = 0,
+        deadline: int | None = None,
+        rest_after_minutes: int = 0,
+        grid_minutes: int = 15,
+    ) -> WeeklySegment | None:
+        """Find the earliest work segment whose protected range is available."""
+        if duration_minutes <= 0 or grid_minutes <= 0:
+            raise ValueError("duration and grid must be positive")
+        boundary = WEEK_MINUTES if deadline is None else min(max(deadline, 0), WEEK_MINUTES)
+        free = WeeklyTimeAxis.subtract(available, occupied)
+        for segment in free:
+            start = max(segment.start, not_before)
+            start = math.ceil(start / grid_minutes) * grid_minutes
+            while start + duration_minutes <= min(segment.end, boundary):
+                end = start + duration_minutes
+                day_end = min((start // 1440 + 1) * 1440, WEEK_MINUTES)
+                protected_end = min(end + rest_after_minutes, day_end)
+                protected = WeeklySegment(start, protected_end)
+                if any(item.contains(protected) for item in free):
+                    return WeeklySegment(start, end)
+                start += grid_minutes
+        return None

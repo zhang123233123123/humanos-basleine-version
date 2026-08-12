@@ -182,25 +182,32 @@ def build_deterministic_plan(
         while remaining > 0:
             work = min(session_minutes, remaining)
             work = max(math.ceil(work / GRID_MINUTES) * GRID_MINUTES if work > GRID_MINUTES else work, GRID_MINUTES)
-            chosen: tuple[int, int] | None = None
-            for window_start, window_end in windows:
-                start = max(window_start, current_axis, dependency_ready)
-                start = math.ceil(start / GRID_MINUTES) * GRID_MINUTES
-                while start + work <= window_end:
-                    end = start + work
-                    if deadline is not None and end > deadline:
-                        break
-                    rest_end = min(end + rest_minutes, (start // 1440 + 1) * 1440)
-                    if not _overlaps(start, rest_end, occupied):
-                        chosen = (start, end)
-                        break
-                    start += GRID_MINUTES
-                if chosen:
-                    break
+            chosen_segment = WeeklyTimeAxis.find_slot(
+                available_segments,
+                [WeeklySegment(start, end) for start, end in occupied],
+                duration_minutes=work,
+                not_before=max(current_axis, dependency_ready),
+                deadline=deadline,
+                rest_after_minutes=rest_minutes,
+                grid_minutes=GRID_MINUTES,
+            )
+            chosen = (chosen_segment.start, chosen_segment.end) if chosen_segment else None
             if not chosen:
+                remaining_free = WeeklyTimeAxis.subtract(
+                    available_segments,
+                    [WeeklySegment(start, end) for start, end in occupied],
+                )
+                available_minutes = WeeklyTimeAxis.capacity(
+                    remaining_free,
+                    before=deadline,
+                    after=max(current_axis, dependency_ready),
+                )
                 unscheduled.append({
                     "task_id": task_id,
                     "remaining_minutes": remaining,
+                    "required_minutes": remaining,
+                    "available_minutes": available_minutes,
+                    "shortage_minutes": max(remaining - available_minutes, 0),
                     "reason": "no_available_interval_before_deadline" if deadline is not None else "no_available_interval",
                 })
                 break
@@ -235,7 +242,7 @@ def build_deterministic_plan(
                 "state_scope": "weekly_skeleton",
                 "week_id": week_id,
                 "plan_status": "proposed",
-                "scheduler": "python_timeline_v1",
+                "scheduler": "python_timeline_v2",
             })
             occupied.append((start, min(end + rest_minutes, (start // 1440 + 1) * 1440)))
             task_end[task_id] = end

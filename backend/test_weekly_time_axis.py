@@ -24,6 +24,25 @@ class WeeklyTimeAxisTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             WeeklySegment(10000, 10081)
 
+    def test_find_slot_protects_rest_after_work(self):
+        slot = WeeklyTimeAxis.find_slot(
+            [WeeklySegment(480, 720)],
+            [WeeklySegment(540, 600)],
+            duration_minutes=45,
+            rest_after_minutes=15,
+        )
+        self.assertEqual(slot, WeeklySegment(480, 525))
+
+    def test_find_slot_respects_deadline(self):
+        slot = WeeklyTimeAxis.find_slot(
+            [WeeklySegment(480, 720)],
+            [],
+            duration_minutes=60,
+            not_before=600,
+            deadline=630,
+        )
+        self.assertIsNone(slot)
+
 
 if __name__ == "__main__":
     unittest.main()
