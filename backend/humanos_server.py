@@ -34,6 +34,8 @@ try:
     from .app.application.calendar_advisor import advisor_requires_planner_handoff, fallback_calendar_summary, sessions_for_local_date
     from .app.application.task_parse_coordinator import parse_with_validation_retry
     from .app.application.task_payloads import build_task_previews, normalize_parser_items
+    from .app.application.classify_chat_intent import classify_chat_intent
+    from .app.agents import PydanticAIIntentClassifier
     from .app.domain.intent import classify_intent
     from .app.domain.task.change_policy import exact_task_reference_indexes, has_unique_task_identity, is_explicit_change_request, matching_context_item
     from .app.domain.execution import analyze_remaining_work_impact, settle_interruption
@@ -47,6 +49,8 @@ except ImportError:
         from app.application.calendar_advisor import advisor_requires_planner_handoff, fallback_calendar_summary, sessions_for_local_date
         from app.application.task_parse_coordinator import parse_with_validation_retry
         from app.application.task_payloads import build_task_previews, normalize_parser_items
+        from app.application.classify_chat_intent import classify_chat_intent
+        from app.agents import PydanticAIIntentClassifier
         from app.domain.intent import classify_intent
         from app.domain.task.change_policy import exact_task_reference_indexes, has_unique_task_identity, is_explicit_change_request, matching_context_item
         from app.domain.execution import analyze_remaining_work_impact, settle_interruption
@@ -2409,12 +2413,25 @@ class Store:
             return self.calendar_advisor_turn(user_id, text, payload)
         chat_context = self.build_chat_context(user_id, text)
         chat_context["client_context"] = payload.get("client_context") or {}
+        profile = self.ensure_profile(user_id)
+        intent_decision = classify_chat_intent(
+            text,
+            current_time=self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai").isoformat(),
+            timezone_name=profile.get("timezone") or "Asia/Shanghai",
+            chat_context=chat_context,
+            ai_classifier=PydanticAIIntentClassifier().classify,
+        )
         features = self.extract_behavior_features(user_id, text, chat_context)
-        intent_decision = classify_intent(text, str(features.get("intent") or "other"))
         features["intent"] = intent_decision.intent
         features["intent_decision"] = intent_decision.to_dict()
         intent = intent_decision.intent
         response = initial_planner_response(intent, features, chat_context)
+        if intent_decision.requires_clarification:
+            response["reply"] = intent_decision.clarification_question or "请补充你要操作的具体任务。"
+            response["requires_clarification"] = True
+            response["intent_decision"] = intent_decision.to_dict()
+            self.save_chat_turn(user_id, text, response["reply"], intent, features, [])
+            return response
         context_update = self.update_weekly_context_from_chat(user_id, text)
         if context_update:
             response = apply_weekly_context_update(response, context_update, format_clock_hour)

@@ -21,6 +21,14 @@ def should_parse_task_candidates(
     compact_multi_task: bool = False,
     english_multi_task: bool = False,
 ) -> bool:
+    if decision.source == "ai" and decision.model_suggestion in {
+        "query_calendar",
+        "summarize_schedule",
+        "general_advice",
+        "delete_task",
+        "update_profile",
+    }:
+        return False
     if decision.intent in {"progress_update", "interruption", "report_state"}:
         return False
     if decision.intent == "add_task":

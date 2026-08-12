@@ -1,4 +1,4 @@
 from .classifier import classify_intent
-from .models import IntentDecision, IntentEvidence
+from .models import AIIntentResult, IntentDecision, IntentEvidence
 
-__all__ = ["IntentDecision", "IntentEvidence", "classify_intent"]
+__all__ = ["AIIntentResult", "IntentDecision", "IntentEvidence", "classify_intent"]
