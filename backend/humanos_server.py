@@ -2669,7 +2669,11 @@ class Store:
             )
             for task in recent_tasks
         )
-        if not has_reference_marker and not has_time_range and not references_known_task and len(recent_tasks) != 1:
+        # A concrete time plus one recent task is not evidence of an update.
+        # New tasks frequently include both a new title and a deadline. Only
+        # mutate an existing task when the user explicitly refers to it by
+        # title or uses an unambiguous edit/reference phrase.
+        if not explicit_reschedule and not references_known_task:
             return []
 
         day_match = re.search(r"(今天|今晚|明天|后天|周[一二三四五六日天]|星期[一二三四五六日天])", text)
