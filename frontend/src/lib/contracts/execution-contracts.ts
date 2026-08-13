@@ -82,6 +82,17 @@ export interface LocalRescheduleCheck {
   confirmation_required: boolean
 }
 
+export interface ReadyQueueItem {
+  execution_session_id: string
+  task_id: string
+  task_title: string
+  planned_start_at?: string
+  planned_work_minutes?: number
+  remaining_minutes?: number
+  priority?: string
+  expected_difficulty?: number
+}
+
 export interface ExecutionFeedbackResult {
   feedback?: Record<string, unknown>
   task: Record<string, unknown>

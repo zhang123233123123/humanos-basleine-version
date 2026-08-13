@@ -7002,7 +7002,14 @@ class Handler(BaseHTTPRequestHandler):
                 command = build_interruption_command(payload)
                 execution_session = store.pause_execution_session(user_id, command)
                 pause_review = None if command["interruption_action"] == "short_break" else store.analyze_execution_impact(user_id, {**command, "action": command["interruption_action"]})
-                self.send_json(interruption_response(execution_session=execution_session, command=command, impact=pause_review, reschedule_check=(pause_review or {}).get("reschedule_check")))
+                response = interruption_response(execution_session=execution_session, command=command, impact=pause_review, reschedule_check=(pause_review or {}).get("reschedule_check"))
+                if command["interruption_action"] == "switch_task":
+                    from app.application.ready_queue import build_ready_queue
+
+                    ready_sessions = store.list_execution_sessions(user_id, ["ready"])
+                    ready_tasks = {str(item.get("task_id")): store.get_task(str(item.get("task_id")), user_id) or {} for item in ready_sessions}
+                    response["ready_queue"] = build_ready_queue(ready_sessions, ready_tasks, exclude_task_id=str(execution_session.get("task_id") or ""), plan_revision=execution_session.get("plan_revision"))
+                self.send_json(response)
                 return
 
             if path == "/api/execution-sessions/impact" and method == "POST":
