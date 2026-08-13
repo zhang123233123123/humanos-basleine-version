@@ -1,0 +1,4 @@
+interface:
+  display_name: "HumanOS Personal Agent"
+  short_description: "Manage personal plans from conversation."
+  default_prompt: "Use HumanOS to update the current user workspace."
