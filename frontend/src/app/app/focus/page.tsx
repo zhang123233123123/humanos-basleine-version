@@ -104,11 +104,18 @@ export default function FocusPage() {
     }
   }, [loadExecution])
 
+  const breakSession = current?.session?.interruption_action === 'short_break'
+    ? current.session
+    : current?.deferred_sessions?.find((item) => item.interruption_action === 'short_break') || null
+  const breakEndsAt = timestamp(breakSession?.preferred_resume_at)
+  const breakRemainingSeconds = breakEndsAt ? Math.max(Math.ceil((breakEndsAt - now) / 1000), 0) : 0
+  const breakFinished = Boolean(breakSession && breakRemainingSeconds === 0)
+
   useEffect(() => {
-    if (current?.mode !== 'running') return
+    if (current?.mode !== 'running' && !breakSession) return
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
-  }, [current?.mode])
+  }, [breakSession, current?.mode])
 
   const session = current?.session || null
   const task = current?.task || session?.task || null
@@ -177,6 +184,9 @@ export default function FocusPage() {
         body: JSON.stringify({ execution_session_id: session.execution_session_id, interruption_action: action, actual_minutes: minutes, remaining_minutes: displayRemaining, pause_reason: pauseReason, progress: pauseProgress, next_step: pauseNextStep, resume_preference: resumePreference, preferred_resume_at: preferred, request_id: requestId(`pause-${action}`) }),
       })
       setCurrent({ mode: 'paused', session: result.data.execution_session, task })
+      setPausePrompt(false)
+      setPauseAction(null)
+      setNow(Date.now())
       setReadyQueue(action === 'switch_task' ? result.data.ready_queue || [] : [])
       try {
         await apiRequest('/api/context-dumps', {
@@ -349,6 +359,8 @@ export default function FocusPage() {
           <div className="mt-2 flex flex-col gap-2 md:flex-row md:items-end md:justify-between"><div><h1 className="text-3xl font-semibold tracking-tight md:text-5xl">{t('execution.title')}</h1><p className="mt-2 text-muted-foreground">{t('execution.subtitle')}</p></div><span className="w-fit rounded-full border bg-background/70 px-4 py-1.5 text-sm">{statusLabel}</span></div>
         </header>
 
+        {breakSession && <Card className="overflow-hidden border-sky-300 bg-gradient-to-br from-sky-50 via-background to-emerald-50"><CardHeader><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-700">{locale === 'zh' ? '短暂休息' : 'Timed break'}</p><CardTitle className="mt-2">{breakFinished ? (locale === 'zh' ? '休息结束' : 'Break complete') : (locale === 'zh' ? '先离开屏幕一会儿' : 'Step away for a moment')}</CardTitle><CardDescription className="mt-1">{locale === 'zh' ? '任务上下文和计时状态已由后端保存，刷新页面不会丢失。' : 'Task context and timing are persisted by the backend and survive refreshes.'}</CardDescription></div><Clock3 className="h-6 w-6 text-sky-700" /></div></CardHeader><CardContent><div className="rounded-2xl border bg-background/80 p-6 text-center"><p className="font-mono text-5xl font-semibold tracking-tight">{durationLabel(breakRemainingSeconds)}</p><p className="mt-2 text-sm text-muted-foreground">{breakFinished ? (locale === 'zh' ? '可以回到原任务，或说明你还没准备好。' : 'Resume the same task or say you are not ready.') : (locale === 'zh' ? '休息剩余时间' : 'Break remaining')}</p></div>{breakFinished && <div className="mt-4 flex flex-wrap justify-center gap-2"><Button onClick={() => void resumeDeferred(breakSession)} disabled={submitting}><Play className="mr-2 h-4 w-4" />{locale === 'zh' ? '恢复原任务' : 'Resume task'}</Button><Button variant="outline" onClick={() => router.push(`/app/check-in?mode=daily&source=break-not-ready&taskId=${encodeURIComponent(breakSession.task_id)}`)}>{locale === 'zh' ? '我还没准备好' : "I'm not ready"}</Button></div>}</CardContent></Card>}
+
         {endedSession ? (
           <Card className="border-primary/30">
             <CardHeader><CardTitle>{t('execution.feedbackTitle')}</CardTitle><CardDescription>{t('execution.feedbackDescription')}</CardDescription></CardHeader>
@@ -384,7 +396,7 @@ export default function FocusPage() {
           <Card className="py-12 text-center"><CardContent><div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-full bg-muted"><Clock3 /></div><h2 className="text-xl font-semibold">{t('execution.noSession')}</h2><p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">{t('execution.noSessionDescription')}</p><Button className="mt-5" asChild><Link href="/app/plan">{t('execution.openPlan')}</Link></Button></CardContent></Card>
         )}
 
-        {(current?.deferred_sessions?.length || 0) > 0 && <Card className="border-amber-300 bg-amber-50/60"><CardHeader><CardTitle>{locale === 'zh' ? '待恢复任务' : 'Deferred sessions'}</CardTitle><CardDescription>{locale === 'zh' ? '这些任务已退出当前执行队列，不会阻塞下一项安排。' : 'These sessions no longer block the next scheduled task.'}</CardDescription></CardHeader><CardContent className="space-y-3">{current?.deferred_sessions?.map((item) => <div key={item.execution_session_id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-background p-4"><div><p className="font-medium">{item.task_title || item.title || item.task_id}</p><p className="mt-1 text-xs text-muted-foreground">{locale === 'zh' ? `剩余 ${item.remaining_at_pause ?? item.session_remaining_minutes ?? 0} 分钟 · ${item.pause_reason || '未填写暂停原因'}` : `${item.remaining_at_pause ?? item.session_remaining_minutes ?? 0} min remaining · ${item.pause_reason || 'No pause reason'}`}</p></div><div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => void resumeDeferred(item)} disabled={submitting}>{locale === 'zh' ? '现在恢复' : 'Resume now'}</Button><Button size="sm" asChild><Link href="/app/plan?adjust=deferred-session">{locale === 'zh' ? '安排恢复时间' : 'Schedule return'}</Link></Button></div></div>)}</CardContent></Card>}
+        {(current?.deferred_sessions?.filter((item) => item.interruption_action !== 'short_break').length || 0) > 0 && <Card className="border-amber-300 bg-amber-50/60"><CardHeader><CardTitle>{locale === 'zh' ? '待恢复任务' : 'Deferred sessions'}</CardTitle><CardDescription>{locale === 'zh' ? '这些任务已退出当前执行队列，不会阻塞下一项安排。' : 'These sessions no longer block the next scheduled task.'}</CardDescription></CardHeader><CardContent className="space-y-3">{current?.deferred_sessions?.filter((item) => item.interruption_action !== 'short_break').map((item) => <div key={item.execution_session_id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-background p-4"><div><p className="font-medium">{item.task_title || item.title || item.task_id}</p><p className="mt-1 text-xs text-muted-foreground">{locale === 'zh' ? `剩余 ${item.remaining_at_pause ?? item.session_remaining_minutes ?? 0} 分钟 · ${item.pause_reason || '未填写暂停原因'}` : `${item.remaining_at_pause ?? item.session_remaining_minutes ?? 0} min remaining · ${item.pause_reason || 'No pause reason'}`}</p></div><div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => void resumeDeferred(item)} disabled={submitting}>{locale === 'zh' ? '现在恢复' : 'Resume now'}</Button><Button size="sm" asChild><Link href="/app/plan?adjust=deferred-session">{locale === 'zh' ? '安排恢复时间' : 'Schedule return'}</Link></Button></div></div>)}</CardContent></Card>}
         <Card><CardHeader><CardTitle>{t('execution.history')}</CardTitle><CardDescription>{t('execution.historyDescription')}</CardDescription></CardHeader><CardContent className="space-y-2">{history.length === 0 ? <p className="text-sm text-muted-foreground">{t('execution.noHistory')}</p> : history.slice(0, 12).map((item) => <div key={item.execution_session_id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border p-3 text-sm"><div><p className="font-medium">{item.task_title || item.title || item.task_id}</p><p className="text-xs text-muted-foreground">{item.planned_start_at ? new Date(item.planned_start_at).toLocaleString() : item.block_id}</p></div><span className="rounded-full bg-muted px-3 py-1 text-xs">{item.status}</span></div>)}</CardContent></Card>
       </div>
     </main>
