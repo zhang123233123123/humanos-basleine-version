@@ -13,7 +13,7 @@ class ExecutionSessionRepository:
 
     def latest_paused_for_task(self, *, user_id: str, task_id: str) -> sqlite3.Row | None:
         return self.connection.execute(
-            "SELECT id FROM execution_sessions WHERE user_id=? AND task_id=? AND status='paused' ORDER BY updated_at DESC LIMIT 1",
+            "SELECT * FROM execution_sessions WHERE user_id=? AND task_id=? AND status='paused' ORDER BY updated_at DESC LIMIT 1",
             (user_id, task_id),
         ).fetchone()
 
@@ -30,14 +30,19 @@ class ExecutionSessionRepository:
         planned_end_at: str,
         planned_work_minutes: int,
         resumed_from_session_id: str | None,
+        accumulated_active_minutes: int = 0,
+        remaining_at_pause: int | None = None,
+        interruption_snapshot_json: str | None = None,
         timestamp: int,
     ) -> None:
         self.connection.execute(
-            "INSERT INTO execution_sessions (id,user_id,task_id,block_id,week_id,plan_revision,planned_start_at,planned_end_at,planned_work_minutes,resumed_from_session_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,block_id,plan_revision) DO UPDATE SET planned_start_at=excluded.planned_start_at,planned_end_at=excluded.planned_end_at,planned_work_minutes=excluded.planned_work_minutes,resumed_from_session_id=excluded.resumed_from_session_id,updated_at=excluded.updated_at",
+            "INSERT INTO execution_sessions (id,user_id,task_id,block_id,week_id,plan_revision,planned_start_at,planned_end_at,planned_work_minutes,resumed_from_session_id,accumulated_active_minutes,remaining_at_pause,interruption_snapshot_json,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,block_id,plan_revision) DO UPDATE SET planned_start_at=excluded.planned_start_at,planned_end_at=excluded.planned_end_at,planned_work_minutes=excluded.planned_work_minutes,resumed_from_session_id=excluded.resumed_from_session_id,accumulated_active_minutes=excluded.accumulated_active_minutes,remaining_at_pause=excluded.remaining_at_pause,interruption_snapshot_json=excluded.interruption_snapshot_json,updated_at=excluded.updated_at",
             (
                 execution_id, user_id, task_id, block_id, week_id, revision,
                 planned_start_at, planned_end_at, planned_work_minutes,
-                resumed_from_session_id, "ready", timestamp, timestamp,
+                resumed_from_session_id, accumulated_active_minutes,
+                remaining_at_pause, interruption_snapshot_json,
+                "ready", timestamp, timestamp,
             ),
         )
 

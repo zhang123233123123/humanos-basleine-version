@@ -3772,6 +3772,10 @@ class Store:
                 execution_id = new_id("exec")
                 planned_minutes = int(block.get("planned_work_minutes") or block.get("session_minutes") or round((float(block["end"]) - float(block["start"])) * 60))
                 paused_source = execution_sessions.latest_paused_for_task(user_id=user_id, task_id=block_task_id)
+                inherited_active_minutes = int(paused_source["accumulated_active_minutes"] or 0) if paused_source else 0
+                inherited_remaining = int(paused_source["remaining_at_pause"] or planned_minutes) if paused_source else None
+                if inherited_remaining is not None:
+                    planned_minutes = min(planned_minutes, inherited_remaining)
                 execution_sessions.upsert_ready(
                     execution_id=execution_id,
                     user_id=user_id,
@@ -3783,6 +3787,9 @@ class Store:
                     planned_end_at=str(block.get("end_at") or ""),
                     planned_work_minutes=planned_minutes,
                     resumed_from_session_id=paused_source["id"] if paused_source else None,
+                    accumulated_active_minutes=inherited_active_minutes,
+                    remaining_at_pause=inherited_remaining,
+                    interruption_snapshot_json=paused_source["interruption_snapshot_json"] if paused_source else None,
                     timestamp=timestamp,
                 )
                 if paused_source:
