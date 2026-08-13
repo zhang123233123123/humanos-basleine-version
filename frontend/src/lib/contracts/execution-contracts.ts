@@ -62,6 +62,15 @@ export interface ExecutionImpact {
   options: string[]
 }
 
+export interface ExecutionInterruption {
+  action: InterruptionAction
+  next_stage: 'break_timer' | 'capture_context_and_resume_time' | 'capture_context_and_ready_queue' | 'capture_reason_and_runtime_state' | string
+  context_required: boolean
+  runtime_state_required: boolean
+  formal_calendar_changed: boolean
+  policy: Record<string, unknown>
+}
+
 export interface ExecutionFeedbackResult {
   feedback?: Record<string, unknown>
   task: Record<string, unknown>

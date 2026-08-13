@@ -6979,9 +6979,12 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/execution-sessions/pause" and method == "POST":
                 payload = self.read_json()
                 user_id = payload.get("user_id", "demo")
-                execution_session = store.pause_execution_session(user_id, payload)
-                pause_review = store.analyze_execution_impact(user_id, {**payload, "action": "pause"})
-                self.send_json({"execution_session": execution_session, "pause_review": pause_review})
+                from app.application.execution_interruption import build_interruption_command, interruption_response
+
+                command = build_interruption_command(payload)
+                execution_session = store.pause_execution_session(user_id, command)
+                pause_review = None if command["interruption_action"] == "short_break" else store.analyze_execution_impact(user_id, {**command, "action": command["interruption_action"]})
+                self.send_json(interruption_response(execution_session=execution_session, command=command, impact=pause_review))
                 return
 
             if path == "/api/execution-sessions/impact" and method == "POST":
