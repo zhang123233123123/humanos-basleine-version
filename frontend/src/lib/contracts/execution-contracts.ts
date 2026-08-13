@@ -93,6 +93,20 @@ export interface ReadyQueueItem {
   expected_difficulty?: number
 }
 
+export interface LocalCalendarDiff {
+  base_plan_id: string
+  base_plan_revision: number
+  week_id: string
+  scope: 'local'
+  trigger: string
+  status: 'proposed'
+  changes: Array<{ type: 'move_session'; before: Record<string, unknown>; after: Record<string, unknown> }>
+  affected_execution_session_ids: string[]
+  protected_resources: string[]
+  confirmation_required: true
+  formal_calendar_changed: false
+}
+
 export interface ExecutionFeedbackResult {
   feedback?: Record<string, unknown>
   task: Record<string, unknown>

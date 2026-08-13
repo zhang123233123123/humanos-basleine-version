@@ -3517,6 +3517,40 @@ class Store:
             {"week_id": row["week_id"], "request_id": request_id},
         )
 
+    def propose_continue_later_diff(self, user_id: str, execution_session: dict, impact: dict, request_id: str | None = None) -> dict:
+        preferred = str(execution_session.get("preferred_resume_at") or "").strip()
+        if not preferred:
+            raise ValueError("preferred_resume_at is required")
+        active = self.active_plan(user_id, str(execution_session.get("week_id") or "")) or {}
+        if not active.get("plan_id") or active.get("plan_status") not in {"confirmed", "needs_update"}:
+            raise ValueError("An active confirmed plan is required")
+        from app.application.local_calendar_diff import apply_local_calendar_diff, build_local_calendar_diff
+
+        reschedule = impact.get("reschedule_check") or {}
+        calendar_diff = build_local_calendar_diff(
+            plan_id=str(active["plan_id"]),
+            plan_revision=int(active.get("plan_revision") or 0),
+            week_id=str(active.get("week_id") or execution_session.get("week_id")),
+            execution_session=execution_session,
+            preferred_resume_at=preferred,
+            affected_session_ids=list(reschedule.get("releasable_execution_session_ids") or []),
+        )
+        projected = apply_local_calendar_diff(list(active.get("plan_patch") or []), calendar_diff)
+        validation = self.validate_confirmed_schedule(user_id, {"week_id": active.get("week_id"), "plan_patch": projected})
+        decision = dict(active)
+        for key in ("plan_id", "plan_revision", "plan_status", "confirmed_at"):
+            decision.pop(key, None)
+        decision.update({
+            "action": "suggest_plan",
+            "source": "continue_later_local_diff",
+            "base_plan_id": active["plan_id"],
+            "plan_patch": projected,
+            "validation": validation,
+            "calendar_diff": calendar_diff,
+        })
+        proposed = self.save_proposed_plan(user_id, decision, {"week_id": active.get("week_id"), "request_id": request_id or new_id("continue_later")})
+        return {"calendar_diff": calendar_diff, "proposed_plan": proposed, "validation": validation}
+
     def decide_parallel_suggestion(self, user_id: str, payload: dict) -> dict:
         plan_id = str(payload.get("plan_id") or "")
         suggestion_id = str(payload.get("suggestion_id") or "")
@@ -7009,6 +7043,8 @@ class Handler(BaseHTTPRequestHandler):
                     ready_sessions = store.list_execution_sessions(user_id, ["ready"])
                     ready_tasks = {str(item.get("task_id")): store.get_task(str(item.get("task_id")), user_id) or {} for item in ready_sessions}
                     response["ready_queue"] = build_ready_queue(ready_sessions, ready_tasks, exclude_task_id=str(execution_session.get("task_id") or ""), plan_revision=execution_session.get("plan_revision"))
+                if command["interruption_action"] == "continue_later" and execution_session.get("preferred_resume_at"):
+                    response.update(store.propose_continue_later_diff(user_id, execution_session, pause_review or {}, request_id=f"{command.get('request_id') or new_id('pause')}:local-diff"))
                 self.send_json(response)
                 return
 

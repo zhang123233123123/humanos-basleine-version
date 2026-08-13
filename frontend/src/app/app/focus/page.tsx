@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { apiRequest } from '@/lib/client/api'
 import { requestId } from '@/lib/client/request-id'
-import type { CurrentExecution, ExecutionFeedbackResult, ExecutionImpact, ExecutionInterruption, ExecutionResourceEnvelope, ExecutionSession, InterruptionAction, ReadyQueueItem } from '@/lib/contracts/execution-contracts'
+import type { CurrentExecution, ExecutionFeedbackResult, ExecutionImpact, ExecutionInterruption, ExecutionResourceEnvelope, ExecutionSession, InterruptionAction, LocalCalendarDiff, ReadyQueueItem } from '@/lib/contracts/execution-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
@@ -179,7 +179,7 @@ export default function FocusPage() {
       const preferred = resumePreference === 'soon'
         ? new Date(Date.now() + 10 * 60_000).toISOString()
         : resumePreference === 'later_today' && preferredResumeAt ? new Date(preferredResumeAt).toISOString() : null
-      const result = await apiRequest<ExecutionResourceEnvelope<{ execution_session: ExecutionSession; interruption: ExecutionInterruption; pause_review: ExecutionImpact; ready_queue: ReadyQueueItem[] }>>('/api/execution-sessions/pause', {
+      const result = await apiRequest<ExecutionResourceEnvelope<{ execution_session: ExecutionSession; interruption: ExecutionInterruption; pause_review: ExecutionImpact; ready_queue: ReadyQueueItem[]; calendar_diff: LocalCalendarDiff | null; proposed_plan: Record<string, unknown> | null }>>('/api/execution-sessions/pause', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ execution_session_id: session.execution_session_id, interruption_action: action, actual_minutes: minutes, remaining_minutes: displayRemaining, pause_reason: pauseReason, progress: pauseProgress, next_step: pauseNextStep, resume_preference: resumePreference, preferred_resume_at: preferred, request_id: requestId(`pause-${action}`) }),
       })
@@ -204,6 +204,7 @@ export default function FocusPage() {
       await loadExecution()
       setResumeImpact(null)
       toast(t('execution.paused'))
+      if (action === 'continue_later' && result.data.proposed_plan) router.push('/app/plan?adjust=continue-later')
     } catch (error) {
       toast(error instanceof Error ? error.message : t('execution.pauseFailed'))
     } finally {
