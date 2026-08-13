@@ -71,6 +71,17 @@ export interface ExecutionInterruption {
   policy: Record<string, unknown>
 }
 
+export interface LocalRescheduleCheck {
+  change_minutes: number
+  absorbed: Array<{ source: 'session_slack' | 'idle_gap' | 'buffer' | string; minutes: number }>
+  unabsorbed_minutes: number
+  absorbed_without_calendar_change: boolean
+  calendar_diff_required: boolean
+  formal_calendar_changed: boolean
+  releasable_execution_session_ids: string[]
+  confirmation_required: boolean
+}
+
 export interface ExecutionFeedbackResult {
   feedback?: Record<string, unknown>
   task: Record<string, unknown>

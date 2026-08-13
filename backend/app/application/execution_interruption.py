@@ -34,6 +34,7 @@ def interruption_response(
     execution_session: dict[str, Any],
     command: dict[str, Any],
     impact: dict[str, Any] | None,
+    reschedule_check: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     policy = interruption_policy(command.get("interruption_action"))
     return {
@@ -52,5 +53,10 @@ def interruption_response(
             "deferred": policy.action == "short_break",
             "affected_sessions": [],
             "options": ["continue_without_changes"],
+        },
+        "reschedule_check": reschedule_check or {
+            "calendar_diff_required": False,
+            "formal_calendar_changed": False,
+            "confirmation_required": False,
         },
     }

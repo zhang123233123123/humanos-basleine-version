@@ -4483,7 +4483,7 @@ class Store:
         deadline_at = task.get("deadline_at") or context.get("deadlineAt") or context.get("deadline_at")
         week_start = datetime.fromisoformat(f"{session.get('week_id')}T00:00:00").replace(tzinfo=current.tzinfo)
         week_end = week_start + timedelta(days=7)
-        return analyze_remaining_work_impact(
+        impact = analyze_remaining_work_impact(
             current=current,
             remaining_minutes=remaining_minutes,
             future_sessions=future,
@@ -4492,6 +4492,24 @@ class Store:
             week_end_at=week_end,
             action=str(payload.get("action") or "resume"),
         )
+        from app.application.local_rescheduler import assess_local_reschedule
+
+        next_starts = []
+        for item in future:
+            try:
+                next_starts.append(datetime.fromisoformat(str(item["planned_start_at"])).astimezone(current.tzinfo))
+            except (KeyError, TypeError, ValueError):
+                continue
+        idle_gap = max(int((min(next_starts) - current).total_seconds() // 60), 0) if next_starts else 0
+        change_minutes = max(int(payload.get("break_minutes") or payload.get("change_minutes") or remaining_minutes), 0)
+        impact["reschedule_check"] = assess_local_reschedule(
+            impact=impact,
+            change_minutes=change_minutes,
+            session_slack_minutes=max(int(payload.get("session_slack_minutes") or 0), 0),
+            idle_gap_minutes=idle_gap,
+            buffer_minutes=max(int(payload.get("buffer_minutes") or 0), 0),
+        )
+        return impact
 
     def end_execution_session(self, user_id: str, payload: dict) -> dict:
         session_id = str(payload.get("execution_session_id") or "")
@@ -6984,7 +7002,7 @@ class Handler(BaseHTTPRequestHandler):
                 command = build_interruption_command(payload)
                 execution_session = store.pause_execution_session(user_id, command)
                 pause_review = None if command["interruption_action"] == "short_break" else store.analyze_execution_impact(user_id, {**command, "action": command["interruption_action"]})
-                self.send_json(interruption_response(execution_session=execution_session, command=command, impact=pause_review))
+                self.send_json(interruption_response(execution_session=execution_session, command=command, impact=pause_review, reschedule_check=(pause_review or {}).get("reschedule_check")))
                 return
 
             if path == "/api/execution-sessions/impact" and method == "POST":
