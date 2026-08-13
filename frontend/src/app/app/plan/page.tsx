@@ -97,6 +97,14 @@ export default function WeeklyPlanPage() {
     () => new Map(tasks.map((task) => [String(task.id), task.title || t('planning.untitledTask')])),
     [tasks, t],
   )
+  const localDiff = decision?.source === 'continue_later_local_diff' ? decision.calendar_diff : undefined
+
+  const formatDateTime = (value?: string) => {
+    if (!value) return '—'
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return value
+    return parsed.toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  }
 
   const updateTask = (index: number, field: string, value: string | number) => {
     setTasks((current) => current.map((task, taskIndex) => (
@@ -340,7 +348,17 @@ export default function WeeklyPlanPage() {
 
         {adjustmentTrigger && (
           <Card className="border-amber-500/40 bg-amber-500/5">
-            <CardHeader><CardTitle className="text-lg">{locale === 'zh' ? '根据当前状态重新规划' : 'Replan from your current state'}</CardTitle><CardDescription>{locale === 'zh' ? '系统会使用刚刚的 Daily Check-in，重新计算今天第一个未开始 Session。生成后仍需预览、验证并确认，现有计划不会被直接覆盖。' : 'HumanOS will use your latest Daily Check-in to reconsider today’s first unstarted session. The result still requires review, validation, and confirmation.'}</CardDescription></CardHeader>
+            <CardHeader><CardTitle className="text-lg">{adjustmentTrigger === 'continue-later' ? (locale === 'zh' ? '审查稍后继续的时间调整' : 'Review the continue-later adjustment') : (locale === 'zh' ? '根据当前状态重新规划' : 'Replan from your current state')}</CardTitle><CardDescription>{adjustmentTrigger === 'continue-later' ? (locale === 'zh' ? '这里只调整受中断影响的 Session。正式日历会保持不变，直到你应用这份变更。' : 'Only sessions affected by the interruption are adjusted. The formal calendar stays unchanged until you apply this change.') : (locale === 'zh' ? '系统会使用刚刚的 Daily Check-in，重新计算今天第一个未开始 Session。生成后仍需预览、验证并确认，现有计划不会被直接覆盖。' : 'HumanOS will use your latest Daily Check-in to reconsider today’s first unstarted session. The result still requires review, validation, and confirmation.')}</CardDescription></CardHeader>
+          </Card>
+        )}
+
+        {localDiff && (
+          <Card className="overflow-hidden border-primary/40">
+            <CardHeader className="bg-primary/5"><CardTitle className="text-lg">{locale === 'zh' ? '局部日历变更' : 'Local calendar change'}</CardTitle><CardDescription>{locale === 'zh' ? `基于计划 R${localDiff.base_plan_revision}，未影响的任务不会移动。` : `Based on plan R${localDiff.base_plan_revision}. Unaffected tasks will not move.`}</CardDescription></CardHeader>
+            <CardContent className="space-y-4 pt-5">
+              {localDiff.changes.map((change, index) => <div key={`${change.after.block_id || change.after.task_id}-${index}`} className="grid gap-3 rounded-2xl border bg-background p-4 md:grid-cols-[1fr_auto_1fr]"><div><p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{locale === 'zh' ? '原安排' : 'Before'}</p><p className="mt-1 font-medium">{taskName.get(String(change.before.task_id || '')) || (locale === 'zh' ? '当前任务' : 'Current task')}</p><p className="mt-1 text-sm text-muted-foreground">{formatDateTime(change.before.start_at)} – {formatDateTime(change.before.end_at)}</p></div><div className="self-center text-center text-primary">→</div><div><p className="text-xs font-semibold uppercase tracking-wide text-primary">{locale === 'zh' ? '建议安排' : 'After'}</p><p className="mt-1 font-medium">{taskName.get(String(change.after.task_id || '')) || (locale === 'zh' ? '当前任务' : 'Current task')}</p><p className="mt-1 text-sm text-muted-foreground">{formatDateTime(change.after.start_at)} – {formatDateTime(change.after.end_at)}</p></div></div>)}
+              <div className="grid gap-3 text-sm md:grid-cols-2"><div className="rounded-xl bg-muted/60 p-3"><strong>{locale === 'zh' ? '可能受影响' : 'Potentially affected'}</strong><p className="mt-1 text-muted-foreground">{locale === 'zh' ? `${localDiff.affected_execution_session_ids.length} 个后续 Session` : `${localDiff.affected_execution_session_ids.length} downstream session(s)`}</p></div><div className="rounded-xl bg-emerald-500/10 p-3"><strong>{locale === 'zh' ? '受保护内容' : 'Protected'}</strong><p className="mt-1 text-muted-foreground">{localDiff.protected_resources.map((item) => item.replaceAll('_', ' ')).join(' · ')}</p></div></div>
+            </CardContent>
           </Card>
         )}
 
@@ -386,7 +404,7 @@ export default function WeeklyPlanPage() {
                     <label className="grid gap-1 text-xs text-muted-foreground"><span>{locale === 'zh' ? '结束日期和时间' : 'End date and time'}</span><DateTimePicker value={blockDateTime(weekId, block.day_index, block.end)} onChange={(value) => updateBlockDateTime(index, 'end', value)} /></label>
                   </div>
                 ))}
-                <div className="flex justify-between pt-3"><Button variant="outline" onClick={() => setStage('setup')}>{t('planning.backToSetup')}</Button><div className="flex gap-2"><Button variant="outline" onClick={validatePlan} disabled={submitting}><ShieldCheck className="mr-2 h-4 w-4" />{t('planning.validate')}</Button><Button onClick={confirmPlan} disabled={submitting || validation?.valid === false}><CalendarCheck className="mr-2 h-4 w-4" />{t('planning.confirm')}</Button></div></div>
+                <div className="flex justify-between pt-3">{localDiff ? <Button variant="outline" asChild><Link href="/app/focus">{locale === 'zh' ? '暂不调整' : 'Not now'}</Link></Button> : <Button variant="outline" onClick={() => setStage('setup')}>{t('planning.backToSetup')}</Button>}<div className="flex gap-2"><Button variant="outline" onClick={validatePlan} disabled={submitting}><ShieldCheck className="mr-2 h-4 w-4" />{t('planning.validate')}</Button><Button onClick={confirmPlan} disabled={submitting || validation?.valid === false}><CalendarCheck className="mr-2 h-4 w-4" />{localDiff ? (locale === 'zh' ? '应用变更' : 'Apply changes') : t('planning.confirm')}</Button></div></div>
               </CardContent>
             </Card>
             <div className="space-y-4">

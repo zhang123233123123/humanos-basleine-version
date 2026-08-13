@@ -4181,6 +4181,8 @@ class Store:
             },
         )
         action = recommendation["action"]
+        if action == "continue_later" and not str(payload.get("preferred_resume_at") or "").strip():
+            raise ValueError("preferred_resume_at is required for continue_later")
         execution_result: dict = {"action": action, "execution_session": session}
 
         if action == "continue_current":
@@ -4219,8 +4221,6 @@ class Store:
                 })
                 execution_result["switched_to"] = started
             elif action == "continue_later":
-                if not paused.get("preferred_resume_at"):
-                    raise ValueError("preferred_resume_at is required for continue_later")
                 execution_result.update(self.propose_continue_later_diff(
                     user_id,
                     paused,

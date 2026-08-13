@@ -26,6 +26,24 @@ export interface PlanValidation {
   [key: string]: unknown
 }
 
+export interface LocalCalendarDiff {
+  base_plan_id: string
+  base_plan_revision: number
+  week_id: string
+  scope: 'local'
+  trigger: 'continue_later'
+  status: 'proposed'
+  changes: Array<{
+    type: 'move_session'
+    before: { execution_session_id?: string; task_id?: string; block_id?: string; start_at?: string; end_at?: string; planned_work_minutes?: number }
+    after: { execution_session_id?: string; task_id?: string; block_id?: string; start_at?: string; end_at?: string; planned_work_minutes?: number }
+  }>
+  affected_execution_session_ids: string[]
+  protected_resources: string[]
+  confirmation_required: boolean
+  formal_calendar_changed: boolean
+}
+
 export interface PlanDecision {
   plan_id?: string
   plan_revision?: number
@@ -40,6 +58,8 @@ export interface PlanDecision {
   repair_suggestions?: Array<Record<string, unknown> | string>
   parallel_suggestions?: Array<{ id: string; status?: 'pending' | 'accepted' | 'rejected'; primary_task_id: string; secondary_task_id: string; suggested_overlap_minutes?: number; resource_basis?: string[]; evidence?: string[] }>
   explanation?: string
+  source?: string
+  calendar_diff?: LocalCalendarDiff
   reasons?: string[]
   requires_confirmation?: boolean
   unavailable?: boolean
