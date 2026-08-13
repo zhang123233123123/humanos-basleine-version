@@ -32,7 +32,7 @@ class ExecutionSessionRepository:
         resumed_from_session_id: str | None,
         accumulated_active_minutes: int = 0,
         remaining_at_pause: int | None = None,
-        interruption_snapshot_json: str | None = None,
+        interruption_snapshot_json: str = "{}",
         timestamp: int,
     ) -> None:
         self.connection.execute(
@@ -41,7 +41,7 @@ class ExecutionSessionRepository:
                 execution_id, user_id, task_id, block_id, week_id, revision,
                 planned_start_at, planned_end_at, planned_work_minutes,
                 resumed_from_session_id, accumulated_active_minutes,
-                remaining_at_pause, interruption_snapshot_json,
+                remaining_at_pause, interruption_snapshot_json or "{}",
                 "ready", timestamp, timestamp,
             ),
         )

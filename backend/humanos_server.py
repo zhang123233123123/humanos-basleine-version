@@ -3789,7 +3789,7 @@ class Store:
                     resumed_from_session_id=paused_source["id"] if paused_source else None,
                     accumulated_active_minutes=inherited_active_minutes,
                     remaining_at_pause=inherited_remaining,
-                    interruption_snapshot_json=paused_source["interruption_snapshot_json"] if paused_source else None,
+                    interruption_snapshot_json=paused_source["interruption_snapshot_json"] if paused_source else "{}",
                     timestamp=timestamp,
                 )
                 if paused_source:
@@ -4446,7 +4446,7 @@ class Store:
         return self.add_memory(
             user_id=user_id,
             source_type="context_dump",
-            source_id=dump_id,
+            source_id=str(dump.get("id") or ""),
             task_id=task_id,
             text=memory_text,
             metadata={"stop_reason": dump["stop_reason"], "task_id": task_id},
