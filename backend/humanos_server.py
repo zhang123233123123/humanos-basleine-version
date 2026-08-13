@@ -4174,6 +4174,8 @@ class Store:
         return result
 
     def save_help_decide_feedback(self, user_id: str, payload: dict) -> dict:
+        from app.application.recommendation_learning import recommendation_pattern_label
+
         recommendation_id = str(payload.get("recommendation_id") or "").strip()
         if not recommendation_id:
             raise ValueError("recommendation_id is required")
@@ -4186,13 +4188,18 @@ class Store:
             "selected_action": payload.get("selected_action"),
             "created_at": now_ms(),
         }
+        pattern_label = recommendation_pattern_label(
+            reason=payload.get("reason"),
+            selected_action=feedback["selected_action"],
+            accepted=accepted,
+        )
         self.add_memory(
             user_id=user_id,
             source_type="episodic_memory",
             source_id=recommendation_id,
             task_id=task_id,
             text=f"Help-me-decide recommendation feedback: {as_json(feedback)}",
-            metadata={"kind": "recommendation_feedback", "eligible_for_pattern": True, **feedback},
+            metadata={"kind": "recommendation_feedback", "eligible_for_pattern": True, "pattern_label": pattern_label, "interruption_reason": payload.get("reason"), **feedback},
         )
         self.log_event(user_id, "help_decide_recommendation_feedback", feedback)
         return feedback
@@ -5015,7 +5022,7 @@ class Store:
         candidate = next((item for item in self.pattern_candidates(user_id) if item.get("pattern_label") == label), None)
         if not candidate:
             raise ValueError("pattern candidate does not exist")
-        if candidate.get("status") != "candidate" or not candidate.get("can_suggest_update"):
+        if candidate.get("status") != "candidate":
             raise ValueError("pattern candidate has not reached the evidence threshold")
         if not bool(payload.get("user_confirmed")):
             raise ValueError("user confirmation is required before promoting a pattern")
