@@ -3931,8 +3931,13 @@ class Store:
                 (timestamp,user_id,current.get("week_id") or iso_week_id()),
             )
             conn.execute(
-                "UPDATE execution_sessions SET status='superseded',updated_at=? WHERE user_id=? AND task_id=? AND status IN ('ready','paused')",
-                (timestamp,user_id,task_id),
+                """UPDATE execution_sessions
+                   SET status='superseded', completion_outcome='task_deleted',
+                       paused_at=CASE WHEN status='running' THEN ? ELSE paused_at END,
+                       resumed_at=NULL, updated_at=?
+                   WHERE user_id=? AND task_id=?
+                     AND status IN ('ready','running','paused','not_started')""",
+                (self.user_clock_now(user_id, self.ensure_profile(user_id).get("timezone") or "Asia/Shanghai").isoformat(), timestamp, user_id, task_id),
             )
         self.log_event(current["user_id"], "task_archived", {"task_id": task_id, "title": current["title"]})
         return {"id": task_id, "deleted": False, "archived": True}
@@ -5640,7 +5645,15 @@ class Store:
         energy = int(runtime_state.get("energy") or 4)
         stress = int(runtime_state.get("stress") or 4)
         high_capacity_now = focus >= 6 and energy >= 5 and stress <= 5
-        low_capacity_now = focus <= 2 or energy <= 2 or stress >= 6
+        mood = str(runtime_state.get("mood") or "").lower()
+        readiness = str(runtime_state.get("readiness") or "").lower()
+        low_capacity_now = (
+            focus <= 3
+            or energy <= 3
+            or stress >= 6
+            or mood in {"low", "anxious"}
+            or readiness in {"unsure", "need_rest"}
+        )
         accepted_pair_specs = {}
         for pair in ((state.get("payload") or {}).get("accepted_parallel_pairs") or []):
             if not isinstance(pair, dict) or not pair.get("parallel_group_id"):
@@ -6027,7 +6040,7 @@ class Store:
                         "runtime_state 只影响今天接下来第一个执行块，不能外推到整周。"
                         "Momentary State must causally affect next_session_selection. Every state field included here must affect a defined decision or be omitted; never mention state only as a post-hoc explanation."
                         "If current focus is high (>=6), energy is adequate (>=5), and stress is not high (<=5), prefer a ready, high-priority, cognitively demanding task first. Preserve this high-focus period; do not place chores, passive listening, or other light activities first unless a hard constraint prevents demanding work."
-                        "If current focus or energy is very low (<=2), or stress is high (>=6), prefer a light task or a <=30-minute checkpoint as the first session."
+                        "If current focus or energy is low (<=3), stress is high (>=6), mood is low/anxious, or readiness is unsure/need_rest, the first session today must be a light task or a <=30-minute checkpoint."
                         "Any deviation must include a concrete candidate-level override_reason that names the hard constraint."
                         "When accepted_parallel_pairs is non-empty, regenerate the entire plan. Put exactly the two confirmed tasks into the same parallel_group_id for no more than the approved duration; move every affected Session so no third item overlaps."
                         "Do not create any unconfirmed overlap. Parallel work may not consume a high-focus window while an important demanding ready task is available."
@@ -6284,7 +6297,13 @@ class Store:
                 stress = int(runtime_state.get("stress") or 4)
                 if focus >= 6 and energy >= 5 and stress <= 5:
                     decision["user_reason"] = f"Your focus is strong right now, so HumanOS starts with {first_task.get('title')} and keeps lighter activities for later."
-                elif focus <= 2 or energy <= 2 or stress >= 6:
+                elif (
+                    focus <= 3
+                    or energy <= 3
+                    or stress >= 6
+                    or str(runtime_state.get("mood") or "").lower() in {"low", "anxious"}
+                    or str(runtime_state.get("readiness") or "").lower() in {"unsure", "need_rest"}
+                ):
                     decision["user_reason"] = f"Your current capacity is limited, so HumanOS starts with a lighter or shorter session: {first_task.get('title')}."
             if accepted_parallel_context_pairs:
                 decision["context_parallel_adjustments"] = [

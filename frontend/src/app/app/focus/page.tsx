@@ -65,6 +65,9 @@ export default function FocusPage() {
         apiRequest<ExecutionResourceEnvelope<{ current: CurrentExecution }>>('/api/execution-sessions/current'),
         apiRequest<ExecutionResourceEnvelope<{ execution_sessions: ExecutionSession[] }>>('/api/execution-sessions'),
       ])
+      // The browser timer is display-only. Re-anchor it whenever server state is
+      // loaded so background-tab throttling cannot make elapsed time appear lost.
+      setNow(Date.now())
       setCurrent(currentData.data.current)
       setHistory(historyData.data.execution_sessions || [])
     } catch (error) {
@@ -81,7 +84,10 @@ export default function FocusPage() {
   useEffect(() => {
     const refreshExecution = () => void loadExecution()
     const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') refreshExecution()
+      if (document.visibilityState === 'visible') {
+        setNow(Date.now())
+        refreshExecution()
+      }
     }
 
     window.addEventListener('humanos:plan-updated', refreshExecution)
