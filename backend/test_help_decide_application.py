@@ -34,6 +34,11 @@ class HelpDecideApplicationTests(unittest.TestCase):
         self.assertEqual(10, result["break_minutes"])
         self.assertFalse(result["validation"]["valid"])
 
+    def test_chinese_fallback_uses_chinese_reason(self) -> None:
+        result = fallback_recommendation({"locale": "zh", "runtime_state": {"focus": 2, "energy": 2, "stress": 6}})
+        self.assertEqual("short_break", result["action"])
+        self.assertIn("休息", result["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()

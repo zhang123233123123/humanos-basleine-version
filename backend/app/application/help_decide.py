@@ -11,6 +11,7 @@ ALLOWED_ACTIONS = {"short_break", "continue_current", "switch_task", "continue_l
 def fallback_recommendation(context: dict[str, Any]) -> dict[str, Any]:
     state = context.get("runtime_state") or {}
     reason = str(context.get("reason") or "").lower()
+    zh = str(context.get("locale") or "").lower().startswith("zh")
     ready_queue = context.get("ready_queue") or []
     if any(token in reason for token in ("blocked", "waiting", "缺材料", "卡住", "等待")) and ready_queue:
         candidate = ready_queue[0]
@@ -19,18 +20,18 @@ def fallback_recommendation(context: dict[str, Any]) -> dict[str, Any]:
             "target_execution_session_id": candidate.get("execution_session_id"),
             "target_task_id": candidate.get("task_id"),
             "duration_minutes": min(int(candidate.get("remaining_minutes") or candidate.get("planned_work_minutes") or 30), 45),
-            "reason": "The current task is blocked, so switch to a ready task without losing its context.",
+            "reason": "当前任务处于阻塞状态，建议切换到一项已就绪任务，同时保留当前上下文。" if zh else "The current task is blocked, so switch to a ready task without losing its context.",
         }
     if int(state.get("energy") or 4) <= 3 or int(state.get("focus") or 4) <= 3 or int(state.get("stress") or 4) >= 6:
         return {
             "action": "short_break",
             "break_minutes": 10,
-            "reason": "Your current capacity is low; take a short timed break before deciding whether to continue.",
+            "reason": "你当前的精力或专注较低，先进行一次有时限的短暂休息，再判断是否继续。" if zh else "Your current capacity is low; take a short timed break before deciding whether to continue.",
         }
     return {
         "action": "continue_current",
         "duration_minutes": min(max(int(context.get("remaining_minutes") or 25), 5), 25),
-        "reason": "Your current state can support one bounded continuation of this task.",
+        "reason": "你当前的状态可以支持继续完成一个有明确时长的工作段。" if zh else "Your current state can support one bounded continuation of this task.",
     }
 
 
@@ -76,6 +77,7 @@ def validate_recommendation(raw: object, context: dict[str, Any]) -> dict[str, A
 
 
 def recommendation_prompt(context: dict[str, Any]) -> list[dict[str, str]]:
+    response_language = "Simplified Chinese" if str(context.get("locale") or "").lower().startswith("zh") else "English"
     return [
         {
             "role": "system",
@@ -86,6 +88,7 @@ def recommendation_prompt(context: dict[str, Any]) -> list[dict[str, str]]:
                 "switch_task (target_execution_session_id), continue_later. Consider the interruption "
                 "reason, current focus/energy/stress, elapsed and remaining work, deadline, ready queue, "
                 "fixed events, buffer and downstream impact. Never invent task or session identifiers."
+                f" Write the reason in {response_language}."
             ),
         },
         {"role": "user", "content": str(context)},

@@ -72,7 +72,7 @@ export default function CheckInPage() {
     try {
       const result = await apiRequest<{ data: HelpDecideRecommendation }>('/api/execution/recommendations', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_id: taskId, reason: decisionReason, runtime_state: runtimeState }),
+        body: JSON.stringify({ task_id: taskId, reason: decisionReason, locale, runtime_state: runtimeState }),
       })
       setDecision(result.data)
     } catch (error) { toast(error instanceof Error ? error.message : t('checkin.saveFailed')) }
@@ -95,7 +95,7 @@ export default function CheckInPage() {
       const endpoint = accepted ? '/api/execution/recommendations/apply' : '/api/execution/recommendations/feedback'
       await apiRequest(endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recommendation_id: decision.id, task_id: taskId, reason: decisionReason, preferred_resume_at: decisionResumeAt || undefined, progress, progress_percent: progressPercent, remaining_duration_minutes: remainingMinutes, next_action: nextAction, open_questions: openQuestions, recommendation: decision.recommendation, accepted, recommended_action: action, selected_action: accepted ? action : 'user_choice' }),
+        body: JSON.stringify({ recommendation_id: decision.id, task_id: taskId, reason: decisionReason, locale, preferred_resume_at: decisionResumeAt || undefined, progress, progress_percent: progressPercent, remaining_duration_minutes: remainingMinutes, next_action: nextAction, open_questions: openQuestions, recommendation: decision.recommendation, accepted, recommended_action: action, selected_action: accepted ? action : 'user_choice' }),
       })
       toast(accepted ? (locale === 'zh' ? '建议已执行' : 'Recommendation applied') : (locale === 'zh' ? '选择已记录' : 'Choice recorded'))
       window.location.assign(accepted && action === 'continue_later' ? `/app/plan?adjust=continue-later&task_id=${encodeURIComponent(taskId)}` : '/app/focus')

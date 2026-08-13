@@ -18,6 +18,7 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
+from functools import wraps
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -659,12 +660,22 @@ def session_absolute_times(week_id: str, day_index: int, start: float, end: floa
     return start_at.isoformat(), end_at.isoformat()
 
 
+def transactional(method):
+    """Run a Store application operation inside one re-entrant transaction."""
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self.atomic():
+            return method(self, *args, **kwargs)
+    return wrapped
+
+
 class Store:
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
         self.schedule_request_lock = threading.Lock()
         self.schedule_request_cache: dict[str, dict] = {}
+        self._transaction_state = threading.local()
         self.init_db()
         self.resume_background_jobs()
 
@@ -677,6 +688,10 @@ class Store:
         connections inside ``with`` blocks, so closing here prevents leaked
         file handles in tests and long-running server sessions.
         """
+        ambient = getattr(self._transaction_state, "connection", None)
+        if ambient is not None:
+            yield ambient
+            return
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
         try:
@@ -686,6 +701,27 @@ class Store:
             conn.rollback()
             raise
         finally:
+            conn.close()
+
+    @contextmanager
+    def atomic(self):
+        """Provide one connection to every nested Store method in this thread."""
+        existing = getattr(self._transaction_state, "connection", None)
+        if existing is not None:
+            yield existing
+            return
+        conn = sqlite3.connect(self.path)
+        conn.row_factory = sqlite3.Row
+        self._transaction_state.connection = conn
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            self._transaction_state.connection = None
             conn.close()
 
     def init_db(self) -> None:
@@ -4114,6 +4150,7 @@ class Store:
         })
         context = {
             "reason": str(payload.get("reason") or "").strip(),
+            "locale": str(payload.get("locale") or "en"),
             "runtime_state": runtime_state,
             "task": {key: task.get(key) for key in ("id", "title", "priority", "deadline_at", "expected_difficulty", "cognitive_load")},
             "execution_session": {key: session.get(key) for key in ("execution_session_id", "status", "planned_start_at", "planned_end_at", "planned_work_minutes", "live_active_minutes")},
@@ -4183,12 +4220,27 @@ class Store:
         action = recommendation["action"]
         if action == "continue_later" and not str(payload.get("preferred_resume_at") or "").strip():
             raise ValueError("preferred_resume_at is required for continue_later")
+        if action == "continue_later":
+            try:
+                preferred = datetime.fromisoformat(str(payload["preferred_resume_at"]).replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                raise ValueError("preferred_resume_at must be a valid ISO datetime")
+            profile = self.ensure_profile(user_id)
+            current = self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai")
+            if preferred.tzinfo is None:
+                preferred = preferred.replace(tzinfo=current.tzinfo)
+            if preferred <= current:
+                raise ValueError("preferred_resume_at must be in the future")
+            active = self.active_plan(user_id, str(session.get("week_id") or "")) or {}
+            if not active.get("plan_id") or active.get("plan_status") not in {"confirmed", "needs_update"}:
+                raise ValueError("An active confirmed plan is required before leaving this task for later")
+        context_payload = None
         if action in {"continue_later", "switch_task"}:
             progress = str(payload.get("progress") or "").strip()
             next_action = str(payload.get("next_action") or "").strip()
             if not progress or not next_action:
                 raise ValueError("progress and next_action are required before leaving the current task")
-            context_dump = self.save_context_dump(user_id, {
+            context_payload = {
                 "task_id": task_id,
                 "progress": progress,
                 "progress_percent": min(max(int(payload.get("progress_percent") or 0), 0), 100),
@@ -4197,23 +4249,23 @@ class Store:
                 "open_questions": payload.get("open_questions") or [],
                 "stop_reason": payload.get("reason") or "help_decide_recommendation",
                 "materials": [],
-            })
-        else:
-            context_dump = None
+            }
+        context_dump = None
         execution_result: dict = {"action": action, "execution_session": session}
-        if context_dump:
-            execution_result["context_dump"] = context_dump
-
-        if action == "continue_current":
-            if session.get("status") == "paused":
-                resumed = self.start_execution_session(user_id, {
-                    "execution_session_id": session.get("execution_session_id"),
-                    "request_id": f"{payload.get('recommendation_id')}:resume",
-                    "confirm_schedule_impact": True,
-                })
-                execution_result["execution_session"] = resumed
-        else:
-            command_payload = {
+        with self.atomic():
+            if context_payload:
+                context_dump = self.save_context_dump(user_id, {**context_payload, "skip_memory_index": True})
+                execution_result["context_dump"] = context_dump
+            if action == "continue_current":
+                if session.get("status") == "paused":
+                    resumed = self.start_execution_session(user_id, {
+                        "execution_session_id": session.get("execution_session_id"),
+                        "request_id": f"{payload.get('recommendation_id')}:resume",
+                        "confirm_schedule_impact": True,
+                    })
+                    execution_result["execution_session"] = resumed
+            else:
+                command_payload = {
                 "execution_session_id": session.get("execution_session_id"),
                 "interruption_action": action,
                 "reason": payload.get("reason") or "help_decide_recommendation",
@@ -4221,32 +4273,35 @@ class Store:
                 "break_minutes": recommendation.get("break_minutes"),
                 "preferred_resume_at": payload.get("preferred_resume_at"),
                 "remaining_duration_minutes": session.get("session_remaining_minutes"),
-            }
-            command = build_interruption_command(command_payload)
-            paused = self.pause_execution_session(user_id, command)
-            impact = None if action == "short_break" else self.analyze_execution_impact(user_id, {**command, "action": action})
-            execution_result.update(interruption_response(
-                execution_session=paused,
-                command=command,
-                impact=impact,
-                reschedule_check=(impact or {}).get("reschedule_check"),
-            ))
-            if action == "switch_task":
-                target_id = recommendation.get("target_execution_session_id")
-                started = self.start_execution_session(user_id, {
-                    "execution_session_id": target_id,
-                    "request_id": f"{payload.get('recommendation_id')}:switch",
-                    "confirm_schedule_impact": True,
-                })
-                execution_result["switched_to"] = started
-            elif action == "continue_later":
-                execution_result.update(self.propose_continue_later_diff(
-                    user_id,
-                    paused,
-                    impact or {},
-                    request_id=f"{payload.get('recommendation_id')}:local-diff",
+                }
+                command = build_interruption_command(command_payload)
+                paused = self.pause_execution_session(user_id, command)
+                impact = None if action == "short_break" else self.analyze_execution_impact(user_id, {**command, "action": action})
+                execution_result.update(interruption_response(
+                    execution_session=paused,
+                    command=command,
+                    impact=impact,
+                    reschedule_check=(impact or {}).get("reschedule_check"),
                 ))
-                execution_result["requires_user_confirmation"] = True
+                if action == "switch_task":
+                    target_id = recommendation.get("target_execution_session_id")
+                    started = self.start_execution_session(user_id, {
+                        "execution_session_id": target_id,
+                        "request_id": f"{payload.get('recommendation_id')}:switch",
+                        "confirm_schedule_impact": True,
+                    })
+                    execution_result["switched_to"] = started
+                elif action == "continue_later":
+                    execution_result.update(self.propose_continue_later_diff(
+                        user_id,
+                        paused,
+                        impact or {},
+                        request_id=f"{payload.get('recommendation_id')}:local-diff",
+                    ))
+                    execution_result["requires_user_confirmation"] = True
+
+        if context_dump:
+            self.index_context_dump_memory(user_id, context_dump)
 
         feedback = self.save_help_decide_feedback(user_id, {
             **payload,
@@ -4334,12 +4389,19 @@ class Store:
             conn.execute("UPDATE plans SET plan_status='needs_update',updated_at=? WHERE user_id=? AND week_id=? AND plan_status='confirmed'", (dump["created_at"], user_id, task.get("week_id")))
             conn.execute("UPDATE profiles SET active_plan_revision=NULL,updated_at=? WHERE user_id=?", (dump["created_at"], user_id))
             self._insert_state_transition(conn, user_id=user_id, task_id=task_id, before_status=str(task.get("status") or "unknown"), action_type="capture_context", after_status=next_status, action_detail={"context_dump_id": dump_id, "stop_reason": dump["stop_reason"]}, outcome={"persisted": True, "remaining_minutes": execution["remaining_duration_minutes"]}, created_at=dump["created_at"])
+        if not payload.get("skip_memory_index"):
+            self.index_context_dump_memory(user_id, dump)
+        self.log_event(user_id, "context_dump_saved", dump)
+        return dump
+
+    def index_context_dump_memory(self, user_id: str, dump: dict) -> dict:
+        task_id = str(dump.get("task_id") or "")
         memory_text = (
             f"Context dump for task {task_id}. Progress: {dump['progress']}. "
             f"Open questions: {', '.join(dump['open_questions'])}. "
             f"Next action: {dump['next_action']}. Stop reason: {dump['stop_reason']}."
         )
-        self.add_memory(
+        return self.add_memory(
             user_id=user_id,
             source_type="context_dump",
             source_id=dump_id,
@@ -4347,8 +4409,6 @@ class Store:
             text=memory_text,
             metadata={"stop_reason": dump["stop_reason"], "task_id": task_id},
         )
-        self.log_event(user_id, "context_dump_saved", dump)
-        return dump
 
     @staticmethod
     def _iso_elapsed_minutes(start_value: str | None, end_value: str | None = None) -> int:
