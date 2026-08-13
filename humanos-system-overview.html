@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HumanOS | 系统编排说明</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700;900&display=swap');
+
+    :root {
+      --ink: #dce8df;
+      --muted: #84958a;
+      --paper: #07100c;
+      --card: #0d1812;
+      --line: #273a2e;
+      --green: #68e59b;
+      --lime: #d7ff63;
+      --orange: #ff8a62;
+      --blue: #65a2ff;
+      --soft-green: #13271b;
+      --shadow: 0 18px 50px rgba(0, 0, 0, .3);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(rgba(104,229,155,.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(104,229,155,.045) 1px, transparent 1px),
+        var(--paper);
+      background-size: 32px 32px;
+      font-family: "Noto Sans SC", sans-serif;
+    }
+
+    a { color: inherit; text-decoration: none; }
+    .mono { font-family: "DM Mono", monospace; }
+    .shell { width: min(1240px, calc(100% - 40px)); margin: 0 auto; }
+
+    nav {
+      position: sticky; top: 0; z-index: 10;
+      border-bottom: 1px solid rgba(23,35,29,.14);
+      background: rgba(7,16,12,.9);
+      backdrop-filter: blur(16px);
+    }
+    nav .shell { height: 66px; display: flex; align-items: center; justify-content: space-between; }
+    .brand { display: flex; align-items: center; gap: 12px; font-weight: 900; letter-spacing: -.04em; }
+    .brand-mark { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--green); border-radius: 4px; color: var(--green); background: #0b1710; font-family: "DM Mono", monospace; }
+    .nav-links { display: flex; gap: 22px; color: var(--muted); font-size: 13px; }
+    .nav-links a:hover { color: var(--green); }
+
+    header { padding: 88px 0 62px; }
+    .eyebrow { display: flex; align-items: center; gap: 10px; color: var(--green); font: 500 12px "DM Mono", monospace; text-transform: uppercase; letter-spacing: .12em; }
+    .eyebrow::before { content: ""; width: 34px; height: 2px; background: var(--orange); }
+    h1 { max-width: 920px; margin: 24px 0 22px; font-size: clamp(48px, 7vw, 92px); line-height: .98; letter-spacing: -.075em; }
+    .hero-copy { max-width: 760px; margin: 0; color: var(--muted); font-size: clamp(16px, 2vw, 21px); line-height: 1.8; }
+    .hero-strip { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 52px; border: 1px solid var(--green); background: var(--card); box-shadow: var(--shadow); }
+    .metric { min-height: 132px; padding: 22px; border-right: 1px solid var(--ink); }
+    .metric:last-child { border-right: 0; }
+    .metric strong { display: block; margin: 7px 0; font-size: 24px; }
+    .metric span { color: var(--muted); font-size: 12px; }
+
+    section { padding: 72px 0; }
+    .section-head { display: grid; grid-template-columns: 1fr 1.5fr; gap: 40px; margin-bottom: 34px; align-items: end; }
+    .section-head h2 { margin: 0; font-size: clamp(32px, 4.2vw, 58px); line-height: 1.05; letter-spacing: -.055em; }
+    .section-head p { margin: 0; color: var(--muted); line-height: 1.8; }
+
+    .flow { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--green); background: var(--card); }
+    .flow-card { position: relative; min-height: 225px; padding: 24px; border-right: 1px solid var(--ink); overflow: hidden; }
+    .flow-card:nth-child(4n) { border-right: 0; }
+    .flow-card:nth-child(n+5) { border-top: 1px solid var(--ink); }
+    .flow-card .num { font: 500 12px "DM Mono", monospace; color: var(--orange); }
+    .flow-card h3 { margin: 32px 0 12px; font-size: 20px; }
+    .flow-card p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.7; }
+    .flow-card::after { content: "→"; position: absolute; right: 14px; top: 15px; font-size: 24px; color: var(--line); }
+    .flow-card:last-child::after { content: "✓"; color: var(--green); }
+
+    .engine { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .engine-card { padding: 34px; border-radius: 24px; border: 1px solid var(--ink); box-shadow: var(--shadow); }
+    .engine-card.hard { background: #102b1b; color: var(--ink); border-color: var(--green); }
+    .engine-card.soft { background: #17220c; border-color: var(--lime); }
+    .engine-card h3 { margin: 12px 0 8px; font-size: 30px; letter-spacing: -.04em; }
+    .engine-card > p { min-height: 54px; opacity: .75; line-height: 1.7; }
+    .rules { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 24px; }
+    .rule { padding: 12px; border: 1px solid currentColor; border-radius: 10px; font-size: 13px; opacity: .88; }
+
+    .timeline { padding: 32px; border: 1px solid var(--ink); border-radius: 24px; background: var(--card); }
+    .axis { display: grid; grid-template-columns: 105px 1fr; gap: 20px; align-items: center; margin: 20px 0; }
+    .axis-label { font-size: 13px; font-weight: 700; }
+    .track { position: relative; height: 52px; border-radius: 4px; background: repeating-linear-gradient(90deg, #101b15 0, #101b15 calc(12.5% - 1px), #304237 calc(12.5% - 1px), #304237 12.5%); overflow: hidden; }
+    .block { position: absolute; top: 7px; bottom: 7px; display: grid; place-items: center; padding: 0 8px; border-radius: 7px; color: white; font-size: 11px; white-space: nowrap; }
+    .fixed { left: 11%; width: 17%; color: #07100c; background: var(--ink); }
+    .focus { left: 34%; width: 22%; background: var(--blue); }
+    .break { left: 57%; width: 7%; color: #07100c; background: var(--lime); }
+    .draft { left: 69%; width: 20%; color: var(--green); border: 2px dashed var(--green); background: #102319; }
+    .legend { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 24px; color: var(--muted); font-size: 12px; }
+    .legend i { display: inline-block; width: 10px; height: 10px; margin-right: 7px; border-radius: 3px; }
+
+    .states { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 30px; border: 1px solid var(--green); border-radius: 8px; color: var(--ink); background: #050b08; }
+    .state { flex: 1; padding: 18px 10px; text-align: center; border: 1px solid #546159; border-radius: 12px; }
+    .state b { display: block; margin-bottom: 5px; color: var(--lime); }
+    .arrow { color: #6f7d74; }
+
+    .pause-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    .pause-card { padding: 24px; border: 1px solid var(--ink); border-radius: 18px; background: var(--card); }
+    .pause-card .icon { font-size: 28px; }
+    .pause-card h3 { margin: 18px 0 8px; }
+    .pause-card p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+
+    .data-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .data-card { padding: 24px; min-height: 180px; border-top: 4px solid var(--orange); background: var(--card); box-shadow: var(--shadow); }
+    .data-card h3 { font-family: "DM Mono", monospace; font-size: 16px; }
+    .data-card p { color: var(--muted); font-size: 13px; line-height: 1.7; }
+
+    .capacity-board { display: grid; grid-template-columns: .8fr 1.2fr; gap: 18px; }
+    .status-panel, .priority-panel { padding: 30px; border: 1px solid var(--ink); border-radius: 22px; background: var(--card); }
+    .status-panel h3, .priority-panel h3 { margin: 8px 0 22px; font-size: 25px; }
+    .gauge { margin: 18px 0; }
+    .gauge-head { display: flex; justify-content: space-between; margin-bottom: 7px; font-size: 13px; }
+    .gauge-track { height: 12px; border: 1px solid var(--ink); border-radius: 99px; overflow: hidden; background: #e8e9e2; }
+    .gauge-fill { height: 100%; background: var(--blue); }
+    .gauge.energy .gauge-fill { background: var(--lime); }
+    .gauge.stress .gauge-fill { background: var(--orange); }
+    .priority-stack { display: grid; gap: 10px; }
+    .priority-row { display: grid; grid-template-columns: 38px 1fr auto; align-items: center; gap: 12px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; }
+    .priority-rank { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 4px; color: #07100c; background: var(--green); font-family: "DM Mono", monospace; }
+    .priority-row small { color: var(--muted); }
+    .score { font: 500 12px "DM Mono", monospace; color: var(--orange); }
+    .formula { margin-top: 16px; padding: 14px; color: var(--green); border-left: 4px solid var(--lime); background: var(--soft-green); font-size: 13px; line-height: 1.7; }
+
+    .os-map { overflow: hidden; border: 1px solid var(--ink); border-radius: 22px; background: var(--card); }
+    .os-row { display: grid; grid-template-columns: 1fr 1fr 1.5fr; border-top: 1px solid var(--line); }
+    .os-row:first-child { border-top: 0; color: #07100c; background: var(--green); font: 500 12px "DM Mono", monospace; }
+    .os-cell { padding: 18px 20px; border-right: 1px solid var(--line); }
+    .os-cell:last-child { border-right: 0; }
+    .os-row:not(:first-child) .os-cell:first-child { font-weight: 700; }
+    .os-row:not(:first-child) .os-cell:nth-child(2) { color: var(--blue); font-family: "DM Mono", monospace; font-size: 13px; }
+    .os-row:not(:first-child) .os-cell:last-child { color: var(--muted); font-size: 13px; line-height: 1.65; }
+
+    .principle { padding: 58px; border: 1px solid var(--orange); border-radius: 8px; color: var(--ink); background: #29140d; }
+    .principle blockquote { max-width: 920px; margin: 0; font-size: clamp(30px, 4.5vw, 62px); font-weight: 900; line-height: 1.12; letter-spacing: -.055em; }
+    .principle p { margin: 28px 0 0; opacity: .82; }
+    footer { padding: 30px 0 60px; color: var(--muted); font-size: 12px; }
+
+    .reveal { animation: rise .65s both; }
+    @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+
+    @media (max-width: 850px) {
+      .nav-links { display: none; }
+      header { padding-top: 58px; }
+      .hero-strip, .flow, .data-grid { grid-template-columns: 1fr 1fr; }
+      .metric:nth-child(2) { border-right: 0; }
+      .metric:nth-child(n+3) { border-top: 1px solid var(--ink); }
+      .flow-card:nth-child(2n) { border-right: 0; }
+      .flow-card:nth-child(n+3) { border-top: 1px solid var(--ink); }
+      .engine, .section-head { grid-template-columns: 1fr; }
+      .capacity-board { grid-template-columns: 1fr; }
+      .pause-grid { grid-template-columns: 1fr 1fr; }
+      .states { flex-direction: column; }
+      .state { width: 100%; }
+      .arrow { transform: rotate(90deg); }
+    }
+    @media (max-width: 520px) {
+      .shell { width: min(100% - 24px, 1240px); }
+      .hero-strip, .flow, .data-grid, .pause-grid { grid-template-columns: 1fr; }
+      .metric, .flow-card { border-right: 0; border-top: 1px solid var(--ink); }
+      .metric:first-child, .flow-card:first-child { border-top: 0; }
+      .axis { grid-template-columns: 1fr; gap: 8px; }
+      .timeline, .engine-card, .principle { padding: 22px; }
+      .os-row { grid-template-columns: 1fr; }
+      .os-cell { border-right: 0; border-bottom: 1px solid var(--line); }
+      .os-cell:last-child { border-bottom: 0; }
+      section { padding: 50px 0; }
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="shell">
+      <a class="brand" href="#top"><span class="brand-mark">OS</span>HumanOS Kernel</a>
+      <div class="nav-links"><a href="#flow">进程生命周期</a><a href="#engine">调度器</a><a href="#execution">中断处理</a><a href="#data">内核对象</a></div>
+      <span class="mono">KERNEL MAP / PID 01</span>
+    </div>
+  </nav>
+
+  <main id="top">
+    <header class="shell reveal">
+      <div class="eyebrow">Human-centered operating system</div>
+      <h1>把人的任务，<br>当作进程来调度。</h1>
+      <p class="hero-copy">HumanOS 把一周视为有限 CPU 时间，把任务视为 Process，把任务进度与恢复信息保存在 PCB 中。AI 负责理解与提出候选方案，Python Scheduler 负责约束验证，用户拥有最终调度权。</p>
+      <div class="hero-strip">
+        <div class="metric"><span class="mono">SYSCALL</span><strong>自然语言输入</strong><span>创建、修改、中断与查询</span></div>
+        <div class="metric"><span class="mono">PROCESS</span><strong>Task + PCB</strong><span>任务字段、状态与上下文</span></div>
+        <div class="metric"><span class="mono">SCHEDULER</span><strong>Python + AI</strong><span>合法性验证与候选排序</span></div>
+        <div class="metric"><span class="mono">DISPATCH</span><strong>Execution</strong><span>时间片、计时与状态迁移</span></div>
+      </div>
+    </header>
+
+    <section id="flow" class="shell">
+      <div class="section-head"><h2>一个任务的<br>进程生命周期</h2><p>自然语言输入相当于系统调用。内核先创建任务对象和 PCB，再进入 Ready Queue；调度器分配合法时间片，用户确认后由 Dispatcher 发布到正式日历并等待执行。</p></div>
+      <div class="flow">
+        <article class="flow-card"><span class="num">01 / SYSTEM CALL</span><h3>接收用户命令</h3><p>区分 CREATE、UPDATE、DELETE、QUERY、INTERRUPT 与 RESCHEDULE。</p></article>
+        <article class="flow-card"><span class="num">02 / FORK</span><h3>创建 Process</h3><p>AI 将自然语言编译为 Task：时长、Deadline、Priority、Load 和 Dependency。</p></article>
+        <article class="flow-card"><span class="num">03 / PCB</span><h3>持久化上下文</h3><p>先保存 Process Control Block；AI 排程超时也不会丢失任务。</p></article>
+        <article class="flow-card"><span class="num">04 / RESOURCE MAP</span><h3>扫描可用资源</h3><p>把一周 CPU 时间、固定事项、已有 Session 与可用窗口映射为 Slot。</p></article>
+        <article class="flow-card"><span class="num">05 / TIME SLICE</span><h3>切分时间片</h3><p>按 Profile 的专注与休息周期，把总工作量拆成可执行时间片。</p></article>
+        <article class="flow-card"><span class="num">06 / READY QUEUE</span><h3>候选进程入队</h3><p>合法任务进入 Ready Queue，再按优先级、状态适配度和切换成本排序。</p></article>
+        <article class="flow-card"><span class="num">07 / SCHEDULER</span><h3>验证调度结果</h3><p>检查资源冲突、Deadline、Dependency、工作量守恒和并行上限。</p></article>
+        <article class="flow-card"><span class="num">08 / DISPATCH</span><h3>分派并等待运行</h3><p>用户确认后生成 Plan Revision 与 Execution Session，进入 Planned 状态。</p></article>
+      </div>
+    </section>
+
+    <section id="engine" class="shell">
+      <div class="section-head"><h2>Human-aware<br>Scheduler</h2><p>经典 Scheduler 关注 CPU、优先级与资源冲突；HumanOS 额外建模人的认知容量。硬约束回答进程能否运行，人的状态回答何时 Dispatch 更合理。</p></div>
+      <div class="engine">
+        <article class="engine-card hard"><span class="mono">LAYER A / DETERMINISTIC</span><h3>Python 硬约束</h3><p>所有候选方案都必须通过；AI 无权覆盖这些规则。</p><div class="rules"><div class="rule">可用时间窗口</div><div class="rule">固定事项保护</div><div class="rule">Deadline</div><div class="rule">Dependency</div><div class="rule">禁止非法重叠</div><div class="rule">剩余工作量守恒</div></div></article>
+        <article class="engine-card soft"><span class="mono">LAYER B / HUMAN-AWARE</span><h3>AI 与评分优化</h3><p>在合法解中比较更符合用户状态、任务性质和长期习惯的安排。</p><div class="rules"><div class="rule">精力与专注</div><div class="rule">认知负荷</div><div class="rule">任务优先级</div><div class="rule">压力与难度</div><div class="rule">历史 Pattern</div><div class="rule">负荷均衡</div></div></article>
+      </div>
+    </section>
+
+    <section class="shell">
+      <div class="section-head"><h2>一周就是有限的<br>CPU 时间资源</h2><p>Available Window 是可调度 CPU 区域，Fixed Event 是不可抢占进程，Focus Session 是时间片，Break 是冷却与等待区间。任何任务都不能越过资源边界。</p></div>
+      <div class="timeline">
+        <div class="axis"><div class="axis-label">周三 WED</div><div class="track"><span class="block fixed">固定会议</span><span class="block focus">分析访谈 · 45m</span><span class="block break">休息</span><span class="block draft">候选 Session · 45m</span></div></div>
+        <div class="axis"><div class="axis-label">周四 THU</div><div class="track"><span class="block focus" style="left:18%;width:18%">文献综述</span><span class="block break" style="left:37%;width:6%">休息</span><span class="block fixed" style="left:57%;width:21%">课程 / Fixed</span></div></div>
+        <div class="legend"><span><i style="background:#17231d"></i>固定事项</span><span><i style="background:#5d7fff"></i>正式 Session</span><span><i style="background:#d8ef62"></i>休息</span><span><i style="background:#edf5ee;border:1px dashed #174d35"></i>待确认草案</span></div>
+      </div>
+    </section>
+
+    <section id="execution" class="shell">
+      <div class="section-head"><h2>Process State<br>不是前端标签</h2><p>状态迁移必须由后端记录。Start 是 Dispatch，Pause 是 Interrupt，Resume 是重新派发，Complete 是 Terminate；每次变化都会更新 PCB，而不是只改变页面显示。</p></div>
+      <div class="states"><div class="state"><b>PLANNED</b>已排期</div><span class="arrow">→</span><div class="state"><b>READY</b>可开始</div><span class="arrow">→</span><div class="state"><b>RUNNING</b>执行中</div><span class="arrow">→</span><div class="state"><b>PAUSED</b>已暂停</div><span class="arrow">→</span><div class="state"><b>COMPLETED</b>已完成</div></div>
+      <div class="pause-grid" style="margin-top:18px">
+        <article class="pause-card"><span class="icon">◷</span><h3>短暂休息</h3><p>Timed Waiting。优先用当前余量和 Buffer 吸收，不必立即生成新计划。</p></article>
+        <article class="pause-card"><span class="icon">↪</span><h3>晚些继续</h3><p>Suspension。保存进度、剩余工作量和回来后的第一步，再选择恢复时间。</p></article>
+        <article class="pause-card"><span class="icon">⇄</span><h3>切换任务</h3><p>Context Switch。暂停原任务，从 Ready Queue 选择适合当前状态的新任务。</p></article>
+        <article class="pause-card"><span class="icon">◇</span><h3>帮助我决定</h3><p>Scheduler Decision。结合原因、精力、截止时间和后续安排提出具体建议。</p></article>
+      </div>
+    </section>
+
+    <section id="capacity" class="shell">
+      <div class="section-head"><h2>Human Capacity<br>是一种运行资源</h2><p>除了 CPU 时间，任务还消耗专注、精力与抗压容量。人的状态类似动态资源水位：不改变硬约束，却影响 Ready Queue 排序、时间片长度和是否发生抢占。</p></div>
+      <div class="capacity-board">
+        <article class="status-panel">
+          <span class="mono">HUMAN CAPACITY / NOW</span><h3>实时状态向量</h3>
+          <div class="gauge"><div class="gauge-head"><span>专注 Focus</span><b>5 / 7</b></div><div class="gauge-track"><div class="gauge-fill" style="width:71%"></div></div></div>
+          <div class="gauge energy"><div class="gauge-head"><span>精力 Energy</span><b>4 / 7</b></div><div class="gauge-track"><div class="gauge-fill" style="width:57%"></div></div></div>
+          <div class="gauge stress"><div class="gauge-head"><span>压力 Stress</span><b>6 / 7</b></div><div class="gauge-track"><div class="gauge-fill" style="width:86%"></div></div></div>
+          <div class="formula">状态不是新的硬约束。它用于判断此刻适合深度工作、轻任务、缩短 Session、先休息，还是切换任务。</div>
+        </article>
+        <article class="priority-panel">
+          <span class="mono">CANDIDATE RANKING</span><h3>候选任务综合优先级</h3>
+          <div class="priority-stack">
+            <div class="priority-row"><span class="priority-rank">01</span><div><b>准备导师汇报</b><br><small>Deadline 近 · 高优先级 · 状态匹配</small></div><span class="score">92</span></div>
+            <div class="priority-row"><span class="priority-rank">02</span><div><b>整理访谈编码</b><br><small>依赖已满足 · 中等负荷 · 可拆分</small></div><span class="score">78</span></div>
+            <div class="priority-row"><span class="priority-rank">03</span><div><b>调整图片格式</b><br><small>低认知负荷 · 高压力时的备选任务</small></div><span class="score">64</span></div>
+          </div>
+          <div class="formula"><b>排序语义：</b>Deadline 紧迫度 + 显式 Priority + Dependency + 剩余工作量 + 任务负荷与当前状态匹配度 + 历史 Pattern − 切换成本。Python 保证候选合法，AI 解释和比较人的适配性。</div>
+        </article>
+      </div>
+    </section>
+
+    <section id="os-scheduling" class="shell">
+      <div class="section-head"><h2>Interrupt Handler<br>中断处理程序</h2><p>用户中断不是暂停前端计时器，而是触发内核事件：保存 PCB、更新 Process State、决定 Waiting、Suspended 或 Ready，并在资源受影响时调用 Rescheduler。</p></div>
+      <div class="os-map">
+        <div class="os-row"><div class="os-cell">用户动作</div><div class="os-cell">调度概念</div><div class="os-cell">HumanOS 系统行为</div></div>
+        <div class="os-row"><div class="os-cell">点击 Pause</div><div class="os-cell">Interrupt</div><div class="os-cell">停止有效计时，原子保存 task_id、actual duration、remaining work、Session、Plan Revision 和执行上下文。</div></div>
+        <div class="os-row"><div class="os-cell">短暂休息</div><div class="os-cell">Timed Waiting</div><div class="os-cell">任务保持不变并进入定时等待；休息结束后恢复同一任务，优先由 Session 余量或 Buffer 吸收。</div></div>
+        <div class="os-row"><div class="os-cell">晚些继续</div><div class="os-cell">Suspension</div><div class="os-cell">释放当前时间片，保存 Progress、Next Step 和剩余分钟；到选择的时间重新进入 Ready Queue。</div></div>
+        <div class="os-row"><div class="os-cell">切换任务</div><div class="os-cell">Preemption + Context Switch</div><div class="os-cell">保存当前任务上下文，从 Ready Queue 选择另一任务直接执行，并计算切换是否影响未来日程。</div></div>
+        <div class="os-row"><div class="os-cell">帮助我决定</div><div class="os-cell">Scheduler Decision</div><div class="os-cell">调度器综合当前状态、任务优先级、Deadline、Fixed Event、Buffer 和剩余容量提出具体动作。</div></div>
+        <div class="os-row"><div class="os-cell">恢复任务</div><div class="os-cell">Resume / Dispatch</div><div class="os-cell">通过 Resume Brief 恢复上下文，重新检查 Ready 条件和后续冲突，再决定直接运行或生成局部调整草案。</div></div>
+        <div class="os-row"><div class="os-cell">影响后续安排</div><div class="os-cell">Rescheduling</div><div class="os-cell">保护已执行 Session 和 Fixed Event，只释放受影响的未来 Slot；用户确认 Calendar Diff 后创建新 Plan Revision。</div></div>
+      </div>
+    </section>
+
+    <section id="data" class="shell">
+      <div class="section-head"><h2>HumanOS 的<br>内核数据结构</h2><p>这些对象共同承担传统操作系统中资源表、进程描述符、调度版本和执行上下文的职责，并保证所有页面读取同一个后端事实源。</p></div>
+      <div class="data-grid">
+        <article class="data-card"><h3>Profile / Resource Table</h3><p>描述可用时间、专注周期、休息长度、人的容量与已确认 Pattern。</p></article>
+        <article class="data-card"><h3>Task / Process</h3><p>描述目标、Deadline、Priority、Load、Dependency 与 remaining work。</p></article>
+        <article class="data-card"><h3>PlanRevision / Schedule</h3><p>保存调度表版本、局部 Calendar Diff、变更原因与回滚边界。</p></article>
+        <article class="data-card"><h3>Session / PCB Context</h3><p>保存时间片、实际运行时间、暂停记录、进度、Next Step 与状态。</p></article>
+      </div>
+    </section>
+
+    <section class="shell">
+      <div class="principle"><blockquote>AI 是启发式调度器，Python 是内核约束，用户是最高权限。</blockquote><p>HumanOS 借用操作系统的资源分配、优先级队列、中断、抢占、上下文切换和重新调度，把人的计划变化变成可解释、可验证的状态迁移。</p></div>
+    </section>
+  </main>
+
+  <footer class="shell"><span class="mono">HUMANOS SYSTEM OVERVIEW · 2026</span></footer>
+</body>
+</html>
