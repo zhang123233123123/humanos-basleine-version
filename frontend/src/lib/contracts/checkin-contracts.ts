@@ -54,6 +54,22 @@ export interface DailyPlanReview {
   options: string[]
 }
 
+export interface HelpDecideRecommendation {
+  id: string
+  provider: 'deepseek' | 'deterministic_fallback'
+  recommendation: {
+    action: 'short_break' | 'continue_current' | 'switch_task' | 'continue_later'
+    reason: string
+    break_minutes?: number
+    duration_minutes?: number
+    target_execution_session_id?: string
+    target_task_id?: string
+    target_task_title?: string
+    validated: boolean
+    validation: { valid: boolean; violations: string[]; checked_by: string }
+  }
+}
+
 export interface CheckInResourceEnvelope<T> {
   data: T
   resources: { self: string; profile: string; active_plan: string; execution_sessions: string }

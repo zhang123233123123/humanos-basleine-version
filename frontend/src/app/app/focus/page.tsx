@@ -242,7 +242,7 @@ export default function FocusPage() {
 
   const askHumanOS = () => {
     if (!session) return
-    router.push(`/app/check-in?mode=daily&source=help-decide&taskId=${encodeURIComponent(session.task_id)}`)
+    router.push(`/app/check-in?mode=daily&source=help-decide&task_id=${encodeURIComponent(session.task_id)}`)
   }
 
   const endSession = async () => {

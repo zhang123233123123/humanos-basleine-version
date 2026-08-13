@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { apiRequest } from '@/lib/client/api'
-import type { CheckInResourceEnvelope, ContextDump, DailyPlanReview, ReentryResult, RuntimeState, TaskLifecycleResourceEnvelope } from '@/lib/contracts/checkin-contracts'
+import type { CheckInResourceEnvelope, ContextDump, DailyPlanReview, HelpDecideRecommendation, ReentryResult, RuntimeState, TaskLifecycleResourceEnvelope } from '@/lib/contracts/checkin-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 
@@ -18,11 +18,13 @@ export default function CheckInPage() {
   const { t, locale } = useTranslation()
   const params = useSearchParams()
   const mode: Mode = params.get('mode') === 'interruption' ? 'interruption' : 'daily'
+  const helpDecide = params.get('source') === 'help-decide'
   const taskId = params.get('task_id') || ''
   const [submitting, setSubmitting] = useState(false)
   const [saved, setSaved] = useState(false)
   const [reentry, setReentry] = useState<ReentryResult | null>(null)
   const [dailyReview, setDailyReview] = useState<DailyPlanReview | null>(null)
+  const [decision, setDecision] = useState<HelpDecideRecommendation | null>(null)
   const [focus, setFocus] = useState(5)
   const [energy, setEnergy] = useState(5)
   const [stress, setStress] = useState(3)
@@ -36,6 +38,8 @@ export default function CheckInPage() {
   const [nextAction, setNextAction] = useState('')
   const [openQuestions, setOpenQuestions] = useState('')
   const [stopReason, setStopReason] = useState('interrupted')
+  const [decisionReason, setDecisionReason] = useState('tired')
+  const [decisionResumeAt, setDecisionResumeAt] = useState('')
 
   const runtimeState: RuntimeState = useMemo(() => ({ focus, energy, stress, mood, readiness }), [focus, energy, stress, mood, readiness])
 
@@ -59,6 +63,39 @@ export default function CheckInPage() {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  const requestDecision = async () => {
+    if (!taskId) return toast(t('checkin.missingTask'))
+    setSubmitting(true)
+    try {
+      const result = await apiRequest<{ data: HelpDecideRecommendation }>('/api/execution/recommendations', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: taskId, reason: decisionReason, runtime_state: runtimeState }),
+      })
+      setDecision(result.data)
+    } catch (error) { toast(error instanceof Error ? error.message : t('checkin.saveFailed')) }
+    finally { setSubmitting(false) }
+  }
+
+  const recordDecision = async (accepted: boolean) => {
+    if (!decision) return
+    const action = decision.recommendation.action
+    if (accepted && action === 'continue_later' && !decisionResumeAt) {
+      toast(locale === 'zh' ? '请选择恢复时间' : 'Choose a resume time')
+      return
+    }
+    setSubmitting(true)
+    try {
+      const endpoint = accepted ? '/api/execution/recommendations/apply' : '/api/execution/recommendations/feedback'
+      await apiRequest(endpoint, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recommendation_id: decision.id, task_id: taskId, reason: decisionReason, preferred_resume_at: decisionResumeAt || undefined, recommendation: decision.recommendation, accepted, recommended_action: action, selected_action: accepted ? action : 'user_choice' }),
+      })
+      toast(accepted ? (locale === 'zh' ? '建议已执行' : 'Recommendation applied') : (locale === 'zh' ? '选择已记录' : 'Choice recorded'))
+      window.location.assign(accepted && action === 'continue_later' ? `/app/plan?adjust=continue-later&task_id=${encodeURIComponent(taskId)}` : '/app/focus')
+    } catch (error) { toast(error instanceof Error ? error.message : t('checkin.saveFailed')) }
+    finally { setSubmitting(false) }
   }
 
   const saveInterruption = async () => {
@@ -143,7 +180,16 @@ export default function CheckInPage() {
           <p className="mt-2 max-w-2xl text-muted-foreground">{t(`checkin.${mode}Subtitle`)}</p>
         </header>
 
-        {mode === 'daily' ? (
+        {mode === 'daily' && helpDecide ? (
+          <Card>
+            <CardHeader><CardTitle>{locale === 'zh' ? '让 HumanOS 帮你决定下一步' : 'Let HumanOS recommend the next step'}</CardTitle><CardDescription>{locale === 'zh' ? '说明为什么难以继续，再提供此刻状态。建议不会在你确认前修改计划。' : 'Tell us why continuing is difficult and report your current state. Nothing changes until you confirm.'}</CardDescription></CardHeader>
+            <CardContent className="space-y-5">
+              <label className="grid gap-2 text-sm"><span>{locale === 'zh' ? '现在为什么难以继续？' : 'Why is it difficult to continue?'}</span><select className="h-10 rounded-md border bg-background px-3" value={decisionReason} onChange={(event) => setDecisionReason(event.target.value)}><option value="tired">{locale === 'zh' ? '疲劳' : 'Tired'}</option><option value="blocked">{locale === 'zh' ? '卡住了' : 'Stuck'}</option><option value="waiting_material">{locale === 'zh' ? '等待材料' : 'Waiting for material'}</option><option value="interrupted">{locale === 'zh' ? '被打断' : 'Interrupted'}</option><option value="took_longer">{locale === 'zh' ? '任务比预计更久' : 'Took longer than expected'}</option></select></label>
+              <div className="grid gap-3 md:grid-cols-3">{slider(t('checkin.focus'), focus, setFocus, <Brain className="h-4 w-4" />)}{slider(t('checkin.energy'), energy, setEnergy, <BatteryMedium className="h-4 w-4" />)}{slider(t('checkin.stress'), stress, setStress, <Gauge className="h-4 w-4" />)}</div>
+              {!decision ? <Button className="w-full" onClick={requestDecision} disabled={submitting}>{submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{locale === 'zh' ? '生成一个具体建议' : 'Generate one recommendation'}</Button> : <div className="rounded-2xl border border-primary/30 bg-primary/5 p-5"><div className="flex items-center justify-between gap-3"><h3 className="font-semibold">{locale === 'zh' ? 'HumanOS 建议' : 'HumanOS recommendation'}</h3><span className="rounded-full bg-background px-2 py-1 text-xs">{decision.provider === 'deepseek' ? 'AI + Python' : 'Python fallback'}</span></div><p className="mt-3 text-lg font-medium">{decision.recommendation.action === 'short_break' ? (locale === 'zh' ? `休息 ${decision.recommendation.break_minutes} 分钟` : `Take a ${decision.recommendation.break_minutes}-minute break`) : decision.recommendation.action === 'continue_current' ? (locale === 'zh' ? `继续当前任务 ${decision.recommendation.duration_minutes} 分钟` : `Continue for ${decision.recommendation.duration_minutes} minutes`) : decision.recommendation.action === 'switch_task' ? (locale === 'zh' ? `切换到 ${decision.recommendation.target_task_title || '下一项任务'}` : `Switch to ${decision.recommendation.target_task_title || 'the next task'}`) : (locale === 'zh' ? '晚些时候继续当前任务' : 'Continue this task later')}</p><p className="mt-2 text-sm text-muted-foreground">{decision.recommendation.reason}</p>{decision.recommendation.action === 'continue_later' && <label className="mt-4 grid gap-2 text-sm"><span>{locale === 'zh' ? '希望什么时候恢复？' : 'When would you like to resume?'}</span><input type="datetime-local" value={decisionResumeAt} onChange={(event) => setDecisionResumeAt(event.target.value)} className="h-10 rounded-md border bg-background px-3" /></label>}<p className="mt-3 text-xs text-muted-foreground">{locale === 'zh' ? '已通过 Python 执行策略校验；涉及日历变化时仍需在调整草案中确认。' : 'Validated by the Python execution policy. Calendar changes still require confirmation in the adjustment draft.'}</p><div className="mt-4 flex flex-wrap gap-2"><Button onClick={() => void recordDecision(true)} disabled={submitting}>{locale === 'zh' ? '接受建议' : 'Accept'}</Button><Button variant="outline" onClick={() => void recordDecision(false)} disabled={submitting}>{locale === 'zh' ? '我自己选择' : 'Choose myself'}</Button><Button variant="ghost" onClick={() => setDecision(null)}>{locale === 'zh' ? '重新建议' : 'Try again'}</Button></div></div>}
+            </CardContent>
+          </Card>
+        ) : mode === 'daily' ? (
           <Card>
             <CardHeader><CardTitle>{t('checkin.currentState')}</CardTitle><CardDescription>{t('checkin.currentStateDescription')}</CardDescription></CardHeader>
             <CardContent className="space-y-5">

@@ -4093,6 +4093,151 @@ class Store:
             "options": ["keep_plan"] if not reasons else ["apply_recommendation", "regenerate_today_plan", "edit_plan_manually", "keep_plan"],
         }
 
+    def help_decide(self, user_id: str, payload: dict) -> dict:
+        from app.application.help_decide import recommendation_prompt, validate_recommendation
+        from app.application.ready_queue import build_ready_queue
+
+        task_id = str(payload.get("task_id") or "")
+        sessions = self.list_execution_sessions(user_id, ["running", "paused", "ready"])
+        session = next((item for item in sessions if str(item.get("task_id") or "") == task_id and item.get("status") in {"running", "paused"}), None)
+        if not session:
+            raise ValueError("No active execution session is available for this task")
+        task = self.get_task(task_id, user_id) or {}
+        runtime_state = self.save_runtime_state(user_id, {**payload.get("runtime_state", {}), "daily_checkin": False})
+        ready_sessions = [item for item in sessions if item.get("status") == "ready"]
+        ready_tasks = {str(item.get("task_id") or ""): self.get_task(str(item.get("task_id") or ""), user_id) or {} for item in ready_sessions}
+        ready_queue = build_ready_queue(ready_sessions, ready_tasks, exclude_task_id=task_id, plan_revision=session.get("plan_revision"))
+        impact = self.analyze_execution_impact(user_id, {
+            "execution_session_id": session.get("execution_session_id"),
+            "action": "help_decide",
+            "remaining_duration_minutes": session.get("session_remaining_minutes"),
+        })
+        context = {
+            "reason": str(payload.get("reason") or "").strip(),
+            "runtime_state": runtime_state,
+            "task": {key: task.get(key) for key in ("id", "title", "priority", "deadline_at", "expected_difficulty", "cognitive_load")},
+            "execution_session": {key: session.get(key) for key in ("execution_session_id", "status", "planned_start_at", "planned_end_at", "planned_work_minutes", "live_active_minutes")},
+            "elapsed_minutes": int(session.get("live_active_minutes") or 0),
+            "remaining_minutes": int(session.get("session_remaining_minutes") or 0),
+            "ready_queue": ready_queue,
+            "downstream_impact": impact,
+        }
+        ai_result = chat_completion(recommendation_prompt(context), temperature=0.1)
+        recommendation = validate_recommendation(ai_result, context)
+        recommendation_id = new_id("rec")
+        result = {"id": recommendation_id, "recommendation": recommendation, "context": context, "provider": "deepseek" if isinstance(ai_result, dict) else "deterministic_fallback"}
+        self.log_event(user_id, "help_decide_recommendation_created", result)
+        return result
+
+    def save_help_decide_feedback(self, user_id: str, payload: dict) -> dict:
+        recommendation_id = str(payload.get("recommendation_id") or "").strip()
+        if not recommendation_id:
+            raise ValueError("recommendation_id is required")
+        accepted = bool(payload.get("accepted"))
+        task_id = str(payload.get("task_id") or "") or None
+        feedback = {
+            "recommendation_id": recommendation_id,
+            "accepted": accepted,
+            "recommended_action": payload.get("recommended_action"),
+            "selected_action": payload.get("selected_action"),
+            "created_at": now_ms(),
+        }
+        self.add_memory(
+            user_id=user_id,
+            source_type="episodic_memory",
+            source_id=recommendation_id,
+            task_id=task_id,
+            text=f"Help-me-decide recommendation feedback: {as_json(feedback)}",
+            metadata={"kind": "recommendation_feedback", "eligible_for_pattern": True, **feedback},
+        )
+        self.log_event(user_id, "help_decide_recommendation_feedback", feedback)
+        return feedback
+
+    def apply_help_decide_recommendation(self, user_id: str, payload: dict) -> dict:
+        from app.application.execution_interruption import build_interruption_command, interruption_response
+        from app.application.help_decide import validate_recommendation
+        from app.application.ready_queue import build_ready_queue
+
+        task_id = str(payload.get("task_id") or "")
+        sessions = self.list_execution_sessions(user_id, ["running", "paused", "ready"])
+        session = next((item for item in sessions if str(item.get("task_id") or "") == task_id and item.get("status") in {"running", "paused"}), None)
+        if not session:
+            raise ValueError("No active execution session is available for this task")
+        ready_sessions = [item for item in sessions if item.get("status") == "ready"]
+        ready_tasks = {str(item.get("task_id") or ""): self.get_task(str(item.get("task_id") or ""), user_id) or {} for item in ready_sessions}
+        ready_queue = build_ready_queue(
+            ready_sessions,
+            ready_tasks,
+            exclude_task_id=task_id,
+            plan_revision=session.get("plan_revision"),
+        )
+        recommendation = validate_recommendation(
+            payload.get("recommendation"),
+            {
+                "runtime_state": self.latest_runtime_state(user_id),
+                "remaining_minutes": session.get("session_remaining_minutes"),
+                "ready_queue": ready_queue,
+                "reason": payload.get("reason"),
+            },
+        )
+        action = recommendation["action"]
+        execution_result: dict = {"action": action, "execution_session": session}
+
+        if action == "continue_current":
+            if session.get("status") == "paused":
+                resumed = self.start_execution_session(user_id, {
+                    "execution_session_id": session.get("execution_session_id"),
+                    "request_id": f"{payload.get('recommendation_id')}:resume",
+                    "confirm_schedule_impact": True,
+                })
+                execution_result["execution_session"] = resumed
+        else:
+            command_payload = {
+                "execution_session_id": session.get("execution_session_id"),
+                "interruption_action": action,
+                "reason": payload.get("reason") or "help_decide_recommendation",
+                "request_id": f"{payload.get('recommendation_id')}:pause",
+                "break_minutes": recommendation.get("break_minutes"),
+                "preferred_resume_at": payload.get("preferred_resume_at"),
+                "remaining_duration_minutes": session.get("session_remaining_minutes"),
+            }
+            command = build_interruption_command(command_payload)
+            paused = self.pause_execution_session(user_id, command)
+            impact = None if action == "short_break" else self.analyze_execution_impact(user_id, {**command, "action": action})
+            execution_result.update(interruption_response(
+                execution_session=paused,
+                command=command,
+                impact=impact,
+                reschedule_check=(impact or {}).get("reschedule_check"),
+            ))
+            if action == "switch_task":
+                target_id = recommendation.get("target_execution_session_id")
+                started = self.start_execution_session(user_id, {
+                    "execution_session_id": target_id,
+                    "request_id": f"{payload.get('recommendation_id')}:switch",
+                    "confirm_schedule_impact": True,
+                })
+                execution_result["switched_to"] = started
+            elif action == "continue_later":
+                if not paused.get("preferred_resume_at"):
+                    raise ValueError("preferred_resume_at is required for continue_later")
+                execution_result.update(self.propose_continue_later_diff(
+                    user_id,
+                    paused,
+                    impact or {},
+                    request_id=f"{payload.get('recommendation_id')}:local-diff",
+                ))
+                execution_result["requires_user_confirmation"] = True
+
+        feedback = self.save_help_decide_feedback(user_id, {
+            **payload,
+            "accepted": True,
+            "recommended_action": action,
+            "selected_action": action,
+        })
+        self.log_event(user_id, "help_decide_recommendation_applied", {"recommendation_id": payload.get("recommendation_id"), **execution_result})
+        return {"execution": execution_result, "feedback": feedback}
+
     def latest_runtime_state(self, user_id: str) -> dict:
         with self.connect() as conn:
             row = conn.execute(
@@ -6961,6 +7106,27 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/state-checkins" and method == "GET":
                 user_id = query.get("user_id", ["demo"])[0]
                 self.send_json(store.daily_checkin_status(user_id))
+                return
+
+            if path == "/api/execution/recommendations" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                store.ensure_profile(user_id)
+                self.send_json({"data": store.help_decide(user_id, payload)}, status=201)
+                return
+
+            if path == "/api/execution/recommendations/feedback" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                store.ensure_profile(user_id)
+                self.send_json({"data": {"feedback": store.save_help_decide_feedback(user_id, payload)}}, status=201)
+                return
+
+            if path == "/api/execution/recommendations/apply" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                store.ensure_profile(user_id)
+                self.send_json({"data": store.apply_help_decide_recommendation(user_id, payload)})
                 return
 
             if path == "/api/context-dumps" and method == "POST":
