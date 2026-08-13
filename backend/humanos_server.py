@@ -4191,8 +4191,8 @@ class Store:
             context_dump = self.save_context_dump(user_id, {
                 "task_id": task_id,
                 "progress": progress,
-                "progress_percent": payload.get("progress_percent", 0),
-                "remaining_duration_minutes": session.get("session_remaining_minutes"),
+                "progress_percent": min(max(int(payload.get("progress_percent") or 0), 0), 100),
+                "remaining_duration_minutes": max(int(payload.get("remaining_duration_minutes") if payload.get("remaining_duration_minutes") is not None else session.get("session_remaining_minutes") or 0), 0),
                 "next_action": next_action,
                 "open_questions": payload.get("open_questions") or [],
                 "stop_reason": payload.get("reason") or "help_decide_recommendation",
