@@ -1,5 +1,6 @@
 export type ExecutionStatus = 'ready' | 'running' | 'paused' | 'ended' | 'completed' | 'superseded' | string
 export type ExecutionMode = 'up_next' | 'running' | 'paused' | 'empty' | 'none' | 'idle' | string
+export type InterruptionAction = 'short_break' | 'continue_later' | 'switch_task' | 'help_decide'
 
 export interface ExecutionSession {
   accumulated_active_minutes?: number | null
@@ -19,6 +20,8 @@ export interface ExecutionSession {
   paused_at?: string | number | null
   resumed_at?: string | number | null
   pause_reason?: string | null
+  interruption_action?: InterruptionAction | null
+  interruption_snapshot?: Record<string, unknown> | null
   resume_preference?: string | null
   preferred_resume_at?: string | null
   remaining_at_pause?: number | null

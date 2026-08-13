@@ -2,10 +2,26 @@ import unittest
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from backend.app.domain.execution import analyze_remaining_work_impact, settle_interruption
+from backend.app.domain.execution import analyze_remaining_work_impact, build_interruption_snapshot, interruption_policy, settle_interruption
 
 
 class ExecutionInterruptionDomainTests(unittest.TestCase):
+    def test_interruption_actions_define_required_context(self) -> None:
+        self.assertTrue(interruption_policy("short_break").preserves_session)
+        self.assertFalse(interruption_policy("short_break").requires_context_dump)
+        self.assertTrue(interruption_policy("continue_later").requires_context_dump)
+        self.assertTrue(interruption_policy("switch_task").requires_context_dump)
+        self.assertTrue(interruption_policy("help_decide").requires_runtime_state)
+
+    def test_interruption_snapshot_preserves_execution_identity(self) -> None:
+        snapshot = build_interruption_snapshot(task_id="task-1", execution_session_id="exec-1", plan_revision=4, actual_minutes=18, remaining_minutes=27, action="switch_task", progress="Outline done", next_step="Draft intro")
+        self.assertEqual(("task-1", "exec-1", 4), (snapshot["task_id"], snapshot["execution_session_id"], snapshot["plan_revision"]))
+        self.assertEqual((18, 27, "switch_task"), (snapshot["actual_minutes"], snapshot["remaining_minutes"], snapshot["action"]))
+
+    def test_unknown_interruption_action_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            interruption_policy("push_everything_back")
+
     def test_pause_settles_new_work_once(self) -> None:
         result = settle_interruption(planned_session_minutes=45, previous_active_minutes=10, elapsed_segment_minutes=18, reported_active_minutes=28, previous_task_remaining_minutes=170)
         self.assertEqual(28, result.effective_active_minutes)

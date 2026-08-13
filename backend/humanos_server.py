@@ -957,6 +957,8 @@ class Store:
                   paused_at TEXT,
                   resumed_at TEXT,
                   pause_reason TEXT,
+                  interruption_action TEXT,
+                  interruption_snapshot_json TEXT NOT NULL DEFAULT '{}',
                   resume_preference TEXT,
                   preferred_resume_at TEXT,
                   remaining_at_pause INTEGER,
@@ -1062,6 +1064,8 @@ class Store:
             execution_migrations = {
                 "resumed_at": "TEXT",
                 "pause_reason": "TEXT",
+                "interruption_action": "TEXT",
+                "interruption_snapshot_json": "TEXT NOT NULL DEFAULT '{}'",
                 "resume_preference": "TEXT",
                 "preferred_resume_at": "TEXT",
                 "remaining_at_pause": "INTEGER",
@@ -4387,6 +4391,7 @@ class Store:
         confirmed_minutes = max(int(payload.get("actual_minutes") or 0), 0)
         remaining_minutes = max(int(payload.get("remaining_minutes") or 0), 0)
         pause_reason = str(payload.get("pause_reason") or "").strip()
+        interruption_action = str(payload.get("interruption_action") or payload.get("action") or "continue_later").strip()
         resume_preference = str(payload.get("resume_preference") or "unknown").strip()
         preferred_resume_at = str(payload.get("preferred_resume_at") or "").strip() or None
         request_id = str(payload.get("request_id") or "").strip() or None
@@ -4418,7 +4423,20 @@ class Store:
             )
             active = settlement.effective_active_minutes
             remaining_minutes = settlement.session_remaining_minutes
-            conn.execute("UPDATE execution_sessions SET status='paused',paused_at=?,resumed_at=NULL,accumulated_active_minutes=?,pause_reason=?,resume_preference=?,preferred_resume_at=?,remaining_at_pause=?,updated_at=? WHERE id=? AND user_id=?", (paused_at, active, pause_reason, resume_preference, preferred_resume_at, remaining_minutes, timestamp, session_id, user_id))
+            from app.domain.execution import build_interruption_snapshot
+
+            interruption_snapshot = build_interruption_snapshot(
+                task_id=str(row["task_id"]),
+                execution_session_id=session_id,
+                plan_revision=row["plan_revision"],
+                actual_minutes=active,
+                remaining_minutes=remaining_minutes,
+                action=interruption_action,
+                reason=pause_reason,
+                progress=str(payload.get("progress") or ""),
+                next_step=str(payload.get("next_step") or ""),
+            )
+            conn.execute("UPDATE execution_sessions SET status='paused',paused_at=?,resumed_at=NULL,accumulated_active_minutes=?,pause_reason=?,interruption_action=?,interruption_snapshot_json=?,resume_preference=?,preferred_resume_at=?,remaining_at_pause=?,updated_at=? WHERE id=? AND user_id=?", (paused_at, active, pause_reason, interruption_snapshot["action"], as_json(interruption_snapshot), resume_preference, preferred_resume_at, remaining_minutes, timestamp, session_id, user_id))
             execution = dict(task.get("execution") or {})
             execution["accumulated_actual_minutes"] = int(execution.get("accumulated_actual_minutes") or 0) + max(settlement.effective_active_minutes - settlement.previous_active_minutes, 0)
             execution["remaining_duration_minutes"] = settlement.task_remaining_minutes
@@ -4429,7 +4447,7 @@ class Store:
                 status="paused",
                 timestamp=timestamp,
             )
-            self._insert_state_transition(conn, user_id=user_id, task_id=row["task_id"], before_status=str(row["status"]), action_type="pause", after_status="paused", execution_session_id=session_id, action_detail={"pause_reason": pause_reason, "resume_preference": resume_preference, **settlement.to_dict()}, created_at=timestamp)
+            self._insert_state_transition(conn, user_id=user_id, task_id=row["task_id"], before_status=str(row["status"]), action_type="pause", after_status="paused", execution_session_id=session_id, action_detail={"interruption": interruption_snapshot, "resume_preference": resume_preference, **settlement.to_dict()}, created_at=timestamp)
             self._record_execution_request(conn, user_id, request_id, session_id, "pause", timestamp)
             updated = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (session_id,)).fetchone()
         return self.execution_session_row(updated)
