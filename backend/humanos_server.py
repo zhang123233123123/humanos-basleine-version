@@ -4190,6 +4190,34 @@ class Store:
         self.log_event(user_id, "help_decide_recommendation_feedback", feedback)
         return feedback
 
+    def check_resume_time(self, user_id: str, payload: dict) -> dict:
+        from app.application.resume_time_options import evaluate_resume_time
+        try:
+            from humanos_graph import build_scheduling_context
+        except ImportError:
+            from backend.humanos_graph import build_scheduling_context
+
+        task_id = str(payload.get("task_id") or "")
+        session = next((item for item in self.list_execution_sessions(user_id, ["running", "paused"]) if str(item.get("task_id") or "") == task_id), None)
+        if not session:
+            raise ValueError("No active execution session is available for this task")
+        try:
+            preferred = datetime.fromisoformat(str(payload.get("preferred_resume_at") or "").replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            raise ValueError("preferred_resume_at must be a valid ISO datetime")
+        profile = self.ensure_profile(user_id)
+        timezone = safe_timezone(profile.get("timezone") or "Asia/Shanghai")
+        context = build_scheduling_context(profile)
+        occupied = [item for item in self.list_execution_sessions(user_id, ["ready", "running", "paused"]) if item.get("execution_session_id") != session.get("execution_session_id")]
+        return evaluate_resume_time(
+            preferred=preferred,
+            duration_minutes=int(payload.get("remaining_duration_minutes") or session.get("session_remaining_minutes") or 1),
+            week_id=str(session.get("week_id") or profile.get("active_week_id") or iso_week_id(preferred)),
+            available_windows=context.get("full_available_windows") or context.get("windows") or [],
+            occupied_sessions=occupied,
+            timezone=timezone,
+        )
+
     def apply_help_decide_recommendation(self, user_id: str, payload: dict) -> dict:
         from app.application.execution_interruption import build_interruption_command, interruption_response
         from app.application.help_decide import validate_recommendation
@@ -7199,6 +7227,13 @@ class Handler(BaseHTTPRequestHandler):
                 user_id = payload.get("user_id", "demo")
                 store.ensure_profile(user_id)
                 self.send_json({"data": {"feedback": store.save_help_decide_feedback(user_id, payload)}}, status=201)
+                return
+
+            if path == "/api/execution/recommendations/resume-time-check" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                store.ensure_profile(user_id)
+                self.send_json({"data": store.check_resume_time(user_id, payload)})
                 return
 
             if path == "/api/execution/recommendations/apply" and method == "POST":
