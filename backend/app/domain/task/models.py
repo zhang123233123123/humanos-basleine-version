@@ -14,6 +14,10 @@ class ParsedTask(BaseModel):
     start_at: str | None = None
     deadline_at: str | None = None
     priority: Literal["高", "中", "低"] | None = None
+    domain_type: Literal["general", "writing", "research", "meeting", "admin", "recovery"] = "general"
+    resource_modality: list[Literal["visual", "auditory", "verbal", "manual", "mobility"]] = Field(default_factory=list)
+    resource_loads: dict[Literal["visual", "auditory", "verbal", "manual", "mobility", "cognitive"], Literal["none", "low", "medium", "high"]] = Field(default_factory=dict)
+    parallelizable: bool = False
     context: str = ""
     missing_fields: list[str] = Field(default_factory=list)
     source_spans: list[str] = Field(default_factory=list)
@@ -30,4 +34,4 @@ class ParsedTask(BaseModel):
 
 
 class ParsedTaskBatch(BaseModel):
-    tasks: list[ParsedTask] = Field(default_factory=list, max_length=8)
+    tasks: list[ParsedTask] = Field(default_factory=list, max_length=20)

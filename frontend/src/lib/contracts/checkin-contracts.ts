@@ -54,6 +54,19 @@ export interface DailyPlanReview {
   options: string[]
 }
 
+export interface ReplanJob {
+  job_id: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  error?: string | null
+  result?: unknown
+}
+
+export interface ReplanRequest {
+  required: boolean
+  confirmation_required?: boolean
+  job?: ReplanJob
+}
+
 export interface CheckInResourceEnvelope<T> {
   data: T
   resources: { self: string; profile: string; active_plan: string; execution_sessions: string }

@@ -27,12 +27,49 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 try:
     from .app.application.parse_task import parse_structured_tasks as parse_tasks_with_agent
+    from .app.application.chat_replies import interruption_reply, progress_reply, task_preview_reply
+    from .app.application.chat_routing import normalized_chat_intent, should_parse_task_candidates
+    from .app.application.behavior_features import local_behavior_features
+    from .app.application.chat_response import apply_existing_task_updates, apply_weekly_context_update, initial_planner_response
+    from .app.application.calendar_advisor import advisor_requires_planner_handoff, fallback_calendar_summary, sessions_for_local_date
+    from .app.application.task_parse_coordinator import parse_with_validation_retry
+    from .app.application.task_payloads import build_task_previews, normalize_parser_items
+    from .app.application.classify_chat_intent import classify_chat_intent
+    from .app.agents import PydanticAIIntentClassifier
+    from .app.domain.intent import classify_intent
+    from .app.domain.task.change_policy import exact_task_reference_indexes, has_unique_task_identity, is_explicit_change_request, matching_context_item
+    from .app.domain.execution import analyze_remaining_work_impact, settle_interruption
 except ImportError:
     try:
         from app.application.parse_task import parse_structured_tasks as parse_tasks_with_agent
+        from app.application.chat_replies import interruption_reply, progress_reply, task_preview_reply
+        from app.application.chat_routing import normalized_chat_intent, should_parse_task_candidates
+        from app.application.behavior_features import local_behavior_features
+        from app.application.chat_response import apply_existing_task_updates, apply_weekly_context_update, initial_planner_response
+        from app.application.calendar_advisor import advisor_requires_planner_handoff, fallback_calendar_summary, sessions_for_local_date
+        from app.application.task_parse_coordinator import parse_with_validation_retry
+        from app.application.task_payloads import build_task_previews, normalize_parser_items
+        from app.application.classify_chat_intent import classify_chat_intent
+        from app.agents import PydanticAIIntentClassifier
+        from app.domain.intent import classify_intent
+        from app.domain.task.change_policy import exact_task_reference_indexes, has_unique_task_identity, is_explicit_change_request, matching_context_item
+        from app.domain.execution import analyze_remaining_work_impact, settle_interruption
     except ImportError as parser_import_error:
         print(f"PydanticAI parser import fallback: {parser_import_error}", flush=True)
         parse_tasks_with_agent = None
+        PydanticAIIntentClassifier = None
+
+# Optional PydanticAI support must never disable the deterministic domain
+# services.  Keep these imports outside the optional parser import chain so
+# Pause/Resume and chat change handling remain available without pydantic_ai.
+try:
+    from .app.domain.intent import classify_intent
+    from .app.domain.task.change_policy import exact_task_reference_indexes, has_unique_task_identity, is_explicit_change_request, matching_context_item
+    from .app.domain.execution import analyze_remaining_work_impact, settle_interruption
+except ImportError:
+    from app.domain.intent import classify_intent
+    from app.domain.task.change_policy import exact_task_reference_indexes, has_unique_task_identity, is_explicit_change_request, matching_context_item
+    from app.domain.execution import analyze_remaining_work_impact, settle_interruption
 
 
 ROOT = Path(__file__).resolve().parent
@@ -72,6 +109,13 @@ LOCAL_EMBEDDING_MODEL = "humanos-local-hash-embedding-v1"
 
 
 TEST_MODE = os.environ.get("HUMANOS_TEST_MODE", "").strip() == "1"
+MAX_TASKS_PER_PARSE_BATCH = 20
+# Finishing a few seconds late is normal interaction latency.  A full calendar
+# grid step is the point at which the Session has materially consumed time that
+# belonged to the downstream plan and is therefore recorded as an overrun
+# failure.  The result is measured from backend timestamps, never a browser
+# timer.
+EXECUTION_OVERRUN_FAILURE_MINUTES = 15
 QA_MODE = TEST_MODE and os.environ.get("HUMANOS_QA_DB", "").strip() == "1"
 QA_SCENARIO_DIR = Path(
     os.environ.get("HUMANOS_QA_SCENARIO_DIR", "").strip()
@@ -418,11 +462,12 @@ def schedule_task_kind(task: dict) -> str:
     )
 
 
-PARALLEL_RESOURCE_MODALITIES = {"visual", "auditory", "verbal", "language", "manual", "mobility"}
+PARALLEL_RESOURCE_MODALITIES = {"visual", "auditory", "verbal", "manual", "mobility", "cognitive", "social", "environment"}
+RESOURCE_LEVEL_SCORE = {"none": 0, "low": 1, "medium": 2, "high": 3}
 
 
 def normalize_resource_modalities(value: object) -> list[str]:
-    aliases = {"语言": "verbal", "language": "verbal", "听觉": "auditory", "视觉": "visual", "手部": "manual", "行动": "mobility"}
+    aliases = {"语言": "verbal", "language": "verbal", "听觉": "auditory", "视觉": "visual", "手部": "manual", "肢体": "mobility", "行动": "mobility", "认知": "cognitive", "社交": "social", "环境": "environment"}
     raw = value if isinstance(value, list) else [value] if value else []
     normalized: list[str] = []
     for item in raw:
@@ -447,10 +492,25 @@ def local_resource_profile(task: dict) -> dict:
             modalities.append("visual")
         if re.search(r"写|论文|汇报|课程|做题|write|paper|course|assignment", title):
             modalities.append("verbal")
+        if re.search(r"分析|研究|复习|编程|设计|analy|research|review|code|design", title):
+            modalities.append("cognitive")
+        if re.search(r"会议|组会|访谈|电话|meeting|interview|call", title):
+            modalities.extend(["social", "verbal"])
+    modalities = list(dict.fromkeys(modalities))
+    loads = {dimension: "none" for dimension in PARALLEL_RESOURCE_MODALITIES}
+    for dimension in modalities:
+        loads[dimension] = "medium"
+    if re.search(r"分析|研究|复习|编程|写|论文|analy|research|review|code|write|paper", title):
+        loads["cognitive"] = "high"
+    if re.search(r"播客|听力|podcast|audio|listen", title):
+        loads["auditory"] = "high"; loads["cognitive"] = "low"
+    if re.search(r"洗衣|整理|打扫|做饭|laundry|clean|cook", title):
+        loads["manual"] = "high"; loads["cognitive"] = "low"
     parallelizable = bool(task.get("parallelizable")) or bool(set(modalities) & {"manual", "mobility", "auditory"})
     return {
         "task_id": task.get("id"),
         "resource_modality": modalities,
+        "resource_loads": loads,
         "parallelizable": parallelizable,
         "evidence": ["Conservative initial classification from the task title and the user's saved resource types"],
         "confidence_level": "low",
@@ -466,6 +526,20 @@ def parallel_pair_rule(primary: dict, secondary: dict, demand_map: dict[str, dic
         return False, "At least one activity is not eligible for a parallel suggestion."
     if not primary_modalities or not secondary_modalities:
         return False, "The resource types are not specific enough to validate this pair."
+    primary_loads = dict(primary.get("resource_loads") or {})
+    secondary_loads = dict(secondary.get("resource_loads") or {})
+    shared_conflicts = []
+    for dimension in PARALLEL_RESOURCE_MODALITIES:
+        first = RESOURCE_LEVEL_SCORE.get(str(primary_loads.get(dimension) or ("medium" if dimension in primary_modalities else "none")), 2)
+        second = RESOURCE_LEVEL_SCORE.get(str(secondary_loads.get(dimension) or ("medium" if dimension in secondary_modalities else "none")), 2)
+        if first >= 2 and second >= 2:
+            shared_conflicts.append(dimension)
+    if shared_conflicts:
+        return False, (
+            "This prototype only permits a physical or manual activity paired with "
+            "low-demand auditory input; these activities compete for: "
+            f"{', '.join(sorted(shared_conflicts))}."
+        )
     complementary = (
         bool(primary_modalities & {"manual", "mobility"}) and "auditory" in secondary_modalities
     ) or (
@@ -473,15 +547,13 @@ def parallel_pair_rule(primary: dict, secondary: dict, demand_map: dict[str, dic
     )
     if not complementary:
         return False, "This prototype only permits a physical or manual activity paired with low-demand auditory input."
-    if ("verbal" in primary_modalities and "verbal" in secondary_modalities) or ("visual" in primary_modalities and "visual" in secondary_modalities):
-        return False, "The activities compete for the same sustained cognitive resource."
     levels = {
         str(demand_map.get(str(primary.get("task_id")), {}).get("level") or "medium"),
         str(demand_map.get(str(secondary.get("task_id")), {}).get("level") or "medium"),
     }
     if "low" not in levels:
         return False, "At least one activity must have low cognitive demand."
-    return True, "A low-demand physical or manual activity is compatible with auditory input."
+    return True, "The resource matrix permits one low-demand auditory task with one physical or manual task."
 
 
 def confirmed_parallel_overlap_allowed(first: dict, second: dict) -> bool:
@@ -764,6 +836,19 @@ class Store:
                   created_at INTEGER NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS pending_task_batches (
+                  id TEXT PRIMARY KEY,
+                  user_id TEXT NOT NULL,
+                  source_text TEXT NOT NULL,
+                  tasks_json TEXT NOT NULL,
+                  missing_fields_json TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  created_at INTEGER NOT NULL,
+                  updated_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_pending_task_batches_user_status
+                ON pending_task_batches(user_id,status,updated_at);
+
                 CREATE TABLE IF NOT EXISTS execution_feedback (
                   id TEXT PRIMARY KEY,
                   user_id TEXT NOT NULL,
@@ -901,6 +986,10 @@ class Store:
                   resumed_from_session_id TEXT,
                   status TEXT NOT NULL,
                   completion_outcome TEXT,
+                  timing_outcome TEXT,
+                  overrun_minutes INTEGER NOT NULL DEFAULT 0,
+                  overrun_failure INTEGER NOT NULL DEFAULT 0,
+                  overrun_replan_job_id TEXT,
                   request_id TEXT,
                   created_at INTEGER NOT NULL,
                   updated_at INTEGER NOT NULL,
@@ -1004,6 +1093,10 @@ class Store:
                 "preferred_resume_at": "TEXT",
                 "remaining_at_pause": "INTEGER",
                 "resumed_from_session_id": "TEXT",
+                "timing_outcome": "TEXT",
+                "overrun_minutes": "INTEGER NOT NULL DEFAULT 0",
+                "overrun_failure": "INTEGER NOT NULL DEFAULT 0",
+                "overrun_replan_job_id": "TEXT",
             }
             for name, definition in execution_migrations.items():
                 if name not in execution_columns:
@@ -1031,6 +1124,32 @@ class Store:
             )
         self.start_background_job(job_id)
         return self.get_background_job(user_id, job_id) or {}
+
+    def request_replan(
+        self,
+        user_id: str,
+        *,
+        scope: str,
+        trigger: str,
+        affected_task_ids: list[str] | None = None,
+        week_id: str | None = None,
+        adjustment_constraints: dict | None = None,
+    ) -> dict:
+        """Queue a Plan Revision without mutating the confirmed calendar."""
+        from app.application.plan_revision import build_replan_request, replan_response
+
+        profile = self.ensure_profile(user_id)
+        target_week = str(week_id or profile.get("active_week_id") or (profile.get("weekly_context") or {}).get("week_id") or iso_week_id(timezone_name=profile.get("timezone")))
+        command = build_replan_request(
+            week_id=target_week,
+            scope=scope,
+            trigger=trigger,
+            affected_task_ids=affected_task_ids,
+            adjustment_constraints=adjustment_constraints,
+            request_id=new_id("replan"),
+        )
+        job = self.create_background_job(user_id, "schedule_plan", command)
+        return replan_response(command, job)
 
     def get_background_job(self, user_id: str, job_id: str) -> dict | None:
         with self.connect() as conn:
@@ -1618,30 +1737,18 @@ class Store:
             if duplicate:
                 self.log_event(user_id, "task_create_replayed", {"task_id": duplicate["id"], "request_id": create_request_id})
                 return self.task_row(duplicate)
-        # Exact duplicate protection is only a CREATE idempotency fallback.
-        # Reconciliation never uses these editable fields as task identity.
-        if not payload.get("id") and not payload.get("allow_duplicate"):
-            with self.connect() as conn:
-                candidates = conn.execute(
-                    "SELECT * FROM tasks WHERE user_id=? AND status NOT IN ('completed','terminated') AND removed_from_week=0",
-                    (user_id,),
-                ).fetchall()
-            duplicate = next(
-                (
-                    row for row in candidates
-                    if normalize_task_identity(row["title"]) == normalize_task_identity(title)
-                    and normalize_task_identity(row["due"]) == normalize_task_identity(deadline)
-                ),
-                None,
-            )
-            if duplicate:
-                self.log_event(user_id, "task_create_deduplicated", {"task_id": duplicate["id"], "title": title})
-                return self.task_row(duplicate)
-        task_id = payload.get("id") or new_id("task")
+        # Mutable fields are not identity. Two Tasks may share a title and
+        # deadline; only replaying the same request_id may reuse a Task.
+        requested_task_id = str(payload.get("id") or "").strip()
+        # Preview identifiers are transport-only identities. Once the user
+        # confirms a candidate it becomes a real Task and must receive a
+        # persistent task_* identity; calendar projection intentionally hides
+        # preview-* resources.
+        task_id = new_id("task") if not requested_task_id or requested_task_id.startswith("preview-") else requested_task_id
         priority = payload.get("priority") or "中"
-        duration = infer_duration_minutes(f"{title} {context}") or int(
-            payload.get("estimated_duration") or payload.get("duration") or 60
-        )
+        # Structured AI/user input is authoritative. Never re-parse the shared
+        # conversation context because it may contain several other tasks.
+        duration = int(payload.get("estimated_duration") or payload.get("duration") or 60)
         status = payload.get("status", "queued")
         demand = payload.get("task_demand") or self.infer_task_demand(payload, domain_type)
         cognitive_load = payload.get("cognitive_load") or demand["estimated_cognitive_load"]
@@ -1768,27 +1875,12 @@ class Store:
     ) -> list[dict]:
         if create_tasks:
             return [self.create_task(user_id, payload) for payload in payloads]
-        previews = []
-        for index, payload in enumerate(payloads):
-            task_type = payload.get("task_type") or "flexible_task"
-            due = payload.get("due") or payload.get("deadline") or "未设置"
-            missing = list(payload.get("missing_fields") or [])
-            if not str(payload.get("title") or "").strip():
-                missing.append("title")
-            if due == "未设置":
-                missing.append("start_at" if task_type == "fixed_event" else "deadline_at")
-            if payload.get("duration") is None and payload.get("estimated_duration") is None:
-                missing.append("duration_minutes")
-            previews.append({
-                **payload,
-                "id": f"preview-{now_ms()}-{index}",
-                "parser": parser,
-                "is_preview": True,
-                "missing_fields": list(dict.fromkeys(missing)),
-                "source_spans": payload.get("source_spans") or [],
-                "confidence": float(payload.get("confidence") or 0.0),
-            })
-        return previews
+        preview_batch_id = now_ms()
+        return build_task_previews(
+            payloads,
+            parser_name=parser,
+            preview_id=lambda index: f"preview-{preview_batch_id}-{index}",
+        )
 
     def parse_tasks_from_text(
         self,
@@ -1801,31 +1893,21 @@ class Store:
         if not clean:
             raise ValueError("task text is required")
         expected_count = self.estimated_task_count(clean)
+        if expected_count > MAX_TASKS_PER_PARSE_BATCH:
+            raise ValueError(f"task batch exceeds maximum capacity of {MAX_TASKS_PER_PARSE_BATCH}")
         profile = self.ensure_profile(user_id)
         timezone_name = str(profile.get("timezone") or "Asia/Shanghai")
-        typed_tasks = parse_tasks_with_agent(
+        typed_tasks = parse_with_validation_retry(
             clean,
+            expected_count=expected_count,
             current_time=self.user_clock_now(user_id, timezone_name).isoformat(),
             timezone_name=timezone_name,
             chat_context=chat_context,
-        ) if parse_tasks_with_agent else None
-        prefer_local_parser = self.looks_like_compact_multi_task_list(clean) or bool(self.english_task_segments(clean))
-        explicit_schedule_tasks = [] if typed_tasks else self.parse_explicit_schedule_lines(user_id, clean, create_tasks=create_tasks)
-        if explicit_schedule_tasks:
-            return explicit_schedule_tasks
-        shared_time = re.search(
-            r"(?:然后)?(?:它们|这些|都是|每个|全部).*?((?:早上|上午|中午|下午|晚上)\s*\d{1,2}\s*(?:[:：]\s*\d{2}|点|时))",
-            clean,
+            parser=parse_tasks_with_agent,
+            record_event=lambda event_type, details: self.log_event(user_id, event_type, details),
         )
-        if shared_time and not typed_tasks:
-            prefix = clean[:shared_time.start()].strip(" ，,。；;")
-            clauses = [part.strip() for part in re.split(r"(?:然后|，|,|。|；|;)", prefix) if part.strip()]
-            dated_clauses = [part for part in clauses if re.search(r"今天|今晚|明天|后天|周[一二三四五六日天]|星期[一二三四五六日天]", part)]
-            if len(dated_clauses) >= 2:
-                shared_hour = parse_clock_hour(shared_time.group(1))
-                shared_clock = format_clock_hour(shared_hour) if shared_hour is not None else shared_time.group(1)
-                expanded = "，".join(f"{part} {shared_clock}" for part in dated_clauses)
-                return self.local_parse_tasks_from_text(user_id, expanded, create_tasks=create_tasks)
+        # AI owns semantic extraction. Python starts at typed-schema validation
+        # and must not reinterpret task prose through regex or local heuristics.
         if typed_tasks:
             llm_result = {"tasks": typed_tasks}
             parser_name = "pydantic_ai"
@@ -1839,44 +1921,28 @@ class Store:
                 raw_tasks = llm_result.get("tasks") if isinstance(llm_result.get("tasks"), list) else [llm_result]
             else:
                 raw_tasks = []
-            payloads = []
-            for item in raw_tasks[:8]:
-                if not isinstance(item, dict):
-                    continue
-                explicit_duration = infer_duration_minutes(clean) if len(raw_tasks) == 1 else None
-                duration_value = item.get("duration_minutes")
-                if duration_value is None:
-                    duration_value = item.get("estimated_duration") or item.get("duration") or explicit_duration
-                parsed_duration = safe_duration_minutes(duration_value) if duration_value is not None else None
-                task_type = item.get("schedule_type") or item.get("task_type") or item.get("taskType") or "flexible_task"
-                due_value = item.get("start_at") if task_type == "fixed_event" else item.get("deadline_at")
-                due_value = due_value or item.get("deadline") or item.get("due") or "未设置"
-                payload = {
-                    "title": item.get("title") or "",
-                    "task_type": task_type,
-                    "domain_type": item.get("domain_type") or "general",
-                    "classification_rule": item.get("classification_rule") or "legacy_unclassified",
-                    "classification_validation": item.get("classification_validation") or {
-                        "valid": True,
-                        "errors": [],
-                        "checked_by": "legacy_parser",
+            # Reject model output that expands metadata such as duration or a
+            # deadline into standalone tasks. The AI retry layer owns repair.
+            if expected_count == 1 and len(raw_tasks) > 1:
+                self.log_event(
+                    user_id,
+                    "task_parse_fallback",
+                    {
+                        "reason": "llm_over_split",
+                        "expected_count": expected_count,
+                        "llm_count": len(raw_tasks),
+                        "text": clean[:500],
                     },
-                    "deadline": due_value,
-                    "due": due_value,
-                    "timezone": timezone_name,
-                    "start_at": item.get("start_at"),
-                    "deadline_at": item.get("deadline_at"),
-                    "deadline_assumption": "pydantic_ai_resolved" if item.get("deadline_at") else None,
-                    "estimated_duration": parsed_duration,
-                    "duration": parsed_duration,
-                    "priority": item.get("priority") if item.get("priority") in {"高", "中", "低"} else None,
-                    "context": item.get("context") or clean,
-                    "missing_fields": item.get("missing_fields") or [],
-                    "source_spans": item.get("source_spans") or [],
-                    "confidence": item.get("confidence") or 0.0,
-                }
-                payload["parser"] = parser_name
-                payloads.append(payload)
+                )
+                return []
+            payloads = normalize_parser_items(
+                raw_tasks,
+                source_text=clean,
+                timezone_name=timezone_name,
+                parser_name=parser_name,
+                inferred_single_duration=infer_duration_minutes(clean) if len(raw_tasks) == 1 else None,
+                normalize_duration=safe_duration_minutes,
+            )
             if expected_count > 1 and len(payloads) < expected_count:
                 self.log_event(
                     user_id,
@@ -1888,11 +1954,11 @@ class Store:
                         "text": clean[:500],
                     },
                 )
-                return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
+                return []
             if payloads:
                 return self.materialize_parsed_tasks(user_id, payloads, parser_name, create_tasks)
 
-        return self.local_parse_tasks_from_text(user_id, clean, create_tasks=create_tasks)
+        return []
 
     def estimated_task_count(self, text: str) -> int:
         compact = re.sub(r"\s+", "", text)
@@ -2202,39 +2268,11 @@ class Store:
         clean = text.strip()
         llm_result = None if local_only else chat_completion(behavior_feature_messages(clean, chat_context))
         if not isinstance(llm_result, dict):
-            blockers = []
-            if any(word in clean for word in ["不知道", "不清楚", "模糊", "从哪"]):
-                blockers.append("任务不清楚")
-            if any(word in clean for word in ["累", "困", "没精力"]):
-                blockers.append("疲劳")
-            if any(word in clean for word in ["焦虑", "压力", "慌"]):
-                blockers.append("焦虑")
-            if any(word in clean for word in ["被打断", "临时打断", "消息打断"]):
-                blockers.append("外部打断")
-            if any(word in clean for word in ["回不来", "忘了", "上下文"]):
-                blockers.append("上下文丢失")
-            if any(word in clean for word in ["进展", "完成", "写完", "做完"]):
-                intent = "progress_update"
-            elif any(word in clean for word in ["安排", "排", "计划", "日历"]):
-                intent = "add_task"
-            elif any(word in clean for word in ["中断", "暂停", "切换"]):
-                intent = "interruption"
-            else:
-                intent = "other"
-            llm_result = {
-                "intent": intent,
-                "planning_behavior": [],
-                "blockers": blockers,
-                "explicit_state": {
-                    "fatigue": True if any(word in clean for word in ["很累", "疲劳", "没精力"]) else None,
-                    "stress": True if any(word in clean for word in ["压力很大", "很焦虑", "很慌"]) else None,
-                    "focus_difficulty": True if any(word in clean for word in ["无法专注", "集中不了"]) else None,
-                },
-                "evidence_span": clean if blockers else None,
-                "hypotheses": [],
-                "needs_follow_up": bool(blockers),
-            }
+            llm_result = local_behavior_features(clean)
         explicit_state = llm_result.get("explicit_state") if isinstance(llm_result.get("explicit_state"), dict) else {}
+        intent_decision = classify_intent(clean, str(llm_result.get("intent") or "other"))
+        llm_result["intent"] = intent_decision.intent
+        llm_result["intent_decision"] = intent_decision.to_dict()
         evidence_span = str(llm_result.get("evidence_span") or "").strip()
         if evidence_span and any(value is not None for value in explicit_state.values()):
             self.add_memory(
@@ -2254,13 +2292,7 @@ class Store:
         return llm_result
 
     def update_weekly_context_from_chat(self, user_id: str, text: str) -> dict | None:
-        change_request = re.search(r"改成|变成|调整到|移到|挪到|提前到|推迟到|改为", text)
-        english_change_request = re.search(
-            r"\b(?:has\s+moved\s+to|moved\s+to|move(?:d)?\b.*?\bto|has\s+changed\s+to|changed\s+to|change(?:d)?\b.*?\bto|rescheduled\s+to|is\s+now|will\s+be\s+at)\b",
-            text,
-            re.IGNORECASE,
-        )
-        if not change_request and not english_change_request:
+        if not is_explicit_change_request(text):
             return None
         normalized = normalize_chinese_clock(text)
         start = parse_clock_hour(normalized)
@@ -2271,14 +2303,7 @@ class Store:
         items = [dict(item) for item in weekly.get("context_items", []) if isinstance(item, dict)]
         if not items:
             return None
-        matched = None
-        lowered_text = text.lower()
-        for item in items:
-            title = str(item.get("title") or "").strip()
-            title_tokens = re.findall(r"[A-Za-z0-9]{2,}|[\u4e00-\u9fff]{2,}", title)
-            if title and (title.lower() in lowered_text or any(token.lower() in lowered_text for token in title_tokens)):
-                matched = item
-                break
+        matched = matching_context_item(text, items)
         if not matched:
             return None
         raw_type = str(matched.get("type") or matched.get("category") or "")
@@ -2351,9 +2376,7 @@ class Store:
 
     def calendar_advisor_turn(self, user_id: str, text: str, payload: dict) -> dict:
         locale = str(payload.get("locale") or "zh")
-        query_markers = re.search(r"查看|总结|查询|解释|为什么|哪些|什么|空闲|下一个|show|summarize|what|why|when|free|next", text, re.I)
-        write_markers = re.search(r"创建|新增|帮我安排|调整|移动|删除|改到|推迟|提前|create|add|schedule|move|reschedule|delete", text, re.I)
-        if write_markers and not query_markers:
+        if advisor_requires_planner_handoff(text):
             reply = "这是一个会修改任务或计划的操作。我不会在日程顾问中直接执行，已准备转交给任务规划助手生成预览。" if locale == "zh" else "This would change your tasks or plan. I will not execute it in Calendar Advisor; hand it to Task Planner to create a reviewable preview."
             response = {"intent": "planner_handoff", "assistant_mode": "calendar_advisor", "reply": reply, "tasks": [], "handoff_required": True, "handoff_text": text, "read_only": True}
             self.save_chat_turn(user_id, text, reply, "planner_handoff", {"intent": "planner_handoff", "assistant_mode": "calendar_advisor"}, [])
@@ -2361,43 +2384,9 @@ class Store:
         profile = self.ensure_profile(user_id)
         current = self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai")
         tasks = self.list_tasks(user_id)
-        task_map = {str(task.get("id")): task for task in tasks}
         sessions = self.list_execution_sessions(user_id)
-        today_sessions = []
-        for session in sessions:
-            try:
-                start = datetime.fromisoformat(str(session.get("planned_start_at") or "").replace("Z", "+00:00"))
-                if start.tzinfo is None:
-                    start = start.replace(tzinfo=current.tzinfo)
-                if start.astimezone(current.tzinfo).date() == current.date() and session.get("status") != "superseded":
-                    task = task_map.get(str(session.get("task_id"))) or {}
-                    today_sessions.append({**session, "task_title": task.get("title") or session.get("task_id")})
-            except (TypeError, ValueError):
-                continue
-        today_sessions.sort(key=lambda item: str(item.get("planned_start_at") or ""))
-        running = next((item for item in today_sessions if item.get("status") == "running"), None)
-        upcoming = next((item for item in today_sessions if item.get("status") in {"ready", "paused"}), None)
-        if locale == "zh":
-            lines = [f"今天共有 {len(today_sessions)} 个执行时段。"]
-            if running:
-                lines.append(f"当前正在进行：{running['task_title']}。")
-            if upcoming:
-                start_label = datetime.fromisoformat(str(upcoming["planned_start_at"]).replace("Z", "+00:00")).astimezone(current.tzinfo).strftime("%H:%M")
-                lines.append(f"下一项：{start_label} {upcoming['task_title']}（{upcoming['status']}）。")
-            if not today_sessions:
-                standalone_today = [task for task in tasks if str(task.get("start_at") or "").startswith(current.date().isoformat())]
-                lines.append(f"当前没有计划 Session；日历中有 {len(standalone_today)} 个独立任务。")
-            reply = "\n".join(lines)
-        else:
-            lines = [f"You have {len(today_sessions)} execution sessions today."]
-            if running:
-                lines.append(f"In progress: {running['task_title']}.")
-            if upcoming:
-                start_label = datetime.fromisoformat(str(upcoming["planned_start_at"]).replace("Z", "+00:00")).astimezone(current.tzinfo).strftime("%H:%M")
-                lines.append(f"Next: {upcoming['task_title']} at {start_label} ({upcoming['status']}).")
-            if not today_sessions:
-                lines.append("There are no planned execution sessions today.")
-            reply = "\n".join(lines)
+        today_sessions = sessions_for_local_date(sessions, tasks, current)
+        reply = fallback_calendar_summary(today_sessions, tasks, current, locale)
         active_plan = self.active_plan(user_id)
         advisor_result = chat_completion([
             {
@@ -2459,95 +2448,83 @@ class Store:
             raise ValueError("text is required")
         if payload.get("assistant_mode") == "calendar_advisor":
             return self.calendar_advisor_turn(user_id, text, payload)
+        pending_batch = self.latest_pending_task_batch(user_id)
+        if pending_batch and self.is_pending_task_batch_followup(text):
+            tasks = self.complete_pending_task_batch(user_id, pending_batch, text)
+            reply = task_preview_reply(text, len(tasks))
+            self.save_chat_turn(user_id, text, reply, "complete_pending_task_batch", {"intent": "complete_pending_task_batch", "pending_batch_id": pending_batch["id"]}, [])
+            return {"intent": "add_task", "reply": reply, "tasks": tasks, "pending_batch_id": pending_batch["id"], "resolved_pending_batch": True}
         chat_context = self.build_chat_context(user_id, text)
         chat_context["client_context"] = payload.get("client_context") or {}
+        profile = self.ensure_profile(user_id)
+        intent_decision = classify_chat_intent(
+            text,
+            current_time=self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai").isoformat(),
+            timezone_name=profile.get("timezone") or "Asia/Shanghai",
+            chat_context=chat_context,
+            ai_classifier=PydanticAIIntentClassifier().classify if PydanticAIIntentClassifier else None,
+        )
         features = self.extract_behavior_features(user_id, text, chat_context)
-        intent = features.get("intent", "other")
-        response = {
-            "intent": intent,
-            "features": features,
-            "reply": "I recorded this information and will use it in later scheduling decisions.",
-            "tasks": [],
-            "context": {
-                "recent_task_count": len(chat_context.get("recent_tasks", [])),
-                "memory_count": len(chat_context.get("retrieved_memories", [])),
-                "embedding_model": "humanos-local-hash-embedding-v1",
-            },
-        }
+        features["intent"] = intent_decision.intent
+        features["intent_decision"] = intent_decision.to_dict()
+        intent = intent_decision.intent
+        response = initial_planner_response(intent, features, chat_context)
+        if intent_decision.requires_clarification:
+            if intent == "add_task":
+                candidates = self.parse_tasks_from_text(user_id, text, chat_context, create_tasks=False)
+                if candidates:
+                    batch = self.save_pending_task_batch(user_id, text, candidates)
+                    response["pending_batch_id"] = batch["id"]
+            response["reply"] = intent_decision.clarification_question or "请补充你要操作的具体任务。"
+            response["requires_clarification"] = True
+            response["intent_decision"] = intent_decision.to_dict()
+            self.save_chat_turn(user_id, text, response["reply"], intent, features, [])
+            return response
         context_update = self.update_weekly_context_from_chat(user_id, text)
         if context_update:
-            item = context_update["item"]
-            display_day = {
-                "周一": "Monday", "周二": "Tuesday", "周三": "Wednesday", "周四": "Thursday",
-                "周五": "Friday", "周六": "Saturday", "周日": "Sunday",
-            }.get(str(item.get("day")), str(item.get("day") or ""))
-            response["intent"] = "update_weekly_context"
+            response = apply_weekly_context_update(response, context_update, format_clock_hour)
             intent = "update_weekly_context"
-            response["weekly_context"] = context_update["weekly_context"]
-            response["context_event_updated"] = item
-            response["reply"] = (
-                f"Updated “{item.get('title')}” to {display_day} "
-                f"{format_clock_hour(float(item.get('start')))}–{format_clock_hour(float(item.get('end')))}. "
-                + ("This is a routine window. I will preserve it when possible and may shift it by at most 30 minutes for urgent work." if item.get("type") == "recurring_routine" else "This is fixed time. I will not search for another position; I will keep it there, check conflicts, and generate one revised draft plan around it.")
-            )
         followup_tasks = [] if context_update else self.parse_time_followup_for_recent_tasks(user_id, text, chat_context)
         if followup_tasks:
-            response["tasks"] = followup_tasks
-            updates = "; ".join(f"{task.get('title')} → {task.get('due')}" for task in followup_tasks)
-            response["reply"] = f"I understood this as an update to an existing item: {updates}. No duplicate task was created."
+            response = apply_existing_task_updates(response, followup_tasks)
             intent = "reschedule"
-            response["intent"] = intent
-        should_parse_tasks = (
-            any(
-                word in text
-                for word in [
-                "任务",
-                "写",
-                "读",
-                "阅读",
-                "整理",
-                "完成",
-                "复习",
-                "学习",
-                "开会",
-                "会议",
-                "取",
-                "拿",
-                "办",
-                "买",
-                "发",
-                "看",
-                "做",
-                "分钟",
-                "小时",
-                "点",
-                "时",
-                "明天",
-                "今天",
-                "周",
-                ]
-            )
-            or bool(self.english_task_segments(text))
-            or bool(re.search(r"\b(?:add|create|schedule)\s+(?:these\s+)?tasks?\b", text, re.I))
-        ) and (intent in {"add_task", "reschedule", "other"} or self.looks_like_compact_multi_task_list(text))
+        should_parse_tasks = should_parse_task_candidates(
+            text,
+            intent_decision,
+            compact_multi_task=self.looks_like_compact_multi_task_list(text),
+            english_multi_task=bool(self.english_task_segments(text)),
+        )
         if should_parse_tasks and not response["tasks"] and not context_update:
-            intent = "add_task" if intent == "progress_update" else intent
+            intent = normalized_chat_intent(intent_decision, has_task_preview=True)
             response["intent"] = intent
+            estimated_count = self.estimated_task_count(text)
+            if estimated_count > MAX_TASKS_PER_PARSE_BATCH:
+                locale = str((payload or {}).get("locale") or "zh")
+                response["reply"] = (
+                    f"这次包含约 {estimated_count} 个任务，单次最多处理 {MAX_TASKS_PER_PARSE_BATCH} 个。请分批发送，每批不超过 {MAX_TASKS_PER_PARSE_BATCH} 项；我会分别生成确认预览。"
+                    if locale == "zh"
+                    else f"This message contains about {estimated_count} tasks. I can process up to {MAX_TASKS_PER_PARSE_BATCH} per batch. Please send them in batches of no more than {MAX_TASKS_PER_PARSE_BATCH}; each batch will get its own confirmation preview."
+                )
+                response["requires_clarification"] = True
+                response["max_tasks_per_batch"] = MAX_TASKS_PER_PARSE_BATCH
+                response["estimated_task_count"] = estimated_count
+                self.log_event(user_id, "task_batch_capacity_exceeded", {
+                    "estimated_task_count": estimated_count,
+                    "max_tasks_per_batch": MAX_TASKS_PER_PARSE_BATCH,
+                })
+                self.save_chat_turn(user_id, text, response["reply"], intent, features, [])
+                return response
             response["tasks"] = self.parse_tasks_from_text(
                 user_id,
                 text,
                 chat_context,
                 create_tasks=False,
             )
-            response["reply"] = (
-                f"I identified {len(response['tasks'])} items. Review or edit them first; I will create and schedule them only after confirmation."
-                if len(response["tasks"]) > 1
-                else "I identified the item below. Review or edit it first; I will create and schedule it only after confirmation."
-            )
+            response["reply"] = task_preview_reply(text, len(response["tasks"]))
         elif intent == "progress_update":
-            response["reply"] = "Progress recorded. Add the next action, or ask me to replan from the current state."
+            response["reply"] = progress_reply(text)
         elif intent == "interruption":
-            response["reply"] = "Pause signal received. This does not mean the system inferred that your condition declined. Record the reason, progress, and first action for returning."
+            response["reply"] = interruption_reply(text)
             response["event_trigger"] = "open_pause_checkin"
         self.save_chat_turn(
             user_id=user_id,
@@ -2558,6 +2535,52 @@ class Store:
             task_ids=[task["id"] for task in response["tasks"] if not task.get("is_preview")],
         )
         return response
+
+    def save_pending_task_batch(self, user_id: str, source_text: str, tasks: list[dict]) -> dict:
+        batch_id = new_id("taskbatch")
+        missing = sorted({str(field) for task in tasks for field in (task.get("missing_fields") or []) if str(field)})
+        timestamp = now_ms()
+        with self.connect() as conn:
+            conn.execute("UPDATE pending_task_batches SET status='superseded',updated_at=? WHERE user_id=? AND status='awaiting_clarification'", (timestamp, user_id))
+            conn.execute(
+                "INSERT INTO pending_task_batches (id,user_id,source_text,tasks_json,missing_fields_json,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                (batch_id, user_id, source_text, as_json(tasks), as_json(missing), "awaiting_clarification", timestamp, timestamp),
+            )
+        return {"id": batch_id, "tasks": tasks, "missing_fields": missing, "status": "awaiting_clarification"}
+
+    def latest_pending_task_batch(self, user_id: str) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM pending_task_batches WHERE user_id=? AND status='awaiting_clarification' ORDER BY updated_at DESC LIMIT 1", (user_id,)).fetchone()
+        if not row:
+            return None
+        return {"id": row["id"], "source_text": row["source_text"], "tasks": from_json(row["tasks_json"], []), "missing_fields": from_json(row["missing_fields_json"], []), "status": row["status"]}
+
+    @staticmethod
+    def is_pending_task_batch_followup(text: str) -> bool:
+        normalized = re.sub(r"\s+", "", text.lower())
+        confirms = any(token in normalized for token in ("需要", "确认", "全部", "都是", "都要", "yes", "confirm", "all"))
+        supplements = any(token in normalized for token in ("优先级", "备注", "高", "中", "低", "priority", "note"))
+        return confirms or supplements
+
+    def complete_pending_task_batch(self, user_id: str, batch: dict, text: str) -> list[dict]:
+        normalized = re.sub(r"\s+", "", text.lower())
+        priority = "高" if "优先级都是高" in normalized or "全部高" in normalized else "低" if "优先级都是低" in normalized or "全部低" in normalized else "中" if "优先级都是中" in normalized or "全部中" in normalized else None
+        no_notes = any(token in normalized for token in ("没有备注", "无备注", "no note", "no notes"))
+        completed = []
+        for raw in batch.get("tasks") or []:
+            task = dict(raw)
+            if priority:
+                task["priority"] = priority
+            if no_notes:
+                task["context"] = ""
+            missing = [field for field in (task.get("missing_fields") or []) if not (priority and field in {"priority", "user_priority"}) and not (no_notes and field in {"notes", "context", "remark"})]
+            task["missing_fields"] = missing
+            task["pending_batch_id"] = batch["id"]
+            task["is_preview"] = True
+            completed.append(task)
+        with self.connect() as conn:
+            conn.execute("UPDATE pending_task_batches SET tasks_json=?,missing_fields_json=?,status='resolved',updated_at=? WHERE id=? AND user_id=?", (as_json(completed), as_json(sorted({field for task in completed for field in task.get("missing_fields", [])})), now_ms(), batch["id"], user_id))
+        return completed
 
     def save_chat_turn(
         self,
@@ -2648,6 +2671,15 @@ class Store:
             r"(第\s*[一二两三四五六七八九\d]+\s*个?|这个|那个|改成|变成|调整到|移到|挪到|提前到|推迟到)",
             text,
         )
+        if not is_explicit_change_request(text):
+            return []
+        ordinal_reference = re.search(r"第\s*([一二两三四五六七八九\d]+)\s*个?", text)
+        exact_title_matches = exact_task_reference_indexes(text, recent_tasks)
+        # Modification requires a unique identity reference. Words such as
+        # "this/that", shared keywords, vector similarity, or a matching due
+        # time are never sufficient to select an existing Task.
+        if not has_unique_task_identity(text, recent_tasks):
+            return []
         timed_action_parts = [
             part
             for part in re.split(r"(?:，|,|。|；|;|然后|再|接着|最后)", text)
@@ -2669,7 +2701,11 @@ class Store:
             )
             for task in recent_tasks
         )
-        if not has_reference_marker and not has_time_range and not references_known_task and len(recent_tasks) != 1:
+        # A concrete time plus one recent task is not evidence of an update.
+        # New tasks frequently include both a new title and a deadline. Only
+        # mutate an existing task when the user explicitly refers to it by
+        # title or uses an unambiguous edit/reference phrase.
+        if not explicit_reschedule and not references_known_task:
             return []
 
         day_match = re.search(r"(今天|今晚|明天|后天|周[一二三四五六日天]|星期[一二三四五六日天])", text)
@@ -2867,7 +2903,7 @@ class Store:
             "start_at": context_window.get("startAt"),
             "deadline_at": context_window.get("deadlineAt"),
             "deadline_assumption": context_window.get("deadlineAssumption"),
-            "duration": infer_duration_minutes(f"{row['title']} {row['context']}") or row["duration"],
+            "duration": row["duration"],
             "estimated_duration": context_window.get("estimatedDuration") or row["duration"],
             "priority": row["priority"],
             "status": row["status"],
@@ -3518,6 +3554,42 @@ class Store:
             {"week_id": row["week_id"], "request_id": request_id},
         )
 
+    def decide_parallel_suggestion(self, user_id: str, payload: dict) -> dict:
+        plan_id = str(payload.get("plan_id") or "")
+        suggestion_id = str(payload.get("suggestion_id") or "")
+        action = str(payload.get("action") or "keep_separate")
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM plans WHERE id=? AND user_id=? AND plan_status='proposed'", (plan_id, user_id)).fetchone()
+            if not row:
+                raise KeyError(plan_id)
+            plan = from_json(row["plan_json"], {})
+            suggestions = [dict(item) for item in (plan.get("parallel_suggestions") or [])]
+            suggestion = next((item for item in suggestions if str(item.get("id")) == suggestion_id), None)
+            if not suggestion:
+                raise KeyError(suggestion_id)
+            suggestion["status"] = "accepted" if action == "combine" else "rejected"
+            if action == "combine":
+                block_ids = {str(suggestion.get("primary_block_id")), str(suggestion.get("secondary_block_id"))}
+                task_ids = [str(suggestion.get("primary_task_id")), str(suggestion.get("secondary_task_id"))]
+                overlap = int(suggestion.get("suggested_overlap_minutes") or 30)
+                start = float(suggestion.get("start") or 0)
+                end = start + overlap / 60.0
+                found = 0
+                for block in plan.get("plan_patch") or []:
+                    if str(block.get("block_id")) not in block_ids:
+                        continue
+                    found += 1
+                    block.update({"day_index": int(suggestion.get("day_index") or 0), "start": start, "end": end, "session_minutes": overlap, "planned_work_minutes": min(overlap, int(block.get("planned_work_minutes") or overlap)), "parallel_group_id": suggestion["parallel_group_id"], "parallel_user_confirmed": True, "parallel_task_ids": task_ids, "allowed_overlap_minutes": overlap, "parallel_role": "primary" if str(block.get("task_id")) == task_ids[0] else "secondary"})
+                if found != 2:
+                    raise ValueError("Parallel suggestion no longer matches the current draft")
+                plan["accepted_parallel_pairs"] = [*(plan.get("accepted_parallel_pairs") or []), {**suggestion, "user_confirmed": True}]
+            plan["parallel_suggestions"] = suggestions
+            plan["validation"] = self.validate_confirmed_schedule(user_id, {**plan, "accepted_parallel_pairs": plan.get("accepted_parallel_pairs") or []})
+            if action == "combine" and not plan["validation"].get("valid"):
+                raise ValueError(f"Parallel combination failed Python validation: {plan['validation'].get('violations', [])[:1]}")
+            conn.execute("UPDATE plans SET plan_json=?,updated_at=? WHERE id=?", (as_json(plan), now_ms(), plan_id))
+        return plan
+
     def adjust_scheduled_task(self, user_id: str, payload: dict) -> dict:
         task_id = str(payload.get("task_id") or "").strip()
         if not task_id:
@@ -3582,6 +3654,8 @@ class Store:
         return {"task": updated_task, "plan": result.get("plan"), "validation": result.get("validation"), "revision_created": True}
 
     def confirm_plan(self, user_id: str, payload: dict) -> dict:
+        from app.application.plan_revision import activation_event_payload, activation_resources, revision_activation
+
         plan_id = str(payload.get("plan_id") or "")
         plan_patch = list(payload.get("plan_patch") or [])
         validation = self.validate_confirmed_schedule(user_id, {**payload, "plan_patch": plan_patch})
@@ -3619,10 +3693,13 @@ class Store:
         week_id = str(payload.get("week_id") or profile.get("active_week_id") or iso_week_id(timezone_name=timezone_name))
         timestamp = now_ms()
         with self.connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM plans WHERE id=? AND user_id=?",
-                (plan_id,user_id),
-            ).fetchone() if plan_id else None
+            from app.repositories import ExecutionSessionRepository, PlanRepository, TaskRepository
+            from app.domain.task import project_confirmed_task_schedule
+
+            plans = PlanRepository(conn)
+            execution_sessions = ExecutionSessionRepository(conn)
+            tasks = TaskRepository(conn)
+            row = plans.get_for_user(plan_id=plan_id, user_id=user_id) if plan_id else None
             if row and row["plan_status"] == "confirmed":
                 result = from_json(row["plan_json"], {})
                 return {
@@ -3636,58 +3713,64 @@ class Store:
                     },
                 }
             if not row:
-                max_row = conn.execute(
-                    "SELECT COALESCE(MAX(plan_revision),0) AS revision FROM plans WHERE user_id=? AND week_id=?",
-                    (user_id,week_id),
-                ).fetchone()
-                revision = int(max_row["revision"] or 0) + 1
+                revision = plans.next_revision(user_id=user_id, week_id=week_id)
                 plan_id = new_id("plan")
-                conn.execute(
-                    "INSERT INTO plans (id,user_id,week_id,plan_revision,plan_status,request_id,plan_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                    (plan_id,user_id,week_id,revision,"proposed",payload.get("request_id"),as_json({}),timestamp,timestamp),
+                plans.insert_proposed(
+                    plan_id=plan_id,
+                    user_id=user_id,
+                    week_id=week_id,
+                    revision=revision,
+                    request_id=payload.get("request_id"),
+                    plan_json=as_json({}),
+                    timestamp=timestamp,
                 )
             else:
                 revision = int(row["plan_revision"])
                 week_id = str(row["week_id"])
+            activation = revision_activation(week_id=week_id, revision=revision, plan_id=plan_id)
             decorated = self._decorate_plan_blocks(plan_patch, week_id, revision, timezone_name)
             blocks_by_task: dict[str, list[dict]] = {}
             for block in decorated:
                 block["plan_status"] = "confirmed"
-                blocks_by_task.setdefault(str(block.get("task_id")), []).append(block)
+                block_task_id = str(block.get("task_id") or "").strip()
+                if str(block.get("kind") or "") == "fixed_event" or not block_task_id:
+                    continue
+                blocks_by_task.setdefault(block_task_id, []).append(block)
                 execution_id = new_id("exec")
                 planned_minutes = int(block.get("planned_work_minutes") or block.get("session_minutes") or round((float(block["end"]) - float(block["start"])) * 60))
-                paused_source = conn.execute(
-                    "SELECT id FROM execution_sessions WHERE user_id=? AND task_id=? AND status='paused' ORDER BY updated_at DESC LIMIT 1",
-                    (user_id, str(block.get("task_id") or "")),
-                ).fetchone()
-                conn.execute(
-                    "INSERT INTO execution_sessions (id,user_id,task_id,block_id,week_id,plan_revision,planned_start_at,planned_end_at,planned_work_minutes,resumed_from_session_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,block_id,plan_revision) DO UPDATE SET planned_start_at=excluded.planned_start_at,planned_end_at=excluded.planned_end_at,planned_work_minutes=excluded.planned_work_minutes,resumed_from_session_id=excluded.resumed_from_session_id,updated_at=excluded.updated_at",
-                    (execution_id, user_id, str(block.get("task_id") or ""), str(block.get("block_id") or execution_id), week_id, revision, str(block.get("start_at") or ""), str(block.get("end_at") or ""), planned_minutes, paused_source["id"] if paused_source else None, "ready", timestamp, timestamp),
+                paused_source = execution_sessions.latest_paused_for_task(user_id=user_id, task_id=block_task_id)
+                execution_sessions.upsert_ready(
+                    execution_id=execution_id,
+                    user_id=user_id,
+                    task_id=block_task_id,
+                    block_id=str(block.get("block_id") or execution_id),
+                    week_id=week_id,
+                    revision=revision,
+                    planned_start_at=str(block.get("start_at") or ""),
+                    planned_end_at=str(block.get("end_at") or ""),
+                    planned_work_minutes=planned_minutes,
+                    resumed_from_session_id=paused_source["id"] if paused_source else None,
+                    timestamp=timestamp,
                 )
                 if paused_source:
-                    conn.execute("UPDATE execution_sessions SET status='superseded',completion_outcome='continued_in_revision',updated_at=? WHERE id=?", (timestamp, paused_source["id"]))
-            active_rows = conn.execute(
-                "SELECT * FROM tasks WHERE user_id=? AND week_id=? AND removed_from_week=0 AND status NOT IN ('completed','terminated')",
-                (user_id,week_id),
-            ).fetchall()
+                    execution_sessions.mark_continued_in_revision(session_id=paused_source["id"], timestamp=timestamp)
+            active_rows = tasks.active_for_week(user_id=user_id, week_id=week_id)
             for task_row in active_rows:
                 task = self.task_row(task_row)
                 task_id = str(task["id"])
-                sessions = sorted(blocks_by_task.get(task_id, []), key=lambda item: (item["start_at"], item["end_at"]))
-                if not sessions:
-                    conn.execute("UPDATE tasks SET slot_json=?,updated_at=? WHERE id=? AND user_id=?", (as_json(None),timestamp,task_id,user_id))
-                    continue
-                for index, session in enumerate(sessions):
-                    session["session_index"] = index + 1
-                    session["session_count"] = len(sessions)
-                slot = {"sessions": sessions,"start": sessions[0]["start"],"end": sessions[0]["end"],"day_index": sessions[0]["day_index"],"week_id": week_id,"plan_revision": revision,"plan_status": "confirmed","color": sessions[0].get("color") or "blue"}
-                execution = dict(task.get("execution") or {})
-                execution["scheduled_duration_minutes"] = sum(int(item.get("planned_work_minutes") or item.get("session_minutes") or round((item["end"] - item["start"]) * 60)) for item in sessions)
-                execution["unallocated_schedule_minutes"] = max(int(execution.get("remaining_duration_minutes", task.get("duration") or 0)) - execution["scheduled_duration_minutes"], 0)
-                status = "scheduled" if execution["unallocated_schedule_minutes"] == 0 else "partially_scheduled"
-                conn.execute(
-                    "UPDATE tasks SET slot_json=?,execution_json=?,status=?,updated_at=? WHERE id=? AND user_id=?",
-                    (as_json(slot),as_json(execution),status,timestamp,task_id,user_id),
+                projection = project_confirmed_task_schedule(
+                    task,
+                    sessions=blocks_by_task.get(task_id, []),
+                    week_id=week_id,
+                    revision=revision,
+                )
+                tasks.save_schedule_projection(
+                    task_id=task_id,
+                    user_id=user_id,
+                    slot_json=as_json(projection.slot),
+                    execution_json=as_json(projection.execution),
+                    status=projection.status,
+                    timestamp=timestamp,
                 )
             stored = dict(payload.get("decision") or {})
             stored.update({"plan_id": plan_id,"plan_revision": revision,"plan_status": "confirmed","week_id": week_id,"plan_patch": decorated,"confirmed_at": timestamp})
@@ -3721,21 +3804,27 @@ class Store:
                     "UPDATE plan_edit_episodes SET final_plan_json=?,final_plan_hash=?,canonical_diff_json=?,status='confirmed',confirmed_at=?,updated_at=? WHERE id=? AND user_id=?",
                     (as_json(final_snapshot), final_hash, as_json(canonical_diff), timestamp, timestamp, episode_id, user_id),
                 )
-            conn.execute(
-                "UPDATE plans SET plan_status='superseded',updated_at=? WHERE user_id=? AND week_id=? AND id<>? AND plan_status IN ('confirmed','needs_update','proposed')",
-                (timestamp,user_id,week_id,plan_id),
+            plans.supersede_other_revisions(
+                user_id=user_id,
+                week_id=activation.week_id,
+                active_plan_id=activation.plan_id,
+                timestamp=timestamp,
             )
             # A confirmed revision is the single source of future calendar
             # truth. Keep completed/ended/running history, but retire unstarted
             # and paused Sessions from earlier revisions so they cannot reappear
             # in Now / Up Next after the user confirms a replacement plan.
-            conn.execute(
-                "UPDATE execution_sessions SET status='superseded',completion_outcome=CASE WHEN status='paused' THEN 'replaced_by_revision' ELSE completion_outcome END,updated_at=? WHERE user_id=? AND week_id=? AND plan_revision<>? AND status IN ('ready','paused')",
-                (timestamp, user_id, week_id, revision),
+            execution_sessions.supersede_older_future_sessions(
+                user_id=user_id,
+                week_id=activation.week_id,
+                active_revision=activation.revision,
+                timestamp=timestamp,
             )
-            conn.execute(
-                "UPDATE plans SET plan_status='confirmed',plan_json=?,confirmed_at=?,updated_at=? WHERE id=? AND user_id=?",
-                (as_json(stored),timestamp,timestamp,plan_id,user_id),
+            plans.confirm(
+                plan_id=plan_id,
+                user_id=user_id,
+                plan_json=as_json(stored),
+                timestamp=timestamp,
             )
             conn.execute(
                 "UPDATE profiles SET active_week_id=?,active_plan_revision=?,updated_at=? WHERE user_id=?",
@@ -3743,7 +3832,7 @@ class Store:
             )
             conn.execute(
                 "INSERT INTO events (id,user_id,type,payload_json,created_at) VALUES (?,?,?,?,?)",
-                (new_id("evt"),user_id,"plan_confirmed",as_json({"plan_id":plan_id,"week_id":week_id,"plan_revision":revision}),timestamp),
+                (new_id("evt"),user_id,"plan_confirmed",as_json(activation_event_payload(activation)),timestamp),
             )
         return {
             "plan": stored,
@@ -3752,11 +3841,7 @@ class Store:
             "requires_rationale": False,
             "edit_episode_id": episode_id or None,
             "canonical_diff": canonical_diff,
-            "resources": {
-                "profile": "/api/profile",
-                "tasks": "/api/tasks",
-                "execution_sessions": "/api/execution-sessions",
-            },
+            "resources": activation_resources(activation),
         }
 
     def active_plan(self, user_id: str, week_id: str | None = None) -> dict | None:
@@ -3840,7 +3925,10 @@ class Store:
             new_context = {
                 "week_id": new_week,
                 "week_of": new_week,
-                "weekly_available_windows": weekly.get("weekly_available_windows") if use_last else "",
+                # Availability is a Profile-owned capacity boundary established
+                # during onboarding. A fresh week clears transient commitments,
+                # not the person's normal working-time envelope.
+                "weekly_available_windows": weekly.get("weekly_available_windows", ""),
                 "context_items": [
                     item for item in (weekly.get("context_items") or [])
                     if use_last
@@ -4077,8 +4165,9 @@ class Store:
                 "UPDATE tasks SET status=?,checkpoints_json=?,execution_json=?,context_window_json=?,updated_at=? WHERE id=? AND user_id=?",
                 (next_status, as_json(checkpoints), as_json(execution), as_json(context_window), dump["created_at"], task_id, user_id),
             )
-            conn.execute("UPDATE plans SET plan_status='needs_update',updated_at=? WHERE user_id=? AND week_id=? AND plan_status='confirmed'", (dump["created_at"], user_id, task.get("week_id")))
-            conn.execute("UPDATE profiles SET active_plan_revision=NULL,updated_at=? WHERE user_id=?", (dump["created_at"], user_id))
+            # Capturing a paused process context is not itself a calendar edit.
+            # Keep the confirmed Plan active until impact analysis proves that
+            # future Slots must change and the user applies a local revision.
             self._insert_state_transition(conn, user_id=user_id, task_id=task_id, before_status=str(task.get("status") or "unknown"), action_type="capture_context", after_status=next_status, action_detail={"context_dump_id": dump_id, "stop_reason": dump["stop_reason"]}, outcome={"persisted": True, "remaining_minutes": execution["remaining_duration_minutes"]}, created_at=dump["created_at"])
         memory_text = (
             f"Context dump for task {task_id}. Progress: {dump['progress']}. "
@@ -4097,12 +4186,16 @@ class Store:
         return dump
 
     @staticmethod
-    def _iso_elapsed_minutes(start_value: str | None, end_value: str | None = None) -> int:
+    def _iso_elapsed_minutes(
+        start_value: str | None,
+        end_value: str | None = None,
+        now_value: datetime | None = None,
+    ) -> int:
         if not start_value:
             return 0
         try:
             start = datetime.fromisoformat(str(start_value))
-            end = datetime.fromisoformat(str(end_value)) if end_value else clock_now(start.tzinfo)
+            end = datetime.fromisoformat(str(end_value)) if end_value else (now_value or clock_now(start.tzinfo))
             return max(int((end - start).total_seconds() // 60), 0)
         except (TypeError, ValueError):
             return 0
@@ -4112,11 +4205,84 @@ class Store:
         planned = int(data.get("planned_work_minutes") or 0)
         active = int(data.get("accumulated_active_minutes") or 0)
         if data.get("status") == "running":
-            active += self._iso_elapsed_minutes(data.get("resumed_at") or data.get("actual_start_at"))
+            # The running clock is derived from persisted backend timestamps,
+            # so it keeps accumulating while the tab is hidden or closed.
+            # Test accounts use the same unified simulated clock.
+            current = self.user_clock_now(str(data.get("user_id") or "")) if data.get("user_id") else None
+            active += self._iso_elapsed_minutes(
+                data.get("resumed_at") or data.get("actual_start_at"),
+                now_value=current,
+            )
         data["live_active_minutes"] = active
+        data["overrun_failure"] = bool(data.get("overrun_failure"))
         data["execution_session_id"] = data.pop("id")
         data["session_remaining_minutes"] = max(planned - active, 0)
         return data
+
+    @staticmethod
+    def _execution_timing_result(planned_end_at: object, actual_end_at: object) -> dict:
+        """Classify a Session finish using persisted calendar timestamps."""
+        try:
+            planned_end = datetime.fromisoformat(str(planned_end_at).replace("Z", "+00:00"))
+            actual_end = datetime.fromisoformat(str(actual_end_at).replace("Z", "+00:00"))
+            if planned_end.tzinfo is None and actual_end.tzinfo is not None:
+                planned_end = planned_end.replace(tzinfo=actual_end.tzinfo)
+            elif actual_end.tzinfo is None and planned_end.tzinfo is not None:
+                actual_end = actual_end.replace(tzinfo=planned_end.tzinfo)
+            overrun_seconds = max((actual_end - planned_end).total_seconds(), 0)
+            overrun_minutes = int(math.ceil(overrun_seconds / 60.0)) if overrun_seconds else 0
+        except (TypeError, ValueError):
+            overrun_minutes = 0
+        overrun_failure = overrun_minutes >= EXECUTION_OVERRUN_FAILURE_MINUTES
+        return {
+            "timing_outcome": "overrun_failure" if overrun_failure else "late_within_tolerance" if overrun_minutes else "on_time_or_early",
+            "overrun_minutes": overrun_minutes,
+            "overrun_failure": overrun_failure,
+            "failure_threshold_minutes": EXECUTION_OVERRUN_FAILURE_MINUTES,
+        }
+
+    def _overrun_affected_task_ids(self, user_id: str, session: dict, *, include_current_task: bool) -> list[str]:
+        """Return only downstream work whose current-day Slots need reconsidering."""
+        affected: set[str] = set()
+        if include_current_task and session.get("task_id"):
+            affected.add(str(session["task_id"]))
+        try:
+            planned_end = datetime.fromisoformat(str(session.get("planned_end_at") or "").replace("Z", "+00:00"))
+            actual_end = datetime.fromisoformat(str(session.get("actual_end_at") or "").replace("Z", "+00:00"))
+            if planned_end.tzinfo is None and actual_end.tzinfo is not None:
+                planned_end = planned_end.replace(tzinfo=actual_end.tzinfo)
+            elif actual_end.tzinfo is None and planned_end.tzinfo is not None:
+                actual_end = actual_end.replace(tzinfo=planned_end.tzinfo)
+            review_until = max(
+                actual_end,
+                planned_end.replace(hour=23, minute=59, second=59, microsecond=999999),
+            )
+        except (TypeError, ValueError):
+            return sorted(affected)
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT task_id, planned_start_at FROM execution_sessions
+                WHERE user_id=? AND id<>? AND week_id=? AND plan_revision=?
+                  AND status='ready'
+                """,
+                (
+                    user_id,
+                    str(session.get("execution_session_id") or session.get("id") or ""),
+                    session.get("week_id"),
+                    int(session.get("plan_revision") or 0),
+                ),
+            ).fetchall()
+        for row in rows:
+            try:
+                start = datetime.fromisoformat(str(row["planned_start_at"] or "").replace("Z", "+00:00"))
+                if start.tzinfo is None and planned_end.tzinfo is not None:
+                    start = start.replace(tzinfo=planned_end.tzinfo)
+            except (TypeError, ValueError):
+                continue
+            if planned_end <= start <= review_until and row["task_id"]:
+                affected.add(str(row["task_id"]))
+        return sorted(affected)
 
     @staticmethod
     def _execution_request_seen(conn: sqlite3.Connection, user_id: str, request_id: str | None) -> sqlite3.Row | None:
@@ -4142,7 +4308,12 @@ class Store:
                 ).fetchall()
             else:
                 rows = conn.execute("SELECT * FROM execution_sessions WHERE user_id=? ORDER BY planned_start_at", (user_id,)).fetchall()
-        return [self.execution_session_row(row) for row in rows]
+        sessions = []
+        for row in rows:
+            session = self.execution_session_row(row)
+            task = self.get_task(str(session.get("task_id") or ""), user_id) or {}
+            sessions.append({**session, "task_title": task.get("title"), "task": task})
+        return sessions
 
     def current_execution(self, user_id: str) -> dict:
         sessions = self.list_execution_sessions(user_id, ["running", "paused", "ended", "ready"])
@@ -4176,6 +4347,13 @@ class Store:
         for item in paused:
             preference = str(item.get("resume_preference") or "")
             preferred_at = item.get("preferred_resume_at")
+            pause_reason = str(item.get("pause_reason") or "")
+            # A timed break is still the current execution context.  Do not
+            # replace it with the next Ready task merely because its resume
+            # timestamp is a few minutes in the future.
+            if pause_reason in {"short_break", "normal_break", "decision_pending"}:
+                actionable_paused.append(item)
+                continue
             should_defer = preference == "unknown"
             if preferred_at:
                 try:
@@ -4195,11 +4373,21 @@ class Store:
             return {"mode": "empty", "session": None, "task": None, "deferred_sessions": deferred_sessions}
         session = selected[0]
         task = self.get_task(session["task_id"], user_id)
-        mode = "now" if session["status"] == "running" else "paused" if session["status"] == "paused" else "session_ended" if session["status"] == "ended" else "up_next"
+        # Keep the persisted execution-session status and the API mode aligned.
+        # The Focus client only advances a timer for ``running``.  Returning the
+        # older ``now`` label after a tab refresh made an active session appear
+        # stopped and reset the visible counter even though the backend had
+        # continued to retain its timestamps.
+        mode = "running" if session["status"] == "running" else "paused" if session["status"] == "paused" else "session_ended" if session["status"] == "ended" else "up_next"
         if mode == "up_next" and session.get("planned_start_at"):
             try:
-                planned_start = datetime.fromisoformat(session["planned_start_at"])
-                if current >= planned_start:
+                planned_start = datetime.fromisoformat(str(session["planned_start_at"]).replace("Z", "+00:00"))
+                planned_end = datetime.fromisoformat(str(session.get("planned_end_at") or "").replace("Z", "+00:00")) if session.get("planned_end_at") else None
+                if planned_start.tzinfo is None:
+                    planned_start = planned_start.replace(tzinfo=current.tzinfo)
+                if planned_end and planned_end.tzinfo is None:
+                    planned_end = planned_end.replace(tzinfo=current.tzinfo)
+                if current >= planned_start and (planned_end is None or current < planned_end):
                     mode = "ready_to_start"
             except ValueError:
                 pass
@@ -4334,24 +4522,55 @@ class Store:
         preferred_resume_at = str(payload.get("preferred_resume_at") or "").strip() or None
         request_id = str(payload.get("request_id") or "").strip() or None
         with self.connect() as conn:
+            from app.repositories import TaskRepository
+
+            tasks = TaskRepository(conn)
             replay = self._execution_request_seen(conn, user_id, request_id)
             if replay:
                 return self.execution_session_row(replay)
             row = conn.execute("SELECT * FROM execution_sessions WHERE id=? AND user_id=?", (session_id, user_id)).fetchone()
             if not row:
                 raise KeyError(session_id)
+            if row["status"] == "paused":
+                # Pause is a two-stage interaction: pressing Pause first saves
+                # execution state, then the chosen action supplies its intent.
+                # Updating that intent must not settle the same minutes twice.
+                conn.execute(
+                    "UPDATE execution_sessions SET pause_reason=?,resume_preference=?,preferred_resume_at=?,updated_at=? WHERE id=? AND user_id=?",
+                    (pause_reason, resume_preference, preferred_resume_at, timestamp, session_id, user_id),
+                )
+                updated = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (session_id,)).fetchone()
+                return self.execution_session_row(updated)
             from app.domain.task import require_execution_transition
 
             require_execution_transition(str(row["status"]), "paused")
             calculated = int(row["accumulated_active_minutes"] or 0)
+            elapsed_segment = 0
             if row["status"] == "running":
-                calculated += self._iso_elapsed_minutes(row["resumed_at"] or row["actual_start_at"], paused_at)
-            active = max(calculated, confirmed_minutes)
-            if not remaining_minutes:
-                remaining_minutes = max(int(row["planned_work_minutes"] or 0) - active, 0)
+                elapsed_segment = self._iso_elapsed_minutes(row["resumed_at"] or row["actual_start_at"], paused_at)
+            task = self.get_task(str(row["task_id"]), user_id) or {}
+            task_remaining = int((task.get("execution") or {}).get("remaining_duration_minutes", task.get("duration") or row["planned_work_minutes"] or 0))
+            settlement = settle_interruption(
+                planned_session_minutes=int(row["planned_work_minutes"] or 0),
+                previous_active_minutes=calculated,
+                elapsed_segment_minutes=elapsed_segment,
+                reported_active_minutes=confirmed_minutes,
+                previous_task_remaining_minutes=task_remaining,
+            )
+            active = settlement.effective_active_minutes
+            remaining_minutes = settlement.session_remaining_minutes
             conn.execute("UPDATE execution_sessions SET status='paused',paused_at=?,resumed_at=NULL,accumulated_active_minutes=?,pause_reason=?,resume_preference=?,preferred_resume_at=?,remaining_at_pause=?,updated_at=? WHERE id=? AND user_id=?", (paused_at, active, pause_reason, resume_preference, preferred_resume_at, remaining_minutes, timestamp, session_id, user_id))
-            conn.execute("UPDATE tasks SET status='paused',updated_at=? WHERE id=? AND user_id=?", (timestamp, row["task_id"], user_id))
-            self._insert_state_transition(conn, user_id=user_id, task_id=row["task_id"], before_status=str(row["status"]), action_type="pause", after_status="paused", execution_session_id=session_id, action_detail={"pause_reason": pause_reason, "resume_preference": resume_preference, "remaining_minutes": remaining_minutes}, created_at=timestamp)
+            execution = dict(task.get("execution") or {})
+            execution["accumulated_actual_minutes"] = int(execution.get("accumulated_actual_minutes") or 0) + max(settlement.effective_active_minutes - settlement.previous_active_minutes, 0)
+            execution["remaining_duration_minutes"] = settlement.task_remaining_minutes
+            tasks.save_execution_state(
+                task_id=str(row["task_id"]),
+                user_id=user_id,
+                execution_json=as_json(execution),
+                status="paused",
+                timestamp=timestamp,
+            )
+            self._insert_state_transition(conn, user_id=user_id, task_id=row["task_id"], before_status=str(row["status"]), action_type="pause", after_status="paused", execution_session_id=session_id, action_detail={"pause_reason": pause_reason, "resume_preference": resume_preference, **settlement.to_dict()}, created_at=timestamp)
             self._record_execution_request(conn, user_id, request_id, session_id, "pause", timestamp)
             updated = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (session_id,)).fetchone()
         return self.execution_session_row(updated)
@@ -4371,11 +4590,23 @@ class Store:
         session = self.execution_session_row(row)
         profile = self.ensure_profile(user_id)
         current = self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai")
+        evaluation_start = current
+        preferred_resume_at = payload.get("preferred_resume_at") or session.get("preferred_resume_at")
+        if preferred_resume_at:
+            try:
+                parsed_resume = datetime.fromisoformat(str(preferred_resume_at).replace("Z", "+00:00"))
+                if parsed_resume.tzinfo is None:
+                    parsed_resume = parsed_resume.replace(tzinfo=current.tzinfo)
+                else:
+                    parsed_resume = parsed_resume.astimezone(current.tzinfo)
+                evaluation_start = max(parsed_resume, current)
+            except (TypeError, ValueError):
+                pass
         remaining_minutes = max(
             int(payload.get("remaining_minutes") if payload.get("remaining_minutes") is not None else session.get("session_remaining_minutes") or 0),
             0,
         )
-        estimated_end = current + timedelta(minutes=remaining_minutes)
+        task = self.get_task(str(session.get("task_id") or ""), user_id) or {}
         future = [
             item for item in self.list_execution_sessions(user_id, ["ready"])
             if item.get("execution_session_id") != session_id
@@ -4383,38 +4614,153 @@ class Store:
             and item.get("plan_revision") == session.get("plan_revision")
             and item.get("planned_start_at")
         ]
-        conflicts = []
-        for item in future:
+        context = dict(task.get("contextWindow") or {})
+        deadline_at = task.get("deadline_at") or context.get("deadlineAt") or context.get("deadline_at")
+        week_start = datetime.fromisoformat(f"{session.get('week_id')}T00:00:00").replace(tzinfo=current.tzinfo)
+        week_end = week_start + timedelta(days=7)
+        # Fixed events are not Execution Sessions, but they are still hard
+        # scheduling boundaries.  Project them into the same impact check so
+        # a break can never silently push work through a meeting or class.
+        active = self.active_plan(user_id, str(session.get("week_id") or ""))
+        for index, block in enumerate((active or {}).get("plan_patch") or []):
+            if str(block.get("kind") or "") != "fixed_event":
+                continue
             try:
-                planned_start = datetime.fromisoformat(str(item["planned_start_at"]))
-                if planned_start.tzinfo is None:
-                    planned_start = planned_start.replace(tzinfo=current.tzinfo)
-                if planned_start < estimated_end and planned_start >= current:
-                    conflicts.append({
-                        "execution_session_id": item["execution_session_id"],
-                        "task_id": item["task_id"],
-                        "task_title": item.get("task_title") or item.get("title"),
-                        "planned_start_at": item.get("planned_start_at"),
-                        "planned_end_at": item.get("planned_end_at"),
-                        "overlap_minutes": max(int((estimated_end - planned_start).total_seconds() // 60), 1),
-                    })
+                day_index = int(block.get("day_index"))
+                start_hour = float(block.get("start"))
+                end_hour = float(block.get("end"))
             except (TypeError, ValueError):
                 continue
-        return {
-            "action": str(payload.get("action") or "resume"),
+            fixed_start = block.get("start_at") or (week_start + timedelta(days=day_index, hours=start_hour)).isoformat()
+            fixed_end = block.get("end_at") or (week_start + timedelta(days=day_index, hours=end_hour)).isoformat()
+            future.append({
+                "execution_session_id": f"fixed:{block.get('block_id') or index}",
+                "task_id": block.get("task_id"),
+                "task_title": block.get("title") or "Protected time",
+                "planned_start_at": fixed_start,
+                "planned_end_at": fixed_end,
+                "kind": "fixed_event",
+            })
+        return analyze_remaining_work_impact(
+            current=evaluation_start,
+            remaining_minutes=remaining_minutes,
+            future_sessions=future,
+            current_session_id=session_id,
+            deadline_at=deadline_at,
+            week_end_at=week_end,
+            action=str(payload.get("action") or "resume"),
+        )
+
+    def recommend_interruption_action(self, user_id: str, payload: dict) -> dict:
+        """Recommend one interrupt action; Python keeps the recommendation safe."""
+        session_id = str(payload.get("execution_session_id") or "").strip()
+        if not session_id:
+            raise ValueError("execution_session_id is required")
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM execution_sessions WHERE id=? AND user_id=?",
+                (session_id, user_id),
+            ).fetchone()
+        if not row:
+            raise KeyError(session_id)
+        session = self.execution_session_row(row)
+        task = self.get_task(str(session.get("task_id") or ""), user_id) or {}
+        runtime_state = payload.get("runtime_state") or self.latest_runtime_state(user_id)
+        reason = str(payload.get("reason") or "unsure").strip()
+        ready_sessions = [
+            item for item in self.list_execution_sessions(user_id, ["ready"])
+            if item.get("execution_session_id") != session_id
+        ]
+        impact = self.analyze_execution_impact(user_id, {
             "execution_session_id": session_id,
-            "evaluated_at": current.isoformat(),
-            "remaining_minutes": remaining_minutes,
-            "estimated_end_at": estimated_end.isoformat(),
-            "requires_plan_adjustment": bool(conflicts),
-            "affected_sessions": conflicts,
-            "options": ["continue_without_changes"] if not conflicts else [
-                "shorten_current_task",
-                "reschedule_future_tasks",
-                "regenerate_today_plan",
-                "edit_plan_manually",
-            ],
+            "remaining_minutes": payload.get("remaining_minutes", session.get("session_remaining_minutes")),
+            "action": "help_decide",
+        })
+        focus = int(runtime_state.get("focus") or 4)
+        energy = int(runtime_state.get("energy") or 4)
+        stress = int(runtime_state.get("stress") or 4)
+        fallback_action = "short_break"
+        break_minutes = 10
+        selected_task_id = None
+        explanation = "Take a 10-minute break, then continue the same task."
+        if reason in {"waiting_for_material", "blocked", "missing_material"} and ready_sessions:
+            fallback_action = "switch_task"
+            selected_task_id = str(ready_sessions[0].get("task_id") or "") or None
+            explanation = f"This task is blocked. Switch to {ready_sessions[0].get('task_title') or 'another ready task'} while you wait."
+        elif focus <= 3 or energy <= 3 or stress >= 6:
+            break_minutes = 15
+            explanation = "Your current capacity is low. Take a 15-minute break before deciding whether to resume."
+        elif reason in {"interrupted", "leave_now", "continue_later"}:
+            fallback_action = "continue_later"
+            explanation = "Save your current context and continue this task later."
+
+        model_result = chat_completion([
+            {
+                "role": "system",
+                "content": (
+                    "You are the HumanOS interrupt scheduler. Return JSON only. Choose exactly one action: "
+                    "short_break, continue_later, or switch_task. Consider the interruption reason, tracked work, "
+                    "remaining work, current focus/energy/stress, ready tasks, fixed calendar risk, buffer, and deadline. "
+                    "A short break may be 5, 10, or 15 minutes. Never move a deadline. If deadline capacity is at risk, "
+                    "only warn the user to add available time or keep the current constraints. Do not invent tasks or time."
+                ),
+            },
+            {
+                "role": "user",
+                "content": as_json({
+                    "task": {"id": task.get("id"), "title": task.get("title"), "deadline": task.get("due")},
+                    "session": {
+                        "tracked_minutes": session.get("live_active_minutes"),
+                        "remaining_minutes": session.get("session_remaining_minutes"),
+                    },
+                    "interruption_reason": reason,
+                    "runtime_state": {"focus": focus, "energy": energy, "stress": stress},
+                    "ready_tasks": [
+                        {"task_id": item.get("task_id"), "title": item.get("task_title"), "minutes": item.get("session_remaining_minutes")}
+                        for item in ready_sessions[:5]
+                    ],
+                    "impact": impact,
+                    "schema": {
+                        "action": "short_break/continue_later/switch_task",
+                        "break_minutes": "5/10/15 or null",
+                        "selected_task_id": "ready task id or null",
+                        "explanation": "one concrete English sentence",
+                    },
+                }),
+            },
+        ], temperature=0.1)
+        allowed_actions = {"short_break", "continue_later", "switch_task"}
+        if isinstance(model_result, dict) and str(model_result.get("action")) in allowed_actions:
+            proposed_task = str(model_result.get("selected_task_id") or "") or None
+            ready_task_ids = {str(item.get("task_id") or "") for item in ready_sessions}
+            if model_result.get("action") != "switch_task" or proposed_task in ready_task_ids:
+                fallback_action = str(model_result["action"])
+                selected_task_id = proposed_task
+                if fallback_action == "short_break":
+                    try:
+                        break_minutes = int(model_result.get("break_minutes") or 10)
+                    except (TypeError, ValueError):
+                        break_minutes = 10
+                    break_minutes = min((5, 10, 15), key=lambda item: abs(item - break_minutes))
+                explanation = str(model_result.get("explanation") or explanation)
+                provider = "deepseek"
+            else:
+                provider = "python_fallback"
+        else:
+            provider = "python_fallback"
+        recommendation = {
+            "action": fallback_action,
+            "break_minutes": break_minutes if fallback_action == "short_break" else None,
+            "selected_task_id": selected_task_id if fallback_action == "switch_task" else None,
+            "explanation": explanation,
+            "deadline_warning": impact.get("capacity_status") == "insufficient",
+            "deadline_options": ["add_available_time", "keep_current_constraints"] if impact.get("capacity_status") == "insufficient" else [],
+            "impact": impact,
+            "provider": provider,
+            "prompt_version": "interrupt-scheduler-v1",
         }
+        self.log_event(user_id, "interruption_recommendation_created", recommendation)
+        return recommendation
 
     def end_execution_session(self, user_id: str, payload: dict) -> dict:
         session_id = str(payload.get("execution_session_id") or "")
@@ -4437,8 +4783,48 @@ class Store:
             if row["status"] == "running":
                 calculated += self._iso_elapsed_minutes(row["resumed_at"] or row["actual_start_at"], ended_at)
             active = max(calculated, actual_minutes)
-            conn.execute("UPDATE execution_sessions SET status='ended',actual_end_at=?,resumed_at=NULL,accumulated_active_minutes=?,completion_outcome=NULL,updated_at=? WHERE id=? AND user_id=?", (ended_at, active, timestamp, session_id, user_id))
-            self._insert_state_transition(conn, user_id=user_id, task_id=row["task_id"], before_status=str(row["status"]), action_type="end", after_status="ended", execution_session_id=session_id, outcome={"persisted": True, "actual_minutes": active}, created_at=timestamp)
+            timing = self._execution_timing_result(row["planned_end_at"], ended_at)
+            conn.execute(
+                "UPDATE execution_sessions SET status='ended',actual_end_at=?,resumed_at=NULL,accumulated_active_minutes=?,completion_outcome=NULL,timing_outcome=?,overrun_minutes=?,overrun_failure=?,updated_at=? WHERE id=? AND user_id=?",
+                (
+                    ended_at,
+                    active,
+                    timing["timing_outcome"],
+                    timing["overrun_minutes"],
+                    1 if timing["overrun_failure"] else 0,
+                    timestamp,
+                    session_id,
+                    user_id,
+                ),
+            )
+            self._insert_state_transition(
+                conn,
+                user_id=user_id,
+                task_id=row["task_id"],
+                before_status=str(row["status"]),
+                action_type="end",
+                after_status="ended",
+                execution_session_id=session_id,
+                outcome={"persisted": True, "actual_minutes": active, **timing},
+                created_at=timestamp,
+            )
+            if timing["overrun_failure"]:
+                conn.execute(
+                    "INSERT INTO events (id,user_id,type,payload_json,created_at) VALUES (?,?,?,?,?)",
+                    (
+                        new_id("evt"),
+                        user_id,
+                        "execution_overrun_failed",
+                        as_json({
+                            "execution_session_id": session_id,
+                            "task_id": row["task_id"],
+                            "planned_end_at": row["planned_end_at"],
+                            "actual_end_at": ended_at,
+                            **timing,
+                        }),
+                        timestamp,
+                    ),
+                )
             self._record_execution_request(conn, user_id, request_id, session_id, "finish", timestamp)
             updated = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (session_id,)).fetchone()
         return self.execution_session_row(updated)
@@ -4450,6 +4836,21 @@ class Store:
         if not task:
             raise KeyError(task_id)
         feedback_profile = self.ensure_profile(user_id)
+        execution_session_id = str(payload.get("execution_session_id") or "").strip() or None
+        session_snapshot = None
+        if execution_session_id:
+            with self.connect() as conn:
+                session_snapshot = conn.execute(
+                    "SELECT * FROM execution_sessions WHERE id=? AND user_id=?",
+                    (execution_session_id, user_id),
+                ).fetchone()
+            if not session_snapshot:
+                raise KeyError(execution_session_id)
+        timing = {
+            "timing_outcome": str(session_snapshot["timing_outcome"] or "on_time_or_early") if session_snapshot else "on_time_or_early",
+            "overrun_minutes": int(session_snapshot["overrun_minutes"] or 0) if session_snapshot else 0,
+            "overrun_failure": bool(session_snapshot["overrun_failure"]) if session_snapshot else False,
+        }
         request_id = str(payload.get("request_id") or "").strip() or None
         if request_id:
             with self.connect() as conn:
@@ -4458,7 +4859,7 @@ class Store:
                     (user_id, request_id),
                 ).fetchone()
             if existing:
-                return {
+                result = {
                     "id": existing["id"],
                     "user_id": existing["user_id"],
                     "task_id": existing["task_id"],
@@ -4470,25 +4871,40 @@ class Store:
                     "request_id": existing["request_id"],
                     "research_context_revision": existing["research_context_revision"],
                     "created_at": existing["created_at"],
+                    **timing,
+                    "execution_failure_recorded": timing["overrun_failure"],
                 }
+                if session_snapshot and session_snapshot["overrun_replan_job_id"]:
+                    result["replan"] = {
+                        "required": True,
+                        "scope": "local",
+                        "trigger": "execution_overrun",
+                        "job": self.get_background_job(user_id, str(session_snapshot["overrun_replan_job_id"])),
+                        "confirmation_required": True,
+                    }
+                    result["requires_plan_adjustment"] = True
+                else:
+                    result["replan"] = {"required": False}
+                    result["requires_plan_adjustment"] = False
+                return result
+        task_eval = {**(payload.get("task_evaluation") or {}), **timing}
         feedback = {
             "id": new_id("feedback"),
             "user_id": user_id,
             "task_id": task_id,
             "trigger": payload.get("trigger", "task_completed"),
-            "task_evaluation": payload.get("task_evaluation") or {},
+            "task_evaluation": task_eval,
             "state_evaluation": payload.get("state_evaluation") or {},
             "recommendation_evaluation": {
                 **(payload.get("recommendation_evaluation") or {}),
                 **({"parallel_evaluation": payload.get("parallel_evaluation")} if payload.get("parallel_evaluation") else {}),
             },
             "parallel_evaluation": payload.get("parallel_evaluation"),
-            "execution_session_id": payload.get("execution_session_id"),
+            "execution_session_id": execution_session_id,
             "request_id": request_id,
             "research_context_revision": int(feedback_profile.get("research_context_revision") or 0),
             "created_at": now_ms(),
         }
-        task_eval = feedback["task_evaluation"]
         from app.domain.task import apply_execution_feedback
 
         feedback_decision = apply_execution_feedback(
@@ -4549,8 +4965,12 @@ class Store:
                 "UPDATE tasks SET execution_json=?,demand_json=?,status=?,updated_at=? WHERE id=? AND user_id=?",
                 (as_json(feedback_decision.execution), as_json(feedback_decision.task_demand), feedback_decision.task_status, feedback["created_at"], task_id, user_id),
             )
-            schedule_action = str(payload.get("schedule_action") or "keep_time_free")
-            requires_plan_adjustment = feedback_decision.execution.get("remaining_duration_minutes", 0) > 0 or schedule_action == "review_today"
+            schedule_action = "automatic_overrun_review" if timing["overrun_failure"] else str(payload.get("schedule_action") or "keep_time_free")
+            # Ending a Session records its observed result. Remaining work may
+            # return to the Ready Queue, but it must not force a planning dialog
+            # or invalidate the confirmed Plan unless the user explicitly asks
+            # to review today's calendar.
+            requires_plan_adjustment = schedule_action == "review_today"
             if requires_plan_adjustment:
                 conn.execute(
                     "UPDATE plans SET plan_status='needs_update',updated_at=? WHERE user_id=? AND week_id=? AND plan_status='confirmed'",
@@ -4580,8 +5000,61 @@ class Store:
             },
         )
         feedback["task"] = self.get_task(task_id, user_id)
+        replan: dict = {"required": False}
+        if timing["overrun_failure"] and session_snapshot:
+            include_current = feedback_decision.task_status != "completed" and int(feedback_decision.execution.get("remaining_duration_minutes") or 0) > 0
+            affected_task_ids = self._overrun_affected_task_ids(
+                user_id,
+                self.execution_session_row(session_snapshot),
+                include_current_task=include_current,
+            )
+            existing_job_id = str(session_snapshot["overrun_replan_job_id"] or "").strip()
+            if existing_job_id:
+                replan = {
+                    "required": True,
+                    "scope": "local",
+                    "trigger": "execution_overrun",
+                    "affected_task_ids": affected_task_ids,
+                    "job": self.get_background_job(user_id, existing_job_id),
+                    "confirmation_required": True,
+                }
+            elif affected_task_ids:
+                replan = self.request_replan(
+                    user_id,
+                    scope="local",
+                    trigger="execution_overrun",
+                    affected_task_ids=affected_task_ids,
+                    week_id=str(session_snapshot["week_id"] or task.get("week_id") or ""),
+                    adjustment_constraints={
+                        "not_before_by_task": {
+                            affected_task_id: str(session_snapshot["actual_end_at"] or "")
+                            for affected_task_id in affected_task_ids
+                        },
+                        "preserve_completed_execution_session_id": execution_session_id,
+                    },
+                )
+                job_id = str(((replan.get("job") or {}).get("job_id")) or "")
+                if job_id:
+                    with self.connect() as conn:
+                        conn.execute(
+                            "UPDATE execution_sessions SET overrun_replan_job_id=?,updated_at=? WHERE id=? AND user_id=?",
+                            (job_id, now_ms(), execution_session_id, user_id),
+                        )
+                self.log_event(user_id, "execution_overrun_replan_requested", {
+                    "execution_session_id": execution_session_id,
+                    "task_id": task_id,
+                    "overrun_minutes": timing["overrun_minutes"],
+                    "affected_task_ids": affected_task_ids,
+                    "job_id": job_id or None,
+                })
+            else:
+                replan = {"required": False, "reason": "no_downstream_work_affected"}
+        requires_plan_adjustment = requires_plan_adjustment or bool(replan.get("required"))
         feedback["requires_plan_adjustment"] = requires_plan_adjustment
         feedback["schedule_action"] = schedule_action
+        feedback.update(timing)
+        feedback["execution_failure_recorded"] = timing["overrun_failure"]
+        feedback["replan"] = replan
         self.log_event(user_id, "execution_feedback_saved", feedback)
         return feedback
 
@@ -4614,6 +5087,26 @@ class Store:
                 outcome=payload.get("outcome") or {},
             )
         self.log_event(user_id, "state_transition_recorded", transition)
+        if action_type in {"accept_interrupt_recommendation", "reject_interrupt_recommendation"}:
+            accepted = action_type == "accept_interrupt_recommendation"
+            recommendation = dict(action.get("recommendation") or {})
+            self.add_memory(
+                user_id=user_id,
+                source_type="episodic_memory",
+                source_id=str(transition.get("id") or new_id("transition")),
+                task_id=str(task_id) if task_id else None,
+                text=(
+                    f"Interrupt recommendation feedback. User {'accepted' if accepted else 'rejected'} "
+                    f"the suggested action {recommendation.get('action') or 'unknown'}."
+                ),
+                metadata={
+                    "kind": "recommendation_feedback",
+                    "accepted": accepted,
+                    "recommended_action": recommendation.get("action"),
+                    "provider": recommendation.get("provider"),
+                    "execution_session_id": execution_session_id,
+                },
+            )
         return transition
 
     def pattern_candidates(self, user_id: str) -> list[dict]:
@@ -5476,13 +5969,21 @@ class Store:
             # stale proposed revision must never move Profile/onboarding tasks
             # that the user has already confirmed.
             existing_plan = self.active_plan(user_id, week_id) or self.latest_proposed_plan(user_id, week_id)
+            scheduling_payload = {**payload, "runtime_state": runtime_state}
             decision = build_deterministic_plan(
                 profile=profile,
                 tasks=tasks,
                 analysis=analysis,
                 existing_plan=existing_plan,
-                payload=payload,
+                payload=scheduling_payload,
             )
+            analysis_state["payload"] = scheduling_payload
+            analysis_state["ai_task_analysis"] = analysis
+            # DeepSeek is the proposal engine: it generates exact candidate
+            # Sessions and receives concrete Python violations for repair.
+            # The deterministic plan remains the safe fallback when the model
+            # is unavailable or every model candidate fails validation.
+            decision = self.refine_schedule_decision(analysis_state, decision)
             review_payload = {
                 "profile_rules": decision.get("scheduler"),
                 "sessions": [
@@ -5562,7 +6063,11 @@ class Store:
         task_map = {str(task.get("id")): task for task in tasks}
         context = build_scheduling_context(profile)
         rest_minutes = int(context.get("rest_minutes") or 15)
-        validation_windows = context.get("movable_routine_windows") or context["windows"]
+        # A confirmed routine may move only inside its user-approved tolerance.
+        # Validate AI proposals against the envelope that still contains those
+        # movable routine minutes; the routine pass below then relocates the
+        # routine and rejects the candidate when no bounded position exists.
+        validation_windows = context.get("movable_routine_windows") or context.get("full_available_windows") or context["windows"]
         now = profile_now(profile)
         today_index = now.weekday()
         next_quarter = math.ceil((now.hour + now.minute / 60) * 4) / 4
@@ -5582,11 +6087,23 @@ class Store:
             if isinstance(item, dict)
         }
         runtime_state = state.get("runtime_state") or {}
+        adjustment_constraints = dict((state.get("payload") or {}).get("adjustment_constraints") or {})
+        not_before_by_task: dict[str, datetime] = {}
+        for task_id, value in (adjustment_constraints.get("not_before_by_task") or {}).items():
+            if not value:
+                continue
+            try:
+                parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=now.tzinfo)
+                not_before_by_task[str(task_id)] = parsed
+            except (TypeError, ValueError):
+                continue
         focus = int(runtime_state.get("focus") or 4)
         energy = int(runtime_state.get("energy") or 4)
         stress = int(runtime_state.get("stress") or 4)
         high_capacity_now = focus >= 6 and energy >= 5 and stress <= 5
-        low_capacity_now = focus <= 2 or energy <= 2 or stress >= 6
+        low_capacity_now = focus <= 3 or energy <= 3 or stress >= 6
         accepted_pair_specs = {}
         for pair in ((state.get("payload") or {}).get("accepted_parallel_pairs") or []):
             if not isinstance(pair, dict) or not pair.get("parallel_group_id"):
@@ -5662,6 +6179,14 @@ class Store:
                     violations.append({"type": "outside_available_window", "task_id": task_id, "day_index": day_index, "start": start, "end": end})
                 if day_index < today_index or (day_index == today_index and start < next_quarter - 0.001):
                     violations.append({"type": "past_time", "task_id": task_id})
+                not_before = not_before_by_task.get(task_id)
+                if not_before:
+                    proposed_start = datetime.fromisoformat(str((state.get("payload") or {}).get("week_id") or profile.get("active_week_id") or (profile.get("weekly_context") or {}).get("week_id") or iso_week_id(now, profile.get("timezone"))))
+                    if proposed_start.tzinfo is None:
+                        proposed_start = proposed_start.replace(tzinfo=now.tzinfo)
+                    proposed_start += timedelta(days=day_index, hours=start)
+                    if proposed_start < not_before:
+                        violations.append({"type": "before_requested_resume_time", "task_id": task_id, "not_before": not_before.isoformat()})
                 due_day = day_index_from_due(task.get("due"), now)
                 due_hour = due_hour_for(task, due_day)
                 if due_day is None or day_index > due_day or (day_index == due_day and end > due_hour + 0.001):
@@ -5695,6 +6220,21 @@ class Store:
                             "parallel_evidence": accepted["evidence"],
                             "parallel_role": str(raw_block.get("parallel_role") or "member"),
                         }
+                raw_capacity_fit = str(raw_block.get("capacity_fit") or "").strip()
+                raw_capacity_evidence = [
+                    str(item).strip()
+                    for item in (raw_block.get("capacity_evidence") or [])
+                    if str(item).strip()
+                ]
+                # The capacity contract remains strict when the model claims a fit.
+                # Older/fallback planner payloads may omit the assessment entirely;
+                # in that case Python supplies an explicit, auditable neutral default
+                # instead of silently rejecting an otherwise valid schedule.
+                if not raw_capacity_fit and not raw_capacity_evidence:
+                    raw_capacity_fit = "acceptable"
+                    raw_capacity_evidence = [
+                        "No model capacity assessment was supplied; Python applied a neutral acceptable default after hard-constraint validation."
+                    ]
                 blocks.append({
                     "block_id": f"{task_id}-{candidate_id}-{task_session_counts[task_id]}",
                     "task_id": task_id,
@@ -5715,6 +6255,9 @@ class Store:
                         "This time block was proposed by the DeepSeek global scheduling prompt.",
                         str(raw_block.get("reason") or "The model did not provide an additional reason."),
                     ],
+                    "capacity_fit": raw_capacity_fit,
+                    "capacity_evidence": raw_capacity_evidence,
+                    "capacity_tradeoff": str(raw_block.get("capacity_tradeoff") or "").strip() or None,
                     "state_scope": "ai_global_weekly_plan",
                     **parallel_fields,
                 })
@@ -5859,10 +6402,10 @@ class Store:
                     "first_task_id": first_today.get("task_id"),
                 })
             first_level = (demand_map.get(str(first_today.get("task_id"))) or {}).get("level") if first_today else None
-            if low_capacity_now and first_today and first_level == "high" and int(first_today.get("session_minutes") or 0) > 30 and not override_reason:
+            if low_capacity_now and first_today and first_level != "low" and int(first_today.get("session_minutes") or 0) > 30 and not override_reason:
                 violations.append({
                     "type": "momentary_state_not_applied",
-                    "detail": "Low current capacity requires a shorter checkpoint or a lighter first task unless a concrete override_reason is supplied.",
+                    "detail": "Low current capacity requires a light first task or a checkpoint no longer than 30 minutes unless a concrete hard-constraint override_reason is supplied.",
                     "first_task_id": first_today.get("task_id"),
                 })
             state_decision = {
@@ -5876,11 +6419,20 @@ class Store:
             for block in task_sessions:
                 block["session_count"] = counts.get(block["task_id"], 1)
             fit_scores = []
+            from app.domain.capacity import capacity_penalty, validate_capacity_assessment
+
+            capacity_fit_counts = {"ideal": 0, "acceptable": 0, "risky": 0, "unsuitable": 0}
             daily_load = {day: sum(block["session_minutes"] for block in task_sessions if block["day_index"] == day) for day in range(7)}
             for block in task_sessions:
                 level = (demand_map.get(block["task_id"]) or {}).get("level", "medium")
                 preferred = low_start if level == "low" else deep_start
                 fit_scores.append(max(0.0, 1.0 - abs(block["start"] - preferred) / 6.0))
+                assessment, capacity_violations = validate_capacity_assessment(block)
+                block["capacity_fit"] = assessment.level
+                block["capacity_evidence"] = list(assessment.evidence)
+                block["capacity_tradeoff"] = assessment.tradeoff
+                violations.extend(capacity_violations)
+                capacity_fit_counts[assessment.level] += 1
             active_loads = [value for value in daily_load.values() if value] or [0]
             mean_load = sum(active_loads) / len(active_loads)
             load_variance = sum((value - mean_load) ** 2 for value in active_loads) / len(active_loads)
@@ -5891,16 +6443,19 @@ class Store:
             )
             remaining_total = sum(item["remaining_minutes"] for item in unscheduled)
             cognitive_fit = sum(fit_scores) / len(fit_scores) if fit_scores else 1.0
+            candidate_capacity_penalty = capacity_penalty(capacity_fit_counts)
             metrics = {
                 "remaining_minutes": remaining_total,
                 "deadline_risk_minutes": remaining_total,
                 "cognitive_fit_score": round(cognitive_fit, 3),
+                "capacity_fit_counts": capacity_fit_counts,
+                "capacity_penalty": candidate_capacity_penalty,
                 "daily_load_variance": round(load_variance, 2),
                 "daily_peak_minutes": max(active_loads),
                 "context_switch_count": context_switches,
                 "fragmentation_score": 0.0,
                 "hard_violation_count": len(violations),
-                "total_score": round(remaining_total * 1000 + len(violations) * 100000 + (1 - cognitive_fit) * 120 + load_variance * 0.02 + context_switches * 5, 2),
+                "total_score": round(remaining_total * 1000 + len(violations) * 100000 + candidate_capacity_penalty + (1 - cognitive_fit) * 120 + load_variance * 0.02 + context_switches * 5, 2),
             }
             validated.append({
                 "id": candidate_id,
@@ -5928,6 +6483,14 @@ class Store:
             pair for pair in ((state.get("payload") or {}).get("accepted_parallel_context_pairs") or [])
             if isinstance(pair, dict) and pair.get("user_confirmed") is True
         ]
+        adjustment_constraints = dict((state.get("payload") or {}).get("adjustment_constraints") or {})
+        affected_task_ids = {
+            str(item) for item in ((state.get("payload") or {}).get("affected_task_ids") or [])
+            if str(item).strip()
+        }
+        interruption_replan = str((state.get("payload") or {}).get("adjustment_trigger") or "") in {
+            "execution_deferred", "execution_switch", "interruption_replan", "execution_overrun"
+        }
         memories = state.get("memories", [])
         from humanos_graph import build_scheduling_context, day_index_from_due, parse_due_start_hour, profile_now
         planning_context = build_scheduling_context(profile)
@@ -5937,6 +6500,9 @@ class Store:
             for item in state.get("ai_task_analysis", {}).get("task_demands", [])
             if isinstance(item, dict)
         }
+        from app.application.build_capacity_context import build_capacity_context
+
+        capacity_context = build_capacity_context(profile, runtime_state)
         global_plan_result = chat_completion(
             [
                 {
@@ -5955,7 +6521,7 @@ class Store:
                         "runtime_state 只影响今天接下来第一个执行块，不能外推到整周。"
                         "Momentary State must causally affect next_session_selection. Every state field included here must affect a defined decision or be omitted; never mention state only as a post-hoc explanation."
                         "If current focus is high (>=6), energy is adequate (>=5), and stress is not high (<=5), prefer a ready, high-priority, cognitively demanding task first. Preserve this high-focus period; do not place chores, passive listening, or other light activities first unless a hard constraint prevents demanding work."
-                        "If current focus or energy is very low (<=2), or stress is high (>=6), prefer a light task or a <=30-minute checkpoint as the first session."
+                        "If current focus or energy is limited (<=3), or stress is high (>=6), prefer a light task or a <=30-minute checkpoint as the first session."
                         "Any deviation must include a concrete candidate-level override_reason that names the hard constraint."
                         "When accepted_parallel_pairs is non-empty, regenerate the entire plan. Put exactly the two confirmed tasks into the same parallel_group_id for no more than the approved duration; move every affected Session so no third item overlaps."
                         "Do not create any unconfirmed overlap. Parallel work may not consume a high-focus window while an important demanding ready task is available."
@@ -5987,7 +6553,9 @@ class Store:
                         "today_index": planning_now.weekday(),
                         "now_iso": planning_now.isoformat(),
                         "current_time": planning_now.hour + planning_now.minute / 60,
-                        "available_windows_after_constraints_and_buffer": planning_context.get("movable_routine_windows") or planning_context.get("windows", []),
+                        "preferred_available_windows": planning_context.get("movable_routine_windows") or planning_context.get("windows", []),
+                        "full_available_windows": planning_context.get("full_available_windows") or planning_context.get("windows", []),
+                        "buffer_policy": "The difference between full_available_windows and preferred_available_windows is soft reserve. Use it only when preferred capacity cannot complete work before its deadline, and disclose its use in evidence.",
                         "hard_constraints": planning_context.get("hard_constraints", []),
                         "routine_soft_constraints": planning_context.get("routine_blocks", []),
                         "ai_arranged_activities": [item for item in planning_context.get("flexible_activity_blocks", []) if item.get("source_type") == "flexible_activity"],
@@ -5995,9 +6563,11 @@ class Store:
                         "deep_work_window": profile.get("deep_work_window"),
                         "low_energy_window": profile.get("low_energy_window"),
                         "runtime_state_today_only": runtime_state,
+                        "capacity_policy": capacity_context,
                         "relevant_learned_patterns": list(profile.get("learned_patterns") or [])[:3],
                         "accepted_parallel_pairs": accepted_parallel_pairs,
                         "accepted_parallel_context_pairs": accepted_parallel_context_pairs,
+                        "adjustment_constraints": adjustment_constraints,
                         "tasks": [
                             {
                                 "task_id": task.get("id"),
@@ -6012,7 +6582,9 @@ class Store:
                                 "dependency": (task.get("contextWindow") or {}).get("dependency"),
                             }
                             for task in tasks
-                            if task.get("status") not in {"completed", "terminated", "blocked", "paused"} and schedule_task_kind(task) != "fixed_event"
+                            if task.get("status") not in {"completed", "terminated", "blocked"}
+                            and (task.get("status") != "paused" or (interruption_replan and str(task.get("id")) in affected_task_ids))
+                            and schedule_task_kind(task) != "fixed_event"
                         ],
                         "blocked_tasks": [
                             {"task_id": task.get("id"), "title": task.get("title"), "remaining_minutes": (task.get("execution") or {}).get("remaining_duration_minutes", task.get("duration")), "status": task.get("status")}
@@ -6035,7 +6607,10 @@ class Store:
                                     "day_index": "0-6 integer",
                                     "start": "15-minute-grid decimal hour",
                                     "end": "15-minute-grid decimal hour",
-                                    "reason": "English evidence for this time block",
+                                    "reason": "English time, deadline, and priority evidence for this block",
+                                    "capacity_fit": "ideal/acceptable/risky/unsuitable",
+                                    "capacity_evidence": ["specific Profile baseline, runtime-state, and task-demand evidence"],
+                                    "capacity_tradeoff": "required English explanation when capacity_fit is risky; otherwise null",
                                     "parallel_group_id": "only the exact id from an accepted pair, otherwise null",
                                     "parallel_role": "primary/secondary only for an accepted pair",
                                 }],
@@ -6156,7 +6731,7 @@ class Store:
                                     "label": "Repaired global plan",
                                     "rationale": "English explanation of how violations were repaired",
                                     "override_reason": "null or a concrete hard constraint",
-                                    "blocks": [{"task_id": "existing id", "day_index": "0-6", "start": "decimal hour", "end": "decimal hour", "reason": "evidence", "parallel_group_id": "accepted group id or null", "parallel_role": "primary/secondary or null"}],
+                                    "blocks": [{"task_id": "existing id", "day_index": "0-6", "start": "decimal hour", "end": "decimal hour", "reason": "time and priority evidence", "capacity_fit": "ideal/acceptable/risky/unsuitable", "capacity_evidence": ["specific Profile, runtime state, and task-demand evidence"], "capacity_tradeoff": "required when risky", "parallel_group_id": "accepted group id or null", "parallel_role": "primary/secondary or null"}],
                                 }],
                                 "selected_candidate_id": "repaired_global_plan",
                                 "warnings": [],
@@ -6181,12 +6756,15 @@ class Store:
         if complete_ai_candidates:
             valid_ai_candidates = complete_ai_candidates
         if valid_ai_candidates:
+            from app.application.rank_schedule_candidates import select_best_candidate
+
             for candidate in valid_ai_candidates:
                 candidate["parallel_suggestions"] = self.build_parallel_suggestions(state, candidate.get("plan_patch", []))
             decision["candidate_plans"] = valid_ai_candidates
             requested_id = global_plan_result.get("selected_candidate_id") if isinstance(global_plan_result, dict) else None
-            selected_ai = next((candidate for candidate in valid_ai_candidates if candidate.get("id") == requested_id), None)
-            selected_ai = selected_ai or min(valid_ai_candidates, key=lambda candidate: candidate.get("metrics", {}).get("total_score", float("inf")))
+            selected_ai = select_best_candidate(valid_ai_candidates, str(requested_id) if requested_id else None)
+            if selected_ai is None:
+                return decision
             decision["selected_candidate_id"] = selected_ai["id"]
             decision["plan_patch"] = selected_ai["plan_patch"]
             decision["validation"] = selected_ai["validation"]
@@ -6203,7 +6781,7 @@ class Store:
                 stress = int(runtime_state.get("stress") or 4)
                 if focus >= 6 and energy >= 5 and stress <= 5:
                     decision["user_reason"] = f"Your focus is strong right now, so HumanOS starts with {first_task.get('title')} and keeps lighter activities for later."
-                elif focus <= 2 or energy <= 2 or stress >= 6:
+                elif focus <= 3 or energy <= 3 or stress >= 6:
                     decision["user_reason"] = f"Your current capacity is limited, so HumanOS starts with a lighter or shorter session: {first_task.get('title')}."
             if accepted_parallel_context_pairs:
                 decision["context_parallel_adjustments"] = [
@@ -6622,6 +7200,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(store.adjust_scheduled_task(user_id, payload), status=201)
                 return
 
+            if path == "/api/plans/parallel-decision" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                store.ensure_profile(user_id)
+                self.send_json({"plan": store.decide_parallel_suggestion(user_id, payload)}, status=200)
+                return
+
             if path == "/api/auth/register" and method == "POST":
                 payload = self.read_json()
                 requested_email = str(payload.get("email") or "").strip().lower()
@@ -6674,8 +7259,11 @@ class Handler(BaseHTTPRequestHandler):
                 if method == "PUT":
                     payload = self.read_json()
                     payload["user_id"] = payload.get("user_id", user_id)
+                    before = store.ensure_profile(payload["user_id"])
+                    profile = store.upsert_profile(payload)
+                    changed = any(before.get(key) != profile.get(key) for key in {"deep_work_window", "low_energy_window", "task_preferences", "timezone", "weekly_context"})
                     self.send_json({
-                        "data": {"profile": store.upsert_profile(payload)},
+                        "data": {"profile": profile, "replan": store.request_replan(payload["user_id"], scope="full", trigger="profile_changed") if changed and before.get("active_plan_revision") else {"required": False}},
                         "resources": {"self": "/api/profile", "tasks": "/api/tasks"},
                         "meta": {"resource": "profile", "aggregate_root": "profile", "read_only": False},
                     })
@@ -6685,7 +7273,10 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 user_id = payload.get("user_id", "demo")
                 store.ensure_profile(user_id)
-                self.send_json(store.reconcile_weekly_setup(user_id, payload))
+                result = store.reconcile_weekly_setup(user_id, payload)
+                if result.get("plan_needs_update"):
+                    result["replan"] = store.request_replan(user_id, scope="full", trigger="weekly_setup_changed", affected_task_ids=result.get("invalidated_task_ids"), week_id=result.get("week_id"))
+                self.send_json(result)
                 return
 
             if path == "/api/weeks/status" and method == "GET":
@@ -6714,8 +7305,9 @@ class Handler(BaseHTTPRequestHandler):
                     payload = self.read_json()
                     user_id = payload.get("user_id", user_id)
                     store.ensure_profile(user_id)
+                    task = store.create_task(user_id, payload)
                     self.send_json({
-                        "data": {"task": store.create_task(user_id, payload)},
+                        "data": {"task": task, "replan": store.request_replan(user_id, scope="local", trigger="task_created", affected_task_ids=[task.get("id")], week_id=task.get("week_id"))},
                         "resources": {"collection": "/api/tasks"},
                         "meta": {"resource": "task", "aggregate_root": "task", "read_only": False},
                     }, status=201)
@@ -6760,8 +7352,11 @@ class Handler(BaseHTTPRequestHandler):
                 task_id = path.split("/")[-1]
                 payload = self.read_json()
                 user_id = payload.get("user_id") or query.get("user_id", ["demo"])[0]
+                before = store.get_task(task_id, user_id) or {}
+                task = store.patch_task(task_id, payload, user_id)
+                changed = any(before.get(key) != task.get(key) for key in {"due", "duration", "priority", "expected_difficulty", "cognitive_load", "task_demand", "contextWindow", "status"})
                 self.send_json({
-                    "data": {"task": store.patch_task(task_id, payload, user_id)},
+                    "data": {"task": task, "replan": store.request_replan(user_id, scope="local", trigger="task_schedule_changed", affected_task_ids=[task_id], week_id=task.get("week_id")) if changed else {"required": False}},
                     "resources": {"collection": "/api/tasks"},
                     "meta": {"resource": "task", "aggregate_root": "task", "read_only": False},
                 })
@@ -6770,8 +7365,9 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/tasks/") and method == "DELETE":
                 task_id = path.split("/")[-1]
                 user_id = query.get("user_id", ["demo"])[0]
+                before = store.get_task(task_id, user_id) or {}
                 self.send_json({
-                    "data": {"task": store.delete_task(task_id, user_id)},
+                    "data": {"task": store.delete_task(task_id, user_id), "replan": store.request_replan(user_id, scope="local", trigger="task_deleted", affected_task_ids=[task_id], week_id=before.get("week_id"))},
                     "resources": {"collection": "/api/tasks"},
                     "meta": {"resource": "task", "aggregate_root": "task", "read_only": False},
                 })
@@ -6783,7 +7379,8 @@ class Handler(BaseHTTPRequestHandler):
                 store.ensure_profile(user_id)
                 runtime_state = store.save_runtime_state(user_id, payload)
                 daily_plan_review = store.evaluate_daily_checkin(user_id, runtime_state) if payload.get("daily_checkin") else None
-                self.send_json({"runtime_state": runtime_state, "daily_plan_review": daily_plan_review}, status=201)
+                replan = store.request_replan(user_id, scope="today", trigger="daily_checkin_changed_capacity", affected_task_ids=[str((daily_plan_review.get("first_session") or {}).get("task_id") or "")]) if daily_plan_review and daily_plan_review.get("requires_plan_adjustment") else {"required": False}
+                self.send_json({"runtime_state": runtime_state, "daily_plan_review": daily_plan_review, "replan": replan}, status=201)
                 return
 
             if path == "/api/state-checkins" and method == "GET":
@@ -6851,6 +7448,25 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 user_id = payload.get("user_id", "demo")
                 self.send_json({"impact": store.analyze_execution_impact(user_id, payload)})
+                return
+
+            if path == "/api/execution-sessions/recommend-action" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                self.send_json({"recommendation": store.recommend_interruption_action(user_id, payload)})
+                return
+
+            if path == "/api/plans/replan" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                self.send_json({"replan": store.request_replan(
+                    user_id,
+                    scope=str(payload.get("scope") or "local"),
+                    trigger=str(payload.get("trigger") or "user_requested"),
+                    affected_task_ids=payload.get("affected_task_ids") or [],
+                    week_id=payload.get("week_id"),
+                    adjustment_constraints=payload.get("adjustment_constraints") or {},
+                )}, status=202)
                 return
 
             if path == "/api/execution-sessions/end" and method == "POST":

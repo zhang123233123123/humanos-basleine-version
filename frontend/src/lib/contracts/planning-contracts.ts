@@ -38,6 +38,7 @@ export interface PlanDecision {
   validation?: PlanValidation
   unscheduled_tasks?: Array<Record<string, unknown>>
   repair_suggestions?: Array<Record<string, unknown> | string>
+  parallel_suggestions?: Array<{ id: string; status?: 'pending' | 'accepted' | 'rejected'; primary_task_id: string; secondary_task_id: string; suggested_overlap_minutes?: number; resource_basis?: string[]; evidence?: string[] }>
   explanation?: string
   reasons?: string[]
   requires_confirmation?: boolean

@@ -94,6 +94,11 @@ export default function LoginPage() {
         : `Account created: ${registeredEmail} (username: ${name.trim()}). Signing in…`
       setRegisterFeedback({ kind: 'success', message: successMessage })
       toast.success(successMessage, { duration: 4000 })
+      // A new HumanOS account always starts in daytime mode. This also
+      // clears a dark preference left by another account in this browser.
+      window.localStorage.setItem('theme', 'light')
+      document.documentElement.classList.remove('dark')
+      document.documentElement.classList.add('light')
       // Auto login after register
       const result = await signIn('credentials', {
         email: registeredEmail,

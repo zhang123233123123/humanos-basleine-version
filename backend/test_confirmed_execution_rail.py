@@ -99,7 +99,44 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
     def test_08_refresh_restores_running_session(self):
         session = self.start()
         restored = Store(self.db).current_execution("u")
-        self.assertEqual(("now", session["execution_session_id"]), (restored["mode"], restored["session"]["execution_session_id"]))
+        self.assertEqual(("running", session["execution_session_id"]), (restored["mode"], restored["session"]["execution_session_id"]))
+
+    def test_08b_backend_clock_keeps_counting_while_page_is_away(self):
+        session = self.start()
+        five_minutes_ago = (datetime.now(ZoneInfo("Asia/Shanghai")) - timedelta(minutes=5, seconds=5)).isoformat()
+        with self.store.connect() as conn:
+            conn.execute(
+                "UPDATE execution_sessions SET actual_start_at=?, resumed_at=?, accumulated_active_minutes=0 WHERE id=?",
+                (five_minutes_ago, five_minutes_ago, session["execution_session_id"]),
+            )
+        # A fresh Store instance represents returning after navigation or a
+        # suspended browser tab.  No browser timer state is reused.
+        restored = Store(self.db).current_execution("u")
+        self.assertGreaterEqual(restored["session"]["live_active_minutes"], 5)
+        self.assertEqual("running", restored["mode"])
+
+    def test_08c_interrupt_recommendation_feedback_becomes_episodic_memory(self):
+        session = self.start()
+        transition = self.store.record_state_transition("u", {
+            "task_id": self.task_id,
+            "execution_session_id": session["execution_session_id"],
+            "before_state": {"execution_status": "running"},
+            "action": {
+                "type": "accept_interrupt_recommendation",
+                "execution_session_id": session["execution_session_id"],
+                "recommendation": {"action": "short_break", "provider": "deepseek"},
+            },
+            "actual_state": {"execution_status": "paused"},
+            "outcome": {"accepted": True},
+        })
+        with self.store.connect() as conn:
+            memory = conn.execute(
+                "SELECT source_type, metadata_json FROM memories WHERE user_id=? AND source_id=?",
+                ("u", transition["id"]),
+            ).fetchone()
+        self.assertIsNotNone(memory)
+        self.assertEqual("episodic_memory", memory["source_type"])
+        self.assertIn('"kind":"recommendation_feedback"', memory["metadata_json"])
 
     def test_09_pause_accumulates_minutes_and_context_dump_is_preserved(self):
         session = self.start()
@@ -112,6 +149,72 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
         self.store.pause_execution_session("u", {"execution_session_id": session["execution_session_id"], "actual_minutes": 10})
         resumed = self.store.start_execution_session("u", {"execution_session_id": session["execution_session_id"], "request_id": "resume-1"})
         self.assertEqual(session["execution_session_id"], resumed["execution_session_id"])
+
+    def test_10b_second_pause_step_only_updates_intent(self):
+        session = self.start()
+        paused = self.store.pause_execution_session("u", {
+            "execution_session_id": session["execution_session_id"],
+            "actual_minutes": 12,
+            "remaining_minutes": 48,
+            "pause_reason": "decision_pending",
+            "request_id": "pause-stage-one",
+        })
+        updated = self.store.pause_execution_session("u", {
+            "execution_session_id": session["execution_session_id"],
+            "actual_minutes": 45,
+            "remaining_minutes": 15,
+            "pause_reason": "short_break",
+            "resume_preference": "soon",
+            "request_id": "pause-stage-two",
+        })
+        self.assertEqual(paused["accumulated_active_minutes"], updated["accumulated_active_minutes"])
+        self.assertEqual("short_break", updated["pause_reason"])
+
+    def test_10c_short_break_remains_current_across_refresh(self):
+        session = self.start()
+        resume_at = (datetime.now(ZoneInfo("Asia/Shanghai")) + timedelta(minutes=15)).isoformat()
+        self.store.pause_execution_session("u", {
+            "execution_session_id": session["execution_session_id"],
+            "actual_minutes": 5,
+            "remaining_minutes": 55,
+            "pause_reason": "short_break",
+            "resume_preference": "soon",
+            "preferred_resume_at": resume_at,
+        })
+        restored = Store(self.db).current_execution("u")
+        self.assertEqual(("paused", "short_break"), (restored["mode"], restored["session"]["pause_reason"]))
+
+    def test_10d_short_break_impact_starts_at_break_end_and_protects_fixed_event(self):
+        session = self.start()
+        now = datetime.now(ZoneInfo("Asia/Shanghai"))
+        break_end = now + timedelta(minutes=10)
+        fixed_start = break_end + timedelta(minutes=20)
+        fixed_end = fixed_start + timedelta(minutes=60)
+        active = self.store.active_plan("u")
+        patch = list(active.get("plan_patch") or [])
+        patch.append({
+            "block_id": "fixed-after-break",
+            "kind": "fixed_event",
+            "title": "Research meeting",
+            "day_index": fixed_start.weekday(),
+            "start": fixed_start.hour + fixed_start.minute / 60,
+            "end": fixed_end.hour + fixed_end.minute / 60,
+            "start_at": fixed_start.isoformat(),
+            "end_at": fixed_end.isoformat(),
+        })
+        with self.store.connect() as conn:
+            row = conn.execute("SELECT plan_json FROM plans WHERE id=?", (active["plan_id"],)).fetchone()
+            payload = __import__("json").loads(row[0])
+            payload["plan_patch"] = patch
+            conn.execute("UPDATE plans SET plan_json=? WHERE id=?", (__import__("json").dumps(payload), active["plan_id"]))
+        impact = self.store.analyze_execution_impact("u", {
+            "execution_session_id": session["execution_session_id"],
+            "remaining_minutes": 45,
+            "preferred_resume_at": break_end.isoformat(),
+            "action": "short_break",
+        })
+        self.assertEqual(break_end.isoformat(), impact["evaluated_at"])
+        self.assertEqual("Research meeting", impact["affected_sessions"][0]["task_title"])
 
     def test_11_timer_end_does_not_reduce_task_remaining(self):
         session = self.start()

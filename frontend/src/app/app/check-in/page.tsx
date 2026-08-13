@@ -2,13 +2,13 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, BatteryMedium, Brain, CheckCircle2, CornerDownRight, Gauge, Loader2, PauseCircle, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { apiRequest } from '@/lib/client/api'
-import type { CheckInResourceEnvelope, ContextDump, DailyPlanReview, ReentryResult, RuntimeState, TaskLifecycleResourceEnvelope } from '@/lib/contracts/checkin-contracts'
+import type { CheckInResourceEnvelope, ContextDump, DailyPlanReview, ReentryResult, ReplanRequest, RuntimeState, TaskLifecycleResourceEnvelope } from '@/lib/contracts/checkin-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 
@@ -16,6 +16,7 @@ type Mode = 'daily' | 'interruption'
 
 export default function CheckInPage() {
   const { t, locale } = useTranslation()
+  const router = useRouter()
   const params = useSearchParams()
   const mode: Mode = params.get('mode') === 'interruption' ? 'interruption' : 'daily'
   const taskId = params.get('task_id') || ''
@@ -42,7 +43,7 @@ export default function CheckInPage() {
   const saveDailyCheckIn = async () => {
     setSubmitting(true)
     try {
-      const result = await apiRequest<CheckInResourceEnvelope<{ runtime_state: RuntimeState; daily_plan_review: DailyPlanReview | null }>>('/api/state-checkins', {
+      const result = await apiRequest<CheckInResourceEnvelope<{ runtime_state: RuntimeState; daily_plan_review: DailyPlanReview | null; replan: ReplanRequest }>>('/api/state-checkins', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...runtimeState,
@@ -53,7 +54,22 @@ export default function CheckInPage() {
       })
       setDailyReview(result.data.daily_plan_review)
       setSaved(true)
-      toast(t('checkin.saved'))
+      const job = result.data.replan?.job
+      if (result.data.replan?.required && job?.job_id) {
+        toast(locale === 'zh' ? '状态已保存。HumanOS 正在调整今天接下来的任务。' : 'State saved. HumanOS is adapting today’s next session.')
+        let latest = job
+        for (let attempt = 0; attempt < 120 && !['completed', 'failed'].includes(latest.status); attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+          const response = await apiRequest<{ job: typeof latest }>(`/api/background-jobs?job_id=${encodeURIComponent(job.job_id)}`)
+          latest = response.job
+        }
+        if (latest.status !== 'completed') throw new Error(latest.error || 'Today’s adjustment could not be generated.')
+        window.dispatchEvent(new CustomEvent('humanos:plan-revision'))
+        toast(locale === 'zh' ? '今天的调整草案已生成，请确认后再写入日历。' : 'Today’s adjustment draft is ready. Review it before updating the calendar.')
+        router.push('/app?review=replan')
+      } else {
+        toast(t('checkin.saved'))
+      }
     } catch (error) {
       toast(error instanceof Error ? error.message : t('checkin.saveFailed'))
     } finally {

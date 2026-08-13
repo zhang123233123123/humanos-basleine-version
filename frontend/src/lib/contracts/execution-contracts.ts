@@ -3,6 +3,7 @@ export type ExecutionMode = 'up_next' | 'running' | 'paused' | 'empty' | 'none' 
 
 export interface ExecutionSession {
   accumulated_active_minutes?: number | null
+  live_active_minutes?: number | null
   execution_session_id: string
   task_id: string
   block_id?: string
@@ -24,6 +25,11 @@ export interface ExecutionSession {
   remaining_at_pause?: number | null
   resumed_from_session_id?: string | null
   ended_at?: string | number | null
+  actual_end_at?: string | number | null
+  timing_outcome?: 'on_time_or_early' | 'late_within_tolerance' | 'overrun_failure' | string | null
+  overrun_minutes?: number
+  overrun_failure?: boolean
+  overrun_replan_job_id?: string | null
   task?: {
     title?: string
     context?: string
@@ -48,6 +54,10 @@ export interface ExecutionImpact {
   remaining_minutes: number
   estimated_end_at: string
   requires_plan_adjustment: boolean
+  capacity_status?: 'sufficient' | 'insufficient' | string
+  reason_codes?: string[]
+  deadline_at?: string | null
+  deadline_warning?: boolean
   affected_sessions: Array<{
     execution_session_id: string
     task_id: string
@@ -64,7 +74,17 @@ export interface ExecutionFeedbackResult {
   task: Record<string, unknown>
   execution_session?: ExecutionSession | null
   requires_plan_adjustment: boolean
-  schedule_action: 'keep_time_free' | 'review_today'
+  schedule_action: 'keep_time_free' | 'review_today' | 'automatic_overrun_review'
+  timing_outcome?: string
+  overrun_minutes?: number
+  execution_failure_recorded?: boolean
+  replan?: {
+    required: boolean
+    trigger?: string
+    affected_task_ids?: string[]
+    reason?: string
+    job?: { job_id?: string; status?: string; error?: string | null }
+  }
 }
 
 export interface ExecutionResourceEnvelope<T> {

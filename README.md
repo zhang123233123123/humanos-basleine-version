@@ -1,5 +1,36 @@
 # HumanOS syy7
 
+## Local teammate V4 experience
+
+This folder is an isolated copy of the teammate `(4).zip`; it does not replace
+the SYY V3 integration folder. Its onboarding form starts with editable sample
+data, including a laundry + English podcast pair for parallel-scheduling tests.
+Sample deadlines are generated for the next actionable planning week.
+
+Start it on the dedicated V4 ports:
+
+```powershell
+cd "D:\TUe\OneDrive - TU Eindhoven\Humanos\humanos-v4-zhj"
+powershell -ExecutionPolicy Bypass -File .\scripts\start_v4.ps1
+```
+
+Open `http://127.0.0.1:3040/login`. Create a new account, then move through the
+four onboarding steps. Previously saved onboarding data in that browser takes
+priority over the sample defaults; clear `humanos:onboarding-draft:v2` in Local
+Storage or use a new account/browser profile if you want to see the defaults
+again.
+
+Stop V4 with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\stop_v4.ps1
+```
+
+The supplied teammate snapshot currently has six failing backend tests (five
+prompt/schedule-contract expectations and one numbered-list parser case). The
+frontend TypeScript check passes. These existing semantic differences were not
+silently replaced with SYY V3 behavior.
+
 HumanOS syy7 keeps the full v12 scheduling and recovery logic while introducing a lighter, four-page onboarding flow inspired by the strongest UI ideas in the teammate prototype.
 
 ## What is preserved
@@ -33,6 +64,8 @@ User: adjust the draft if needed + optionally accept/reject parallel suggestions
 ```
 
 Every Momentary State field sent to the planner must affect `next_session_selection` or be omitted. Python records `state_used`, `affected_decision`, and the selected first task internally so this can be tested without exposing debug data in the interface.
+
+The current end-to-end UX, Finish/overrun policy, interruption states, and their mapping to computer-scheduling concepts are documented in [`docs/UX_FLOW_AND_COMPUTER_SCHEDULING.md`](docs/UX_FLOW_AND_COMPUTER_SCHEDULING.md).
 
 ## Local run
 

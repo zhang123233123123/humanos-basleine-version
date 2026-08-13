@@ -125,7 +125,7 @@ export function projectDraftPlanEvents(plan: Record<string, any> | null, tasks: 
       title: block.title || task?.title || 'Untitled',
       start: start.toISOString(), end: end.toISOString(), allDay: false,
       extendedProps: {
-        description: task?.context || '', status: 'proposed', priority: normalizePriority(task?.priority), attendees: [], context: task?.context || '', progress: '', nextStep: '', openQuestions: '', blockId: block.block_id, taskType: String(task?.task_type || ''), taskId: String(task?.id || block.task_id || ''), isPreview: true, planRevision: plan.plan_revision,
+        description: task?.context || '', status: 'proposed', priority: normalizePriority(task?.priority), attendees: [], context: task?.context || '', progress: '', nextStep: '', openQuestions: '', blockId: block.block_id, taskType: String(task?.task_type || ''), taskId: String(task?.id || block.task_id || ''), isPreview: true, planRevision: plan.plan_revision, parallelGroupId: block.parallel_group_id, parallelRole: block.parallel_role,
       },
     }
   }).filter((event: HumanOSMapEventInput) => inRange(event, rangeStart, rangeEnd))

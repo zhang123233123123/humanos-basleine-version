@@ -10,7 +10,9 @@ __pycache__/
 .venv/
 venv/
 logs/
+qa-*.log
 node_modules/
+.v4-run/
 qa-local/
 /calendar-ai/
 HumanOS_UX_End_to_End_Flow_CN.docx

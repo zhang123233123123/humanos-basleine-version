@@ -16,6 +16,11 @@ class TaskInputLayerTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
+    def test_parse_rejects_more_than_twenty_tasks_before_ai(self) -> None:
+        text = "\n".join(f"{index}. Task {index}, 30 minutes, due Friday 18:00." for index in range(1, 22))
+        with self.assertRaisesRegex(ValueError, "maximum capacity of 20"):
+            self.store.parse_tasks_from_text("user-a", text, create_tasks=False)
+
     def test_duration_only_fragments_belong_to_previous_task(self) -> None:
         tasks = self.store.local_parse_tasks_from_text(
             "user-a",
@@ -41,6 +46,16 @@ class TaskInputLayerTests(unittest.TestCase):
         self.assertIsNone(previews[0]["duration"])
         self.assertIn("duration_minutes", previews[0]["missing_fields"])
         self.assertEqual([], self.store.list_tasks("user-a"))
+
+    def test_confirmed_preview_receives_persistent_task_identity(self) -> None:
+        task = self.store.create_task("user-a", {
+            "id": "preview-test-0",
+            "title": "期末复习",
+            "due": "周五 24:00",
+            "duration": 180,
+        })
+        self.assertTrue(task["id"].startswith("task_"))
+        self.assertFalse(task["id"].startswith("preview-"))
 
     def test_confirmed_task_preserves_absolute_temporal_metadata(self) -> None:
         task = self.store.create_task("user-a", {
@@ -112,6 +127,37 @@ class TaskInputLayerTests(unittest.TestCase):
             tasks = self.store.parse_tasks_from_text("user-a", text, create_tasks=False)
         self.assertEqual([150, 120, 45], [task["duration"] for task in tasks])
 
+    def test_ai_over_split_is_retried_before_local_fallback(self) -> None:
+        bad = [
+            {"title": "期末复习", "duration_minutes": None, "deadline_at": "2026-08-14T20:00:00+08:00", "schedule_type": "flexible_task"},
+            {"title": "三个小时", "duration_minutes": 180, "schedule_type": "flexible_task"},
+        ]
+        corrected = [
+            {"title": "完成期末复习", "duration_minutes": 180, "deadline_at": "2026-08-14T20:00:00+08:00", "schedule_type": "flexible_task", "source_spans": ["完成期末复习", "大概三个小时"], "resource_modality": ["visual"]},
+        ]
+        with patch("backend.humanos_server.parse_tasks_with_agent", side_effect=[bad, corrected]) as parser:
+            tasks = self.store.parse_tasks_from_text(
+                "user-a", "周五晚上8点前完成期末复习，大概三个小时", create_tasks=False,
+            )
+        self.assertEqual(2, parser.call_count)
+        self.assertEqual(1, len(tasks))
+        self.assertIn("期末复习", tasks[0]["title"])
+        self.assertEqual(180, tasks[0]["duration"])
+        self.assertTrue(parser.call_args.kwargs["validation_feedback"])
+
+    def test_structured_duration_is_not_overwritten_by_shared_context(self) -> None:
+        task = self.store.create_task("user-a", {
+            "title": "洗衣服",
+            "duration": 45,
+            "estimated_duration": 45,
+            "due": "2026-08-15T18:00:00+08:00",
+            "context": "修订文献综述，120分钟；洗衣服，45分钟；听播客，30分钟",
+            "resource_modality": ["manual"],
+            "parallelizable": True,
+        })
+        self.assertEqual(45, task["duration"])
+        self.assertEqual(45, self.store.get_task(task["id"], "user-a")["duration"])
+
     def test_expanded_action_keywords_are_not_dropped(self) -> None:
         tasks = self.store.local_parse_tasks_from_text(
             "user-a",
@@ -170,7 +216,7 @@ class TaskInputLayerTests(unittest.TestCase):
         self.assertEqual(1, len(updated))
         self.assertEqual("明天 14:00", updated[0]["due"])
 
-    def test_exact_dedup_is_user_scoped(self) -> None:
+    def test_same_task_facts_create_distinct_user_owned_tasks(self) -> None:
         payload = {"title": "完成  论文", "due": "周三", "duration": 90}
         first = self.store.create_task("user-a", payload)
         duplicate = self.store.create_task(
@@ -179,9 +225,9 @@ class TaskInputLayerTests(unittest.TestCase):
         )
         other_user = self.store.create_task("user-b", payload)
 
-        self.assertEqual(first["id"], duplicate["id"])
+        self.assertNotEqual(first["id"], duplicate["id"])
         self.assertNotEqual(first["id"], other_user["id"])
-        self.assertEqual(1, len(self.store.list_tasks("user-a")))
+        self.assertEqual(2, len(self.store.list_tasks("user-a")))
 
     def test_task_reads_writes_and_deletes_require_owner(self) -> None:
         task = self.store.create_task(

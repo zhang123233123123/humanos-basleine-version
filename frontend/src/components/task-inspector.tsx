@@ -3,11 +3,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { Button } from '@/components/ui/button'
+import { DateTimePicker } from '@/components/ui/date-time-picker'
 import { ArrowLeft, Check, Play, Save, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface TaskDetail {
   id: string
+  taskId?: string
   title: string
   status?: string
   priority?: string
@@ -186,7 +188,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
 
           {task.isPreview && <div className="grid grid-cols-2 gap-2">
             <label><span className={labelClass}>{t('taskDialog.durationLabel')}</span><input className={inputClass} type="number" min="1" value={duration || ''} onChange={(event) => setDuration(Number(event.target.value) || undefined)} /></label>
-            <label><span className={labelClass}>{t('taskDialog.dueLabel')}</span><input className={inputClass} value={due} onChange={(event) => setDue(event.target.value)} /></label>
+            <label><span className={labelClass}>{t('taskDialog.dueLabel')}</span><DateTimePicker value={due} onChange={setDue} className={inputClass} /></label>
             <label><span className={labelClass}>{t('workspace.difficulty')}</span><input className={inputClass} type="number" min="1" max="10" value={expectedDifficulty || ''} onChange={(event) => setExpectedDifficulty(Number(event.target.value) || undefined)} /></label>
             <label><span className={labelClass}>{t('workspace.dependency')}</span><input className={inputClass} value={dependency} onChange={(event) => setDependency(event.target.value)} /></label>
           </div>}
@@ -261,7 +263,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
             <Save className="w-3.5 h-3.5 mr-1" />
             {t('workspace.saveChanges')}
           </Button>
-          {onDelete && <Button variant="outline" size="sm" className="mt-2 h-8 w-full border-destructive/40 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={deleting} onClick={async () => { if (!window.confirm(`Delete “${title}”?`)) return; setDeleting(true); try { await onDelete(buildTask()) } finally { setDeleting(false) } }}><Trash2 className="mr-1 h-3.5 w-3.5" />{deleting ? 'Deleting...' : 'Delete task'}</Button>}
+          {onDelete && <Button variant="outline" size="sm" className="mt-2 h-8 w-full border-destructive/40 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={deleting} onClick={async () => { if (!window.confirm(`Delete “${title}”?`)) return; setDeleting(true); try { await onDelete(buildTask()) } catch (error) { toast.error(error instanceof Error ? error.message : 'Failed to delete task') } finally { setDeleting(false) } }}><Trash2 className="mr-1 h-3.5 w-3.5" />{deleting ? 'Deleting...' : 'Delete task'}</Button>}
         </div>
       )}
 
