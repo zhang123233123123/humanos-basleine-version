@@ -4183,7 +4183,26 @@ class Store:
         action = recommendation["action"]
         if action == "continue_later" and not str(payload.get("preferred_resume_at") or "").strip():
             raise ValueError("preferred_resume_at is required for continue_later")
+        if action in {"continue_later", "switch_task"}:
+            progress = str(payload.get("progress") or "").strip()
+            next_action = str(payload.get("next_action") or "").strip()
+            if not progress or not next_action:
+                raise ValueError("progress and next_action are required before leaving the current task")
+            context_dump = self.save_context_dump(user_id, {
+                "task_id": task_id,
+                "progress": progress,
+                "progress_percent": payload.get("progress_percent", 0),
+                "remaining_duration_minutes": session.get("session_remaining_minutes"),
+                "next_action": next_action,
+                "open_questions": payload.get("open_questions") or [],
+                "stop_reason": payload.get("reason") or "help_decide_recommendation",
+                "materials": [],
+            })
+        else:
+            context_dump = None
         execution_result: dict = {"action": action, "execution_session": session}
+        if context_dump:
+            execution_result["context_dump"] = context_dump
 
         if action == "continue_current":
             if session.get("status") == "paused":
