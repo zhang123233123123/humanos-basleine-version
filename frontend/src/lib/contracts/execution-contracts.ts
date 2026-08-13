@@ -60,6 +60,14 @@ export interface ExecutionImpact {
     overlap_minutes: number
   }>
   options: string[]
+  capacity_projection?: {
+    plan_id?: string
+    plan_revision?: number
+    week_id?: string
+    fixed_event_interval_ids: string[]
+    buffer_minutes: number
+    protected_interval_ids: string[]
+  }
 }
 
 export interface ExecutionInterruption {

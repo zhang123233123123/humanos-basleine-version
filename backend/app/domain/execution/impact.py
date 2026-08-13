@@ -41,6 +41,7 @@ def analyze_remaining_work_impact(
                 "task_title": item.get("task_title") or item.get("title"),
                 "planned_start_at": item.get("planned_start_at"),
                 "planned_end_at": item.get("planned_end_at"),
+                "fixed_event": bool(item.get("fixed_event")),
                 "overlap_minutes": max(int((estimated_end - planned_start).total_seconds() // 60), 1),
             })
     reason_codes: list[str] = []

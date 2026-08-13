@@ -4513,37 +4513,20 @@ class Store:
             and item.get("plan_revision") == session.get("plan_revision")
             and item.get("planned_start_at")
         ]
-        context = dict(task.get("contextWindow") or {})
-        deadline_at = task.get("deadline_at") or context.get("deadlineAt") or context.get("deadline_at")
-        week_start = datetime.fromisoformat(f"{session.get('week_id')}T00:00:00").replace(tzinfo=current.tzinfo)
-        week_end = week_start + timedelta(days=7)
-        impact = analyze_remaining_work_impact(
-            current=current,
-            remaining_minutes=remaining_minutes,
-            future_sessions=future,
-            current_session_id=session_id,
-            deadline_at=deadline_at,
-            week_end_at=week_end,
-            action=str(payload.get("action") or "resume"),
-        )
-        from app.application.local_rescheduler import assess_local_reschedule
+        active = self.active_plan(user_id, str(session.get("week_id") or "")) or {}
+        from app.application.execution_impact import assess_execution_impact
 
-        next_starts = []
-        for item in future:
-            try:
-                next_starts.append(datetime.fromisoformat(str(item["planned_start_at"])).astimezone(current.tzinfo))
-            except (KeyError, TypeError, ValueError):
-                continue
-        idle_gap = max(int((min(next_starts) - current).total_seconds() // 60), 0) if next_starts else 0
-        change_minutes = max(int(payload.get("break_minutes") or payload.get("change_minutes") or remaining_minutes), 0)
-        impact["reschedule_check"] = assess_local_reschedule(
-            impact=impact,
-            change_minutes=change_minutes,
+        return assess_execution_impact(
+            current=current,
+            session=session,
+            task=task,
+            future_sessions=future,
+            active_plan=active,
+            action=str(payload.get("action") or "resume"),
+            remaining_minutes=remaining_minutes,
+            change_minutes=max(int(payload.get("break_minutes") or payload.get("change_minutes") or remaining_minutes), 0),
             session_slack_minutes=max(int(payload.get("session_slack_minutes") or 0), 0),
-            idle_gap_minutes=idle_gap,
-            buffer_minutes=max(int(payload.get("buffer_minutes") or 0), 0),
         )
-        return impact
 
     def end_execution_session(self, user_id: str, payload: dict) -> dict:
         session_id = str(payload.get("execution_session_id") or "")
