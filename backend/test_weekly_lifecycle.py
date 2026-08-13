@@ -100,6 +100,77 @@ class WeeklyLifecycleTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "没有任何可执行时间块"):
                 store.confirm_plan("u", {"plan_id": proposal["plan_id"], "week_id": "2026-08-10", "plan_patch": [], "decision": proposal})
 
+    def test_weekly_setup_task_with_exact_deadline_remains_schedulable(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            store = self.make_store(Path(temp_dir) / "deadline-task.db")
+            store.reconcile_weekly_setup("u", {
+                "week_id": "2026-08-03",
+                "profile": self.profile_patch(),
+                "tasks": [{
+                    "title": "Analyze interview transcripts",
+                    "due": "2026-08-06T17:00",
+                    "duration": 90,
+                    "priority": "high",
+                }],
+            })
+            task = store.list_tasks("u")[0]
+        self.assertEqual("flexible_task", task["task_type"])
+        self.assertEqual("flexible_task", task["contextWindow"]["taskType"])
+
+    def test_future_active_week_is_not_reported_as_rollover(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            store = self.make_store(Path(temp_dir) / "future-week.db")
+            store.reconcile_weekly_setup("u", {
+                "week_id": "2026-08-17",
+                "profile": {
+                    **self.profile_patch(),
+                    "weekly_context": {
+                        **self.profile_patch()["weekly_context"],
+                        "week_id": "2026-08-17",
+                    },
+                },
+                "tasks": [{
+                    "title": "Write report",
+                    "due": "2026-08-20T17:00",
+                    "duration": 60,
+                    "priority": "high",
+                }],
+            })
+            status = store.week_status("u", requested_week_id="2026-08-10")
+        self.assertEqual("2026-08-17", status["active_week_id"])
+        self.assertFalse(status["new_week"])
+
+    def test_empty_ai_candidate_is_invalid_when_schedulable_work_exists(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            store = self.make_store(Path(temp_dir) / "empty-candidate.db")
+            store.reconcile_weekly_setup("u", {
+                "week_id": "2026-08-03",
+                "profile": self.profile_patch(),
+                "tasks": [{
+                    "title": "Write report",
+                    "due": "2026-08-06T17:00",
+                    "duration": 60,
+                    "priority": "high",
+                }],
+            })
+            state = {
+                "profile": store.ensure_profile("u"),
+                "tasks": store.list_tasks("u"),
+                "runtime_state": {},
+                "payload": {"week_id": "2026-08-03"},
+                "ai_task_analysis": {},
+            }
+            candidates = store.validate_llm_schedule_candidates(
+                state,
+                {"plan_patch": []},
+                {"candidate_plans": [{"id": "empty", "blocks": []}]},
+            )
+        self.assertFalse(candidates[0]["validation"]["valid"])
+        self.assertIn(
+            "empty_candidate_with_active_tasks",
+            {item["type"] for item in candidates[0]["validation"]["violations"]},
+        )
+
     def test_weekly_context_change_marks_confirmed_plan_for_update(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             store = self.make_store(Path(temp_dir) / "invalidate.db")

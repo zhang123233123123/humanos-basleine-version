@@ -3160,6 +3160,11 @@ class Store:
 
                     context_window = dict(before.get("contextWindow") or {})
                     context_window.update(draft.get("contextWindow") or {})
+                    # Items submitted through "What do you want to complete?"
+                    # are work outcomes with a deadline, not calendar events at
+                    # that deadline.  An exact deadline time must never turn the
+                    # task into a fixed event.
+                    context_window["taskType"] = "flexible_task"
                     if "due" in draft:
                         context_window["deadline"] = draft.get("due")
                     if "duration" in draft:
@@ -3201,7 +3206,10 @@ class Store:
                 duration = int(draft.get("duration") or 60)
                 context = str(draft.get("context") or "Added from Weekly Setup.")
                 domain_type = draft.get("type") or self.infer_task_type(title, context)
-                schedule_type = self.infer_schedule_task_type({**draft, "title": title, "context": context})
+                # Weekly Setup tasks are always schedulable work. Fixed events,
+                # routines and flexible personal activities enter through the
+                # structured weekly-context collection instead.
+                schedule_type = "flexible_task"
                 demand = draft.get("task_demand") or self.infer_task_demand(draft, domain_type)
                 context_window = dict(draft.get("contextWindow") or {})
                 context_window.update({
@@ -3876,6 +3884,13 @@ class Store:
         profile = self.ensure_profile(user_id)
         current_week = str(requested_week_id or iso_week_id(timezone_name=profile.get("timezone")))
         active_week = str(profile.get("active_week_id") or (profile.get("weekly_context") or {}).get("week_id") or current_week)
+        try:
+            # A future active week means the user is preparing the next plan; it is
+            # not a rollover prompt.  Rollover is only due once wall-clock time has
+            # moved beyond the active week.
+            new_week = datetime.fromisoformat(current_week).date() > datetime.fromisoformat(active_week).date()
+        except (TypeError, ValueError):
+            new_week = current_week != active_week
         unfinished_task_ids = [
             str(task.get("id")) for task in self.list_tasks(user_id)
             if task.get("week_id") == active_week
@@ -3886,7 +3901,7 @@ class Store:
         return {
             "current_week_id": current_week,
             "active_week_id": active_week,
-            "new_week": current_week != active_week,
+            "new_week": new_week,
             "unfinished_task_ids": unfinished_task_ids,
             "resources": {"tasks": "/api/tasks"},
         }
@@ -5816,6 +5831,8 @@ class Store:
         context = build_scheduling_context(profile)
         windows = context.get("movable_routine_windows") or context.get("windows", [])
         now = profile_now(profile)
+        week_id = str(payload.get("week_id") or profile.get("active_week_id") or now.date().isoformat())
+        deadline_reference = datetime.fromisoformat(week_id).replace(tzinfo=safe_timezone(str(profile.get("timezone") or "Asia/Shanghai"))) + timedelta(hours=12)
         violations: list[dict] = []
         blocks: list[dict] = []
         planned_work: dict[str, int] = {}
@@ -5846,7 +5863,7 @@ class Store:
                 conflict = next((item for item in context.get("hard_constraints", []) if item["day_index"] == day and start < item["end"] and item["start"] < end), None)
                 if conflict:
                     violations.append({"type": "hard_constraint_conflict", "task_id": task_id, "constraint": conflict.get("label")})
-                due_day = day_index_from_due(task.get("due"), now)
+                due_day = day_index_from_due(task.get("due"), deadline_reference)
                 due_hour = parse_due_start_hour(task.get("due"))
                 if due_day is None or day > due_day or (day == due_day and due_hour is not None and end > due_hour + 0.001):
                     violations.append({"type": "deadline", "task_id": task_id})
@@ -5915,7 +5932,6 @@ class Store:
                 violations.append({"type": "unexplained_unallocated_work", "task_id": task_id, "planned": allocated, "remaining": remaining})
         from app.application.validate_timeline import validate_weekly_plan_timeline
 
-        week_id = str(payload.get("week_id") or profile.get("active_week_id") or now.date().isoformat())
         timezone_name = str(profile.get("timezone") or "Asia/Shanghai")
         timeline_violations = validate_weekly_plan_timeline(
             week_id=week_id,
@@ -6069,7 +6085,12 @@ class Store:
         # routine and rejects the candidate when no bounded position exists.
         validation_windows = context.get("movable_routine_windows") or context.get("full_available_windows") or context["windows"]
         now = profile_now(profile)
-        today_index = now.weekday()
+        target_week_id = str((state.get("payload") or {}).get("week_id") or profile.get("active_week_id") or (profile.get("weekly_context") or {}).get("week_id") or iso_week_id(now, profile.get("timezone")))
+        target_week_start = datetime.fromisoformat(target_week_id).replace(tzinfo=now.tzinfo)
+        deadline_reference = target_week_start + timedelta(hours=12)
+        current_week_start = (now - timedelta(days=now.weekday())).date()
+        target_offset_days = (target_week_start.date() - current_week_start).days
+        today_index = now.weekday() if target_offset_days == 0 else -1 if target_offset_days > 0 else 7
         next_quarter = math.ceil((now.hour + now.minute / 60) * 4) / 4
         fixed_blocks = [
             dict(block)
@@ -6119,6 +6140,13 @@ class Store:
         deep_start = parse_due_start_hour(profile.get("deep_work_window")) or 9.0
         low_start = parse_due_start_hour(profile.get("low_energy_window")) or 14.0
         palette = ["blue", "green", "violet", "gold"]
+        schedulable_task_ids = {
+            str(task.get("id"))
+            for task in tasks
+            if task.get("status") not in {"completed", "terminated", "blocked"}
+            and not task.get("removed_from_week")
+            and schedule_task_kind(task) != "fixed_event"
+        }
 
         def remaining_for(task: dict) -> int:
             saved = (task.get("execution") or {}).get("remaining_duration_minutes")
@@ -6140,6 +6168,16 @@ class Store:
             candidate_id = str(raw_candidate.get("id") or f"ai_candidate_{candidate_index + 1}")
             violations: list[dict] = []
             blocks = [dict(block) for block in fixed_blocks]
+            raw_task_blocks = [
+                block for block in (raw_candidate.get("blocks") or [])
+                if isinstance(block, dict)
+            ]
+            if schedulable_task_ids and not raw_task_blocks:
+                violations.append({
+                    "type": "empty_candidate_with_active_tasks",
+                    "task_ids": sorted(schedulable_task_ids),
+                    "detail": "The candidate contains no work sessions although schedulable tasks remain.",
+                })
             scheduled_work: dict[str, int] = {}
             allocated_capacity: dict[str, int] = {}
             task_session_counts: dict[str, int] = {}
@@ -6187,7 +6225,7 @@ class Store:
                     proposed_start += timedelta(days=day_index, hours=start)
                     if proposed_start < not_before:
                         violations.append({"type": "before_requested_resume_time", "task_id": task_id, "not_before": not_before.isoformat()})
-                due_day = day_index_from_due(task.get("due"), now)
+                due_day = day_index_from_due(task.get("due"), deadline_reference)
                 due_hour = due_hour_for(task, due_day)
                 if due_day is None or day_index > due_day or (day_index == due_day and end > due_hour + 0.001):
                     violations.append({"type": "deadline", "task_id": task_id})
@@ -6495,6 +6533,11 @@ class Store:
         from humanos_graph import build_scheduling_context, day_index_from_due, parse_due_start_hour, profile_now
         planning_context = build_scheduling_context(profile)
         planning_now = profile_now(profile)
+        target_week_id = str((state.get("payload") or {}).get("week_id") or profile.get("active_week_id") or (profile.get("weekly_context") or {}).get("week_id") or iso_week_id(planning_now, profile.get("timezone")))
+        target_week_start = datetime.fromisoformat(target_week_id).replace(tzinfo=planning_now.tzinfo)
+        deadline_reference = target_week_start + timedelta(hours=12)
+        current_week_start = (planning_now - timedelta(days=planning_now.weekday())).date()
+        planning_today_index = planning_now.weekday() if target_week_start.date() == current_week_start else -1
         demand_map = {
             str(item.get("task_id")): item
             for item in state.get("ai_task_analysis", {}).get("task_demands", [])
@@ -6544,13 +6587,13 @@ class Store:
                     "role": "user",
                     "content": as_json({
                         "prompt_version": "weekly-global-planner-v2",
-                        "week_id": str((state.get("payload") or {}).get("week_id") or profile.get("active_week_id") or (profile.get("weekly_context") or {}).get("week_id") or iso_week_id(planning_now, profile.get("timezone"))),
+                        "week_id": target_week_id,
                         "absolute_dates": {
-                            str(index): (datetime.fromisoformat(str((state.get("payload") or {}).get("week_id") or profile.get("active_week_id") or (profile.get("weekly_context") or {}).get("week_id") or iso_week_id(planning_now, profile.get("timezone")))) + timedelta(days=index)).date().isoformat()
+                            str(index): (datetime.fromisoformat(target_week_id) + timedelta(days=index)).date().isoformat()
                             for index in range(7)
                         },
                         "day_index_map": {"周一": 0, "周二": 1, "周三": 2, "周四": 3, "周五": 4, "周六": 5, "周日": 6},
-                        "today_index": planning_now.weekday(),
+                        "today_index": planning_today_index,
                         "now_iso": planning_now.isoformat(),
                         "current_time": planning_now.hour + planning_now.minute / 60,
                         "preferred_available_windows": planning_context.get("movable_routine_windows") or planning_context.get("windows", []),
@@ -6574,7 +6617,7 @@ class Store:
                                 "title": task.get("title"),
                                 "schedule_type": schedule_task_kind(task),
                                 "deadline": task.get("due"),
-                                "deadline_day_index": day_index_from_due(task.get("due"), planning_now),
+                                "deadline_day_index": day_index_from_due(task.get("due"), deadline_reference),
                                 "deadline_hour": parse_due_start_hour(task.get("due")),
                                 "remaining_minutes": (task.get("execution") or {}).get("remaining_duration_minutes", task.get("duration")),
                                 "priority": task.get("priority"),
@@ -6717,7 +6760,7 @@ class Store:
                                 {
                                     "task_id": task.get("id"),
                                     "deadline": task.get("due"),
-                                    "deadline_day_index": day_index_from_due(task.get("due"), planning_now),
+                                    "deadline_day_index": day_index_from_due(task.get("due"), deadline_reference),
                                     "deadline_hour": parse_due_start_hour(task.get("due")),
                                     "remaining_minutes": (task.get("execution") or {}).get("remaining_duration_minutes", task.get("duration")),
                                     "task_demand": demand_map.get(str(task.get("id"))) or task.get("task_demand", {}),

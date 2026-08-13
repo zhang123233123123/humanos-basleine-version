@@ -49,7 +49,9 @@ export default function WeeklyPlanPage() {
   const [keepBuffer, setKeepBuffer] = useState(true)
   const editSnapshot = useRef('')
 
-  const weekId = weekStatus?.current_week_id || ''
+  // When a user prepares next week in advance, the active planning week can be
+  // later than the wall-clock week.  Always edit and generate that active plan.
+  const weekId = weekStatus?.active_week_id || weekStatus?.current_week_id || ''
 
   const loadPlanningState = useCallback(async () => {
     setLoading(true)

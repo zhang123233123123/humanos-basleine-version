@@ -150,7 +150,6 @@ def build_deterministic_plan(
     payload = payload or {}
     analysis = analysis or {}
     runtime_state = payload.get("runtime_state") or {}
-    runtime_capacity = _runtime_capacity(runtime_state)
     adjustment_constraints = payload.get("adjustment_constraints") or {}
     affected_task_ids = {str(item) for item in (payload.get("affected_task_ids") or [])}
     adjustment_trigger = str(payload.get("adjustment_trigger") or "")
@@ -158,6 +157,10 @@ def build_deterministic_plan(
     now = profile_now(profile)
     week_id = str(payload.get("week_id") or profile.get("active_week_id") or (profile.get("weekly_context") or {}).get("week_id") or (now - timedelta(days=now.weekday())).date().isoformat())
     week_start = _week_start(week_id, timezone_name)
+    deadline_reference = week_start + timedelta(hours=12)
+    planning_current_week = week_start <= now < week_start + timedelta(days=7)
+    effective_runtime_state = runtime_state if planning_current_week else {}
+    runtime_capacity = _runtime_capacity(effective_runtime_state)
     weekly_axis = WeeklyTimeAxis(week_id, timezone_name)
     preferences = profile.get("task_preferences") or {}
     session_minutes = _rounded_preference(preferences.get("preferred_session_minutes"), 45)
@@ -300,10 +303,10 @@ def build_deterministic_plan(
     unscheduled: list[dict[str, Any]] = []
     next_session_decision: dict[str, Any] = {}
     first_new_session = True
-    for task in _dependency_order(list(active_tasks.values()), analysis, now, runtime_state):
+    for task in _dependency_order(list(active_tasks.values()), analysis, deadline_reference, effective_runtime_state):
         task_id = str(task["id"])
         remaining = _remaining_minutes(task) - allocated[task_id]
-        deadline = _deadline_axis(task, now)
+        deadline = _deadline_axis(task, deadline_reference)
         dependency_ready = max((task_end.get(item, 0) + rest_minutes for item in dependency_map.get(task_id, set())), default=0)
         task_ready = max(current_axis, dependency_ready, task_not_before.get(task_id, 0))
         session_index = 1 + sum(1 for block in blocks if str(block.get("task_id")) == task_id)
@@ -405,9 +408,9 @@ def build_deterministic_plan(
             if first_new_session:
                 next_session_decision = {
                     "state_used": {
-                        "focus": int(runtime_state.get("focus") or 4),
-                        "energy": int(runtime_state.get("energy") or 4),
-                        "stress": int(runtime_state.get("stress") or 4),
+                        "focus": int(effective_runtime_state.get("focus") or 4),
+                        "energy": int(effective_runtime_state.get("energy") or 4),
+                        "stress": int(effective_runtime_state.get("stress") or 4),
                     },
                     "affected_decision": "next_session_selection",
                     "capacity": runtime_capacity,

@@ -50,6 +50,12 @@ function sampleDeadline(dayOffset: number, hour: number, minute = 0) {
   return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`
 }
 
+function samplePlanningWeekId() {
+  const value = samplePlanningMonday()
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`
+}
+
 function sampleContextItems(): ContextItem[] {
   return [
     { id: stableId('ctx'), type: 'fixed_event', title: 'Research meeting', day: 'Thursday', start: '10:00', end: '11:00' },
@@ -153,13 +159,15 @@ export default function OnboardingPage() {
     }
     setLoading(true)
     try {
+      const planningWeekId = samplePlanningWeekId()
       const profileResponse = await fetch('/api/profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...profilePayload(3), research_context: { ...profilePayload(3).research_context, onboarding_completed: true } }) })
       if (!profileResponse.ok) throw new Error(t('onboarding.saveFailed'))
 
       const weekResponse = await fetch('/api/weekly-setup/reconcile', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          profile: { ...profilePayload(3), weekly_context: { weekly_goal: weeklyGoal, weekly_available_windows: availableWindows, context_items: contextItems.filter((item) => item.title.trim()), keep_buffer: keepBuffer } },
+          week_id: planningWeekId,
+          profile: { ...profilePayload(3), weekly_context: { week_id: planningWeekId, week_of: planningWeekId, weekly_goal: weeklyGoal, weekly_available_windows: availableWindows, context_items: contextItems.filter((item) => item.title.trim()), keep_buffer: keepBuffer } },
           tasks: readyTasks.map((task) => ({
             title: task.title.trim(),
             due: task.due.trim() || null,
@@ -180,7 +188,7 @@ export default function OnboardingPage() {
       const stateResponse = await fetch('/api/state-checkins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...momentary, source: 'onboarding' }) })
       if (!stateResponse.ok) throw new Error(t('onboarding.stateFailed'))
 
-      const planResponse = await fetch('/api/schedules/decide', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: 'onboarding' }) })
+      const planResponse = await fetch('/api/schedules/decide', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: 'onboarding', week_id: planningWeekId }) })
       if (!planResponse.ok) {
         const error = await planResponse.json().catch(() => ({})) as { message?: string; error?: string }
         throw new Error(error.message || error.error || t('onboarding.planFailed'))
