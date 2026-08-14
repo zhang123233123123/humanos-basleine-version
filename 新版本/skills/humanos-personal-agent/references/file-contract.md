@@ -10,6 +10,10 @@ Every user directory contains seven UTF-8 files.
 - `execution.json`: current session plus prior sessions and interruptions. Preserve actual progress and re-entry cues.
 - `memory.json`: candidate observations, confirmed patterns, rejected patterns.
 - `history.jsonl`: append-only audit records; one valid JSON object per line.
+- `conversation.jsonl`: append-only user and assistant turns with timestamps and job IDs.
+- `behavior.jsonl`: append-only meaningful UI actions such as plan confirmation, revision, cancellation, calendar edits, task completion, and interruption.
+
+`state.json` includes `source` and `valid_until`. Default display values are not user self-reports and must not drive personalized planning.
 
 Calendar sessions require `session_id`, `task_id`, `title`, `start`, `end`, `status`, `goal`, and `reason`. Use ISO 8601 with the user's offset.
 

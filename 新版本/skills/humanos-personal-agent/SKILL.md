@@ -9,12 +9,12 @@ Treat the current user workspace as the sole source of truth. The caller provide
 
 ## Required workflow
 
-1. Read `identity.json` and `profile.json`.
-2. Read only the additional files needed for the request. Consult [file-contract.md](references/file-contract.md).
+1. For task or planning requests, run `python3 scripts/build_planning_context.py "$CURRENT_USER_WORKSPACE"` and use the complete result. Never plan from the latest sentence alone.
+2. Read `identity.json` and `profile.json`, then only the additional files needed. Consult [file-contract.md](references/file-contract.md).
 3. Interpret the raw user message or UI event yourself. Do not expect an intent classifier or parser.
 4. Update the relevant JSON files atomically while preserving stable IDs and unknown fields.
 5. Append the raw input, interpretation, file changes, and timestamp to `history.jsonl`.
-6. If the calendar changes, update `plan.json`; the UI renders its `candidate.sessions` or `active.sessions` directly.
+6. If the calendar changes, update `plan.json`, then run `python3 scripts/validate_plan.py "$CURRENT_USER_WORKSPACE"`. Fix validation errors before responding.
 7. Return one JSON object following [response-contract.md](references/response-contract.md).
 
 ## Non-negotiable rules
@@ -26,5 +26,7 @@ Treat the current user workspace as the sole source of truth. The caller provide
 - Preserve timezone offsets, task IDs, session IDs, history, progress, and re-entry cues.
 - Never invent deadlines, duration, availability, or completion. Ask when a missing value materially changes the plan.
 - Never edit application code, credentials, system files, or another workspace.
+- Treat state as current only when `source` is `user_self_report` and it was reported within six hours. Otherwise ask for a check-in before energy-sensitive planning.
+- Consider all open tasks and the active plan whenever adding or revising scheduled work.
 
 Read [planning-and-learning.md](references/planning-and-learning.md) for planning, execution, interruption, and profile-learning behavior.
