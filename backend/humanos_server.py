@@ -3592,9 +3592,11 @@ class Store:
         return {"calendar_diff": calendar_diff, "proposed_plan": proposed, "validation": validation}
 
     def decide_parallel_suggestion(self, user_id: str, payload: dict) -> dict:
+        from app.domain.planning import validate_parallel_decision_action
+
         plan_id = str(payload.get("plan_id") or "")
         suggestion_id = str(payload.get("suggestion_id") or "")
-        action = str(payload.get("action") or "keep_separate")
+        action = validate_parallel_decision_action(payload.get("action"))
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM plans WHERE id=? AND user_id=? AND plan_status='proposed'", (plan_id, user_id)).fetchone()
             if not row:

@@ -4,6 +4,17 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+PARALLEL_DECISION_ACTIONS = frozenset({"combine", "keep_separate"})
+
+
+def validate_parallel_decision_action(value: object) -> str:
+    """Return a supported user decision without silently coercing bad input."""
+    action = value if isinstance(value, str) else ""
+    if action not in PARALLEL_DECISION_ACTIONS:
+        allowed = ", ".join(sorted(PARALLEL_DECISION_ACTIONS))
+        raise ValueError(f"action must be one of: {allowed}")
+    return action
+
 
 def _minutes(block: dict, field: str) -> int:
     if block.get(field) is not None:

@@ -2,7 +2,7 @@ import unittest
 import tempfile
 from pathlib import Path
 
-from backend.app.domain.planning import apply_parallel_overlap
+from backend.app.domain.planning import apply_parallel_overlap, validate_parallel_decision_action
 from backend.humanos_server import Store
 
 
@@ -42,6 +42,23 @@ class ParallelPlanTransformationTests(unittest.TestCase):
         plan = [self.plan[0], {**self.plan[1], "planned_work_minutes": 20}]
         with self.assertRaises(ValueError):
             apply_parallel_overlap(plan, self.suggestion)
+
+    def test_parallel_decision_action_is_an_explicit_closed_contract(self) -> None:
+        self.assertEqual("combine", validate_parallel_decision_action("combine"))
+        self.assertEqual("keep_separate", validate_parallel_decision_action("keep_separate"))
+        for invalid in (None, "", "reject", "COMBINE", 1):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "action must be one of"):
+                validate_parallel_decision_action(invalid)
+
+    def test_invalid_action_is_rejected_before_plan_lookup(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            store = Store(Path(temp_dir) / "parallel-invalid-action.db")
+            with self.assertRaisesRegex(ValueError, "action must be one of"):
+                store.decide_parallel_suggestion("u", {
+                    "plan_id": "missing-plan",
+                    "suggestion_id": "missing-suggestion",
+                    "action": "reject",
+                })
 
     def test_accepting_partial_overlap_persists_a_valid_work_conserving_draft(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
