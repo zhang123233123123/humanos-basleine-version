@@ -3606,19 +3606,9 @@ class Store:
                 raise KeyError(suggestion_id)
             suggestion["status"] = "accepted" if action == "combine" else "rejected"
             if action == "combine":
-                block_ids = {str(suggestion.get("primary_block_id")), str(suggestion.get("secondary_block_id"))}
-                task_ids = [str(suggestion.get("primary_task_id")), str(suggestion.get("secondary_task_id"))]
-                overlap = int(suggestion.get("suggested_overlap_minutes") or 30)
-                start = float(suggestion.get("start") or 0)
-                end = start + overlap / 60.0
-                found = 0
-                for block in plan.get("plan_patch") or []:
-                    if str(block.get("block_id")) not in block_ids:
-                        continue
-                    found += 1
-                    block.update({"day_index": int(suggestion.get("day_index") or 0), "start": start, "end": end, "session_minutes": overlap, "planned_work_minutes": min(overlap, int(block.get("planned_work_minutes") or overlap)), "parallel_group_id": suggestion["parallel_group_id"], "parallel_user_confirmed": True, "parallel_task_ids": task_ids, "allowed_overlap_minutes": overlap, "parallel_role": "primary" if str(block.get("task_id")) == task_ids[0] else "secondary"})
-                if found != 2:
-                    raise ValueError("Parallel suggestion no longer matches the current draft")
+                from app.domain.planning import apply_parallel_overlap
+
+                plan["plan_patch"] = apply_parallel_overlap(plan.get("plan_patch") or [], suggestion)
                 plan["accepted_parallel_pairs"] = [*(plan.get("accepted_parallel_pairs") or []), {**suggestion, "user_confirmed": True}]
             plan["parallel_suggestions"] = suggestions
             plan["validation"] = self.validate_confirmed_schedule(user_id, {**plan, "accepted_parallel_pairs": plan.get("accepted_parallel_pairs") or []})
@@ -5671,7 +5661,9 @@ class Store:
                     host_minutes = int(host_block.get("session_minutes") or round((float(host_block["end"]) - float(host_block["start"])) * 60))
                     for guest_block in guest_blocks:
                         guest_minutes = int(guest_block.get("session_minutes") or round((float(guest_block["end"]) - float(guest_block["start"])) * 60))
-                        overlap_minutes = min(requested, host_minutes, guest_minutes)
+                        host_work = int(host_block.get("planned_work_minutes") or host_minutes)
+                        guest_work = int(guest_block.get("planned_work_minutes") or guest_minutes)
+                        overlap_minutes = min(requested, host_minutes, guest_minutes, host_work, guest_work)
                         overlap_minutes = int(math.floor(overlap_minutes / 15.0) * 15)
                         if overlap_minutes < 15:
                             continue
