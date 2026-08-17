@@ -4286,7 +4286,12 @@ class Store:
                 "task_id": task_id,
                 "progress": progress,
                 "progress_percent": min(max(int(payload.get("progress_percent") or 0), 0), 100),
-                "remaining_duration_minutes": max(int(payload.get("remaining_duration_minutes") if payload.get("remaining_duration_minutes") is not None else session.get("session_remaining_minutes") or 0), 0),
+                "task_remaining_minutes": max(int(
+                    payload.get("task_remaining_minutes")
+                    if payload.get("task_remaining_minutes") is not None
+                    else (self.get_task(task_id, user_id) or {}).get("execution", {}).get("remaining_duration_minutes", 0)
+                ), 0),
+                "session_remaining_minutes": max(int(session.get("session_remaining_minutes") or 0), 0),
                 "next_action": next_action,
                 "open_questions": payload.get("open_questions") or [],
                 "stop_reason": payload.get("reason") or "help_decide_recommendation",
@@ -4395,8 +4400,15 @@ class Store:
             {"label": "Next action", "text": dump["next_action"] or "Confirm one small next step before resuming."},
         ]
         execution = dict(task.get("execution") or {})
-        payload_remaining = payload.get("remaining_duration_minutes")
-        execution["remaining_duration_minutes"] = int(task.get("duration", 60) if payload_remaining is None and execution.get("remaining_duration_minutes") is None else execution.get("remaining_duration_minutes") if payload_remaining is None else payload_remaining)
+        # A Context Dump describes where the user stopped.  It must not treat
+        # the remaining time in one Execution Session as the remaining work
+        # for the whole task.  Task estimates may still be corrected, but only
+        # through the explicitly named task-level field.
+        task_remaining = payload.get("task_remaining_minutes")
+        if task_remaining is not None:
+            execution["remaining_duration_minutes"] = max(int(task_remaining), 0)
+        elif execution.get("remaining_duration_minutes") is None:
+            execution["remaining_duration_minutes"] = max(int(task.get("duration", 60)), 0)
         payload_progress = payload.get("progress_percent")
         execution["progress_percent"] = int(execution.get("progress_percent", 0) if payload_progress is None else payload_progress)
         execution["last_stop_reason"] = dump["stop_reason"]
@@ -4428,8 +4440,6 @@ class Store:
                 "UPDATE tasks SET status=?,checkpoints_json=?,execution_json=?,context_window_json=?,updated_at=? WHERE id=? AND user_id=?",
                 (next_status, as_json(checkpoints), as_json(execution), as_json(context_window), dump["created_at"], task_id, user_id),
             )
-            conn.execute("UPDATE plans SET plan_status='needs_update',updated_at=? WHERE user_id=? AND week_id=? AND plan_status='confirmed'", (dump["created_at"], user_id, task.get("week_id")))
-            conn.execute("UPDATE profiles SET active_plan_revision=NULL,updated_at=? WHERE user_id=?", (dump["created_at"], user_id))
             self._insert_state_transition(conn, user_id=user_id, task_id=task_id, before_status=str(task.get("status") or "unknown"), action_type="capture_context", after_status=next_status, action_detail={"context_dump_id": dump_id, "stop_reason": dump["stop_reason"]}, outcome={"persisted": True, "remaining_minutes": execution["remaining_duration_minutes"]}, created_at=dump["created_at"])
         if not payload.get("skip_memory_index"):
             self.index_context_dump_memory(user_id, dump)
@@ -4701,7 +4711,15 @@ class Store:
             tasks = TaskRepository(conn)
             replay = self._execution_request_seen(conn, user_id, request_id)
             if replay:
-                return self.execution_session_row(replay)
+                result = self.execution_session_row(replay)
+                replay_task = self.get_task(str(replay["task_id"]), user_id) or {}
+                result["task_remaining_minutes"] = int(
+                    (replay_task.get("execution") or {}).get(
+                        "remaining_duration_minutes",
+                        replay_task.get("duration") or replay["planned_work_minutes"] or 0,
+                    )
+                )
+                return result
             row = conn.execute("SELECT * FROM execution_sessions WHERE id=? AND user_id=?", (session_id, user_id)).fetchone()
             if not row:
                 raise KeyError(session_id)
@@ -4750,7 +4768,9 @@ class Store:
             self._insert_state_transition(conn, user_id=user_id, task_id=row["task_id"], before_status=str(row["status"]), action_type="pause", after_status="paused", execution_session_id=session_id, action_detail={"interruption": interruption_snapshot, "resume_preference": resume_preference, **settlement.to_dict()}, created_at=timestamp)
             self._record_execution_request(conn, user_id, request_id, session_id, "pause", timestamp)
             updated = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (session_id,)).fetchone()
-        return self.execution_session_row(updated)
+        result = self.execution_session_row(updated)
+        result["task_remaining_minutes"] = settlement.task_remaining_minutes
+        return result
 
     def analyze_execution_impact(self, user_id: str, payload: dict) -> dict:
         """Deterministically identify future Sessions affected by an execution change."""
@@ -6880,13 +6900,16 @@ class Store:
             "previous_progress": latest_dump.get("progress", "") if latest_dump else "",
             "previous_stop_reason": latest_dump.get("stop_reason", "") if latest_dump else "",
             "open_questions": latest_dump.get("open_questions", []) if latest_dump else [],
-            "remaining_duration_minutes": int(
+            "task_remaining_minutes": int(
                 task.get("duration", 0)
                 if (task.get("execution") or {}).get("remaining_duration_minutes") is None
                 else (task.get("execution") or {}).get("remaining_duration_minutes")
             ),
             "memory_evidence": memories,
         }
+        # Temporary response alias for older clients. New clients must use the
+        # task-scoped name so it cannot be confused with Session remaining.
+        response["remaining_duration_minutes"] = response["task_remaining_minutes"]
         self.log_event(user_id, "reentry_prompt", response)
         return response
 

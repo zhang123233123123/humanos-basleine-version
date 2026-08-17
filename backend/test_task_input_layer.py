@@ -252,7 +252,7 @@ class TaskInputLayerTests(unittest.TestCase):
             "stop_reason": "interrupted",
             "progress": "已经完成研究问题部分",
             "next_action": "补充方法选择的理由",
-            "remaining_duration_minutes": 75,
+            "task_remaining_minutes": 75,
             "progress_percent": 38,
         })
 
@@ -267,7 +267,7 @@ class TaskInputLayerTests(unittest.TestCase):
         })
         self.assertEqual("补充方法选择的理由", reentry["first_step"])
         self.assertEqual("已经完成研究问题部分", reentry["previous_progress"])
-        self.assertEqual(75, reentry["remaining_duration_minutes"])
+        self.assertEqual(75, reentry["task_remaining_minutes"])
 
     def test_blocked_interruption_uses_blocked_status(self) -> None:
         task = self.store.create_task(
@@ -279,7 +279,7 @@ class TaskInputLayerTests(unittest.TestCase):
             "stop_reason": "blocked",
             "progress": "问题已经发送",
             "next_action": "收到回复后更新实验参数",
-            "remaining_duration_minutes": 30,
+            "task_remaining_minutes": 30,
         })
         self.assertEqual("blocked", self.store.get_task(task["id"], "user-a")["status"])
 
@@ -293,7 +293,7 @@ class TaskInputLayerTests(unittest.TestCase):
             "stop_reason": "interrupted",
             "progress": "报告内容已经完成",
             "next_action": "只需确认是否提交成功",
-            "remaining_duration_minutes": 0,
+            "task_remaining_minutes": 0,
             "progress_percent": 100,
         })
         saved = self.store.get_task(task["id"], "user-a")
@@ -303,7 +303,7 @@ class TaskInputLayerTests(unittest.TestCase):
             "task_id": task["id"],
             "runtime_state": {"focus": 5, "energy": 4, "stress": 4},
         })
-        self.assertEqual(0, reentry["remaining_duration_minutes"])
+        self.assertEqual(0, reentry["task_remaining_minutes"])
 
     def test_store_connection_is_closed_after_context_exit(self) -> None:
         with self.store.connect() as connection:

@@ -16,6 +16,8 @@ export interface ContextDump {
   task_id: string
   progress?: string
   progress_percent?: number
+  task_remaining_minutes?: number
+  session_remaining_minutes?: number
   remaining_duration_minutes?: number
   next_action?: string
   open_questions?: string
@@ -28,9 +30,12 @@ export interface ContextDump {
 export interface ReentryResult {
   task_id?: string
   first_step?: string
-  progress?: string
+  previous_progress?: string
+  previous_stop_reason?: string
+  task_remaining_minutes?: number
   remaining_duration_minutes?: number
-  open_questions?: string
+  suggested_block_minutes?: number
+  open_questions?: string[]
   recommendation?: string
   [key: string]: unknown
 }

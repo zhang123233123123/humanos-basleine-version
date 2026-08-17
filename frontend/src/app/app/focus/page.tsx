@@ -191,7 +191,7 @@ export default function FocusPage() {
       try {
         await apiRequest('/api/context-dumps', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ task_id: session.task_id, execution_session_id: session.execution_session_id, progress: pauseProgress, next_action: pauseNextStep, stop_reason: pauseReason, remaining_duration_minutes: displayRemaining, expected_resume_time: preferred }),
+          body: JSON.stringify({ task_id: session.task_id, execution_session_id: session.execution_session_id, progress: pauseProgress, next_action: pauseNextStep, stop_reason: pauseReason, session_remaining_minutes: displayRemaining, expected_resume_time: preferred }),
         })
       } catch (contextError) {
         toast.error(contextError instanceof Error ? contextError.message : (locale === 'zh' ? '任务已暂停，但恢复上下文保存失败。' : 'The task was paused, but its re-entry context was not saved.'))

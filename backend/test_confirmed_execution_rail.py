@@ -104,8 +104,36 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
     def test_09_pause_accumulates_minutes_and_context_dump_is_preserved(self):
         session = self.start()
         paused = self.store.pause_execution_session("u", {"execution_session_id": session["execution_session_id"], "actual_minutes": 18, "request_id": "pause-1"})
-        dump = self.store.save_context_dump("u", {"task_id": self.task_id, "progress": "Coded two interviews", "next_action": "Code interview three", "stop_reason": "interrupted", "remaining_duration_minutes": 42})
+        dump = self.store.save_context_dump("u", {"task_id": self.task_id, "progress": "Coded two interviews", "next_action": "Code interview three", "stop_reason": "interrupted", "session_remaining_minutes": 42})
         self.assertEqual((18, "Code interview three"), (paused["accumulated_active_minutes"], dump["next_action"]))
+        self.assertEqual(42, paused["task_remaining_minutes"])
+
+    def test_context_dump_does_not_replace_task_remaining_with_session_remaining(self):
+        session = self.start()
+        self.store.patch_task(self.task_id, {"execution": {"remaining_duration_minutes": 105}}, "u")
+        self.store.pause_execution_session("u", {"execution_session_id": session["execution_session_id"], "actual_minutes": 15})
+        before = self.store.get_task(self.task_id, "u")["execution"]["remaining_duration_minutes"]
+        self.store.save_context_dump("u", {
+            "task_id": self.task_id,
+            "progress": "Coded one interview",
+            "next_action": "Continue coding",
+            "stop_reason": "interrupted",
+            "session_remaining_minutes": 45,
+        })
+        after = self.store.get_task(self.task_id, "u")["execution"]["remaining_duration_minutes"]
+        self.assertEqual(before, after)
+
+    def test_context_dump_keeps_confirmed_plan_active(self):
+        revision = self.store.ensure_profile("u").get("active_plan_revision")
+        self.store.save_context_dump("u", {
+            "task_id": self.task_id,
+            "progress": "Coded one interview",
+            "next_action": "Continue coding",
+            "stop_reason": "interrupted",
+        })
+        active = self.store.active_plan("u", "2026-08-03")
+        self.assertEqual("confirmed", active["plan_status"])
+        self.assertEqual(revision, self.store.ensure_profile("u").get("active_plan_revision"))
 
     def test_10_resume_reuses_same_execution_session(self):
         session = self.start()
@@ -174,8 +202,9 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
     def test_21_start_pause_and_feedback_requests_are_idempotent(self):
         session = self.start("start-idem")
         pause_payload = {"execution_session_id": session["execution_session_id"], "actual_minutes": 10, "request_id": "pause-idem"}
-        self.store.pause_execution_session("u", pause_payload)
-        self.store.pause_execution_session("u", pause_payload)
+        first_pause = self.store.pause_execution_session("u", pause_payload)
+        replayed_pause = self.store.pause_execution_session("u", pause_payload)
+        self.assertEqual(first_pause["task_remaining_minutes"], replayed_pause["task_remaining_minutes"])
         feedback = {"task_id": self.task_id, "execution_session_id": session["execution_session_id"], "request_id": "feedback-idem", "task_evaluation": {"completion": "partial", "actual_minutes": 10}, "state_evaluation": {}, "recommendation_evaluation": {}}
         first = self.store.save_execution_feedback("u", feedback)
         second = self.store.save_execution_feedback("u", feedback)

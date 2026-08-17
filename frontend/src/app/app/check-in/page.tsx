@@ -100,7 +100,7 @@ export default function CheckInPage() {
       const endpoint = accepted ? '/api/execution/recommendations/apply' : '/api/execution/recommendations/feedback'
       await apiRequest(endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recommendation_id: decision.id, task_id: taskId, reason: decisionReason, locale, preferred_resume_at: decisionResumeAt || undefined, progress, progress_percent: progressPercent, remaining_duration_minutes: remainingMinutes, next_action: nextAction, open_questions: openQuestions, recommendation: decision.recommendation, accepted, recommended_action: action, selected_action: accepted ? action : 'user_choice' }),
+        body: JSON.stringify({ recommendation_id: decision.id, task_id: taskId, reason: decisionReason, locale, preferred_resume_at: decisionResumeAt || undefined, progress, progress_percent: progressPercent, task_remaining_minutes: remainingMinutes, next_action: nextAction, open_questions: openQuestions, recommendation: decision.recommendation, accepted, recommended_action: action, selected_action: accepted ? action : 'user_choice' }),
       })
       toast(accepted ? (locale === 'zh' ? '建议已执行' : 'Recommendation applied') : (locale === 'zh' ? '选择已记录' : 'Choice recorded'))
       window.location.assign(accepted && action === 'continue_later' ? `/app/plan?adjust=continue-later&task_id=${encodeURIComponent(taskId)}` : '/app/focus')
@@ -138,7 +138,7 @@ export default function CheckInPage() {
           task_id: taskId,
           progress,
           progress_percent: progressPercent,
-          remaining_duration_minutes: remainingMinutes,
+          task_remaining_minutes: remainingMinutes,
           next_action: nextAction,
           open_questions: openQuestions,
           stop_reason: stopReason,
@@ -241,7 +241,7 @@ export default function CheckInPage() {
             </Card>
             <Card className={reentry ? 'border-primary/40 bg-primary/5' : ''}>
               <CardHeader><CardTitle>{t('checkin.reentryTitle')}</CardTitle><CardDescription>{t('checkin.reentryDescription')}</CardDescription></CardHeader>
-              <CardContent>{reentry ? <div className="space-y-4"><div className="rounded-xl bg-background p-4"><p className="text-xs font-semibold uppercase tracking-wider text-primary">{t('checkin.firstStep')}</p><p className="mt-2 text-lg font-medium">{reentry.first_step || nextAction}</p></div>{reentry.progress && <div><p className="text-xs text-muted-foreground">{t('checkin.savedProgress')}</p><p className="mt-1 text-sm">{reentry.progress}</p></div>}<p className="text-sm text-muted-foreground">{t('checkin.remaining')}: {reentry.remaining_duration_minutes ?? remainingMinutes} min</p><Button className="w-full" asChild><Link href="/app/focus"><CornerDownRight className="mr-2 h-4 w-4" />{t('checkin.returnToFocus')}</Link></Button></div> : <p className="text-sm text-muted-foreground">{t('checkin.reentryEmpty')}</p>}</CardContent>
+              <CardContent>{reentry ? <div className="space-y-4"><div className="rounded-xl bg-background p-4"><p className="text-xs font-semibold uppercase tracking-wider text-primary">{t('checkin.firstStep')}</p><p className="mt-2 text-lg font-medium">{reentry.first_step || nextAction}</p></div>{reentry.previous_progress && <div><p className="text-xs text-muted-foreground">{t('checkin.savedProgress')}</p><p className="mt-1 text-sm">{reentry.previous_progress}</p></div>}<p className="text-sm text-muted-foreground">{t('checkin.remaining')}: {reentry.task_remaining_minutes ?? reentry.remaining_duration_minutes ?? remainingMinutes} min</p><Button className="w-full" asChild><Link href="/app/focus"><CornerDownRight className="mr-2 h-4 w-4" />{t('checkin.returnToFocus')}</Link></Button></div> : <p className="text-sm text-muted-foreground">{t('checkin.reentryEmpty')}</p>}</CardContent>
             </Card>
           </div>
         )}
