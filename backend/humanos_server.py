@@ -810,6 +810,12 @@ class Store:
                   id TEXT PRIMARY KEY,
                   user_id TEXT NOT NULL,
                   task_id TEXT NOT NULL,
+                  execution_session_id TEXT,
+                  plan_revision INTEGER,
+                  request_id TEXT,
+                  checkpoint_type TEXT NOT NULL DEFAULT 'human_context',
+                  supersedes_dump_id TEXT,
+                  metadata_json TEXT NOT NULL DEFAULT '{}',
                   progress TEXT NOT NULL,
                   open_questions TEXT NOT NULL,
                   next_action TEXT NOT NULL,
@@ -817,7 +823,6 @@ class Store:
                   materials TEXT NOT NULL,
                   created_at INTEGER NOT NULL
                 );
-
                 CREATE TABLE IF NOT EXISTS memories (
                   id TEXT PRIMARY KEY,
                   user_id TEXT NOT NULL,
@@ -1110,6 +1115,22 @@ class Store:
             for name, definition in execution_migrations.items():
                 if name not in execution_columns:
                     conn.execute(f"ALTER TABLE execution_sessions ADD COLUMN {name} {definition}")
+            context_dump_columns = {row["name"] for row in conn.execute("PRAGMA table_info(context_dumps)").fetchall()}
+            context_dump_migrations = {
+                "execution_session_id": "TEXT",
+                "plan_revision": "INTEGER",
+                "request_id": "TEXT",
+                "checkpoint_type": "TEXT NOT NULL DEFAULT 'human_context'",
+                "supersedes_dump_id": "TEXT",
+                "metadata_json": "TEXT NOT NULL DEFAULT '{}'",
+            }
+            for name, definition in context_dump_migrations.items():
+                if name not in context_dump_columns:
+                    conn.execute(f"ALTER TABLE context_dumps ADD COLUMN {name} {definition}")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_context_dump_request "
+                "ON context_dumps(user_id, request_id) WHERE request_id IS NOT NULL"
+            )
             user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
             user_migrations = {
                 "account_type": "TEXT NOT NULL DEFAULT 'normal'",
@@ -4376,6 +4397,19 @@ class Store:
         return state
 
     def save_context_dump(self, user_id: str, payload: dict) -> dict:
+        request_id = str(payload.get("request_id") or "").strip() or None
+        if request_id:
+            with self.connect() as conn:
+                existing = conn.execute(
+                    "SELECT * FROM context_dumps WHERE user_id=? AND request_id=?",
+                    (user_id, request_id),
+                ).fetchone()
+            if existing:
+                saved = dict(existing)
+                saved["open_questions"] = from_json(saved.get("open_questions"), [])
+                saved["materials"] = from_json(saved.get("materials"), [])
+                saved["metadata"] = from_json(saved.pop("metadata_json", "{}"), {})
+                return saved
         dump_id = new_id("dump")
         task_id = payload["task_id"]
         task = self.get_task(task_id, user_id)
@@ -4387,6 +4421,12 @@ class Store:
             "id": dump_id,
             "user_id": user_id,
             "task_id": task_id,
+            "execution_session_id": str(payload.get("execution_session_id") or "").strip() or None,
+            "plan_revision": payload.get("plan_revision"),
+            "request_id": request_id,
+            "checkpoint_type": str(payload.get("checkpoint_type") or "human_context"),
+            "supersedes_dump_id": str(payload.get("supersedes_dump_id") or "").strip() or None,
+            "metadata": dict(payload.get("metadata") or {}),
             "progress": payload.get("progress", ""),
             "open_questions": open_questions,
             "next_action": payload.get("next_action", ""),
@@ -4419,15 +4459,22 @@ class Store:
             conn.execute(
                 """
                 INSERT INTO context_dumps (
-                  id, user_id, task_id, progress, open_questions,
-                  next_action, stop_reason, materials, created_at
+                  id, user_id, task_id, execution_session_id, plan_revision,
+                  request_id, checkpoint_type, supersedes_dump_id, metadata_json,
+                  progress, open_questions, next_action, stop_reason, materials, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     dump_id,
                     user_id,
                     task_id,
+                    dump["execution_session_id"],
+                    dump["plan_revision"],
+                    dump["request_id"],
+                    dump["checkpoint_type"],
+                    dump["supersedes_dump_id"],
+                    as_json(dump["metadata"]),
                     dump["progress"],
                     as_json(dump["open_questions"]),
                     dump["next_action"],
@@ -4448,6 +4495,17 @@ class Store:
 
     def index_context_dump_memory(self, user_id: str, dump: dict) -> dict:
         task_id = str(dump.get("task_id") or "")
+        source_id = str(dump.get("id") or "")
+        with self.connect() as conn:
+            existing = conn.execute(
+                "SELECT * FROM memories WHERE user_id=? AND source_type='context_dump' AND source_id=? ORDER BY created_at DESC LIMIT 1",
+                (user_id, source_id),
+            ).fetchone()
+        if existing:
+            saved = dict(existing)
+            saved["metadata"] = from_json(saved.pop("metadata_json", "{}"), {})
+            saved.pop("embedding_json", None)
+            return saved
         memory_text = (
             f"Context dump for task {task_id}. Progress: {dump['progress']}. "
             f"Open questions: {', '.join(dump['open_questions'])}. "
@@ -4456,7 +4514,7 @@ class Store:
         return self.add_memory(
             user_id=user_id,
             source_type="context_dump",
-            source_id=str(dump.get("id") or ""),
+            source_id=source_id,
             task_id=task_id,
             text=memory_text,
             metadata={"stop_reason": dump["stop_reason"], "task_id": task_id},
@@ -4771,6 +4829,57 @@ class Store:
         result = self.execution_session_row(updated)
         result["task_remaining_minutes"] = settlement.task_remaining_minutes
         return result
+
+    def interrupt_execution_session(self, user_id: str, payload: dict) -> dict:
+        """Atomically pause one Session and persist its re-entry checkpoint."""
+        from app.application.execution_interruption import build_interruption_command
+        from app.domain.execution import interruption_policy
+
+        command = build_interruption_command(payload)
+        policy = interruption_policy(command.get("interruption_action"))
+        if not str(command.get("request_id") or "").strip():
+            raise ValueError("request_id is required for an atomic interruption")
+        reason = str(command.get("pause_reason") or command.get("reason") or "").strip()
+        progress = str(command.get("progress") or "").strip()
+        next_step = str(command.get("next_step") or command.get("next_action") or "").strip()
+        if policy.requires_context_dump and not reason:
+            raise ValueError("pause_reason is required for this interruption")
+        if policy.requires_context_dump and not next_step:
+            raise ValueError("next_step is required for this interruption")
+
+        context_dump = None
+        with self.atomic():
+            execution_session = self.pause_execution_session(user_id, command)
+            if policy.requires_context_dump:
+                context_dump = self.save_context_dump(user_id, {
+                    "task_id": execution_session["task_id"],
+                    "execution_session_id": execution_session["execution_session_id"],
+                    "plan_revision": execution_session.get("plan_revision"),
+                    "request_id": command.get("request_id"),
+                    "checkpoint_type": "execution_interruption",
+                    "progress": progress,
+                    "progress_percent": command.get("progress_percent"),
+                    "next_action": next_step,
+                    "open_questions": command.get("open_questions") or [],
+                    "stop_reason": reason,
+                    "materials": command.get("materials") or [],
+                    "session_remaining_minutes": execution_session.get("session_remaining_minutes"),
+                    "task_remaining_minutes": command.get("task_remaining_minutes"),
+                    "metadata": {
+                        "interruption_action": policy.action,
+                        "resume_preference": command.get("resume_preference"),
+                        "preferred_resume_at": command.get("preferred_resume_at"),
+                    },
+                    "skip_memory_index": True,
+                })
+
+        if context_dump:
+            self.index_context_dump_memory(user_id, context_dump)
+        return {
+            "execution_session": execution_session,
+            "context_dump": context_dump,
+            "command": command,
+        }
 
     def analyze_execution_impact(self, user_id: str, payload: dict) -> dict:
         """Deterministically identify future Sessions affected by an execution change."""
@@ -7326,6 +7435,31 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 user_id = payload.get("user_id", "demo")
                 self.send_json({"execution_session": store.ensure_execution_session(user_id, payload)}, status=201)
+                return
+
+            if path == "/api/execution-sessions/interrupt" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                from app.application.execution_interruption import interruption_response
+
+                atomic_result = store.interrupt_execution_session(user_id, payload)
+                command = atomic_result["command"]
+                execution_session = atomic_result["execution_session"]
+                pause_review = None if command["interruption_action"] == "short_break" else store.analyze_execution_impact(user_id, {**command, "action": command["interruption_action"]})
+                response = interruption_response(execution_session=execution_session, command=command, impact=pause_review, reschedule_check=(pause_review or {}).get("reschedule_check"))
+                response["context_dump"] = atomic_result.get("context_dump")
+                if command["interruption_action"] == "switch_task":
+                    from app.application.ready_queue import build_ready_queue
+
+                    ready_sessions = store.list_execution_sessions(user_id, ["ready"])
+                    ready_tasks = {str(item.get("task_id")): store.get_task(str(item.get("task_id")), user_id) or {} for item in ready_sessions}
+                    response["ready_queue"] = build_ready_queue(ready_sessions, ready_tasks, exclude_task_id=str(execution_session.get("task_id") or ""), plan_revision=execution_session.get("plan_revision"))
+                if command["interruption_action"] == "continue_later" and execution_session.get("preferred_resume_at"):
+                    try:
+                        response.update(store.propose_continue_later_diff(user_id, execution_session, pause_review or {}, request_id=f"{command.get('request_id')}:local-diff"))
+                    except ValueError as planning_error:
+                        response["planning_warning"] = str(planning_error)
+                self.send_json(response)
                 return
 
             if path == "/api/execution-sessions/pause" and method == "POST":

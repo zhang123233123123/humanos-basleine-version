@@ -1,5 +1,7 @@
 import tempfile
 import unittest
+from unittest.mock import patch
+import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -134,6 +136,102 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
         active = self.store.active_plan("u", "2026-08-03")
         self.assertEqual("confirmed", active["plan_status"])
         self.assertEqual(revision, self.store.ensure_profile("u").get("active_plan_revision"))
+
+    def test_atomic_interrupt_links_one_checkpoint_to_the_session(self):
+        session = self.start()
+        result = self.store.interrupt_execution_session("u", {
+            "execution_session_id": session["execution_session_id"],
+            "request_id": "interrupt-atomic",
+            "interruption_action": "continue_later",
+            "pause_reason": "external_event",
+            "progress": "Coded one interview",
+            "next_step": "Continue with interview two",
+            "actual_minutes": 12,
+            "resume_preference": "unknown",
+        })
+        checkpoint = result["context_dump"]
+        self.assertEqual(session["execution_session_id"], checkpoint["execution_session_id"])
+        self.assertEqual(result["execution_session"]["plan_revision"], checkpoint["plan_revision"])
+        self.assertEqual("execution_interruption", checkpoint["checkpoint_type"])
+        with self.store.connect() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM context_dumps WHERE user_id='u' AND request_id='interrupt-atomic'").fetchone()[0]
+        self.assertEqual(1, count)
+
+    def test_atomic_interrupt_replay_does_not_duplicate_checkpoint_or_memory(self):
+        session = self.start()
+        payload = {
+            "execution_session_id": session["execution_session_id"],
+            "request_id": "interrupt-replay",
+            "interruption_action": "continue_later",
+            "pause_reason": "external_event",
+            "progress": "Coded one interview",
+            "next_step": "Continue with interview two",
+            "actual_minutes": 12,
+            "resume_preference": "unknown",
+        }
+        first = self.store.interrupt_execution_session("u", payload)
+        second = self.store.interrupt_execution_session("u", payload)
+        self.assertEqual(first["context_dump"]["id"], second["context_dump"]["id"])
+        with self.store.connect() as conn:
+            dump_count = conn.execute("SELECT COUNT(*) FROM context_dumps WHERE user_id='u' AND request_id='interrupt-replay'").fetchone()[0]
+            memory_count = conn.execute("SELECT COUNT(*) FROM memories WHERE user_id='u' AND source_type='context_dump' AND source_id=?", (first["context_dump"]["id"],)).fetchone()[0]
+        self.assertEqual((1, 1), (dump_count, memory_count))
+
+    def test_atomic_interrupt_rolls_back_pause_when_checkpoint_fails(self):
+        session = self.start()
+        with patch.object(self.store, "save_context_dump", side_effect=RuntimeError("checkpoint failed")):
+            with self.assertRaisesRegex(RuntimeError, "checkpoint failed"):
+                self.store.interrupt_execution_session("u", {
+                    "execution_session_id": session["execution_session_id"],
+                    "request_id": "interrupt-rollback",
+                    "interruption_action": "continue_later",
+                    "pause_reason": "external_event",
+                    "progress": "Coded one interview",
+                    "next_step": "Continue with interview two",
+                    "actual_minutes": 12,
+                })
+        restored = next(item for item in self.store.list_execution_sessions("u") if item["execution_session_id"] == session["execution_session_id"])
+        self.assertEqual("running", restored["status"])
+        self.assertEqual("running", self.store.get_task(self.task_id, "u")["status"])
+        with self.store.connect() as conn:
+            request_count = conn.execute("SELECT COUNT(*) FROM execution_requests WHERE user_id='u' AND request_id='interrupt-rollback'").fetchone()[0]
+        self.assertEqual(0, request_count)
+
+    def test_atomic_short_break_does_not_create_context_dump(self):
+        session = self.start()
+        result = self.store.interrupt_execution_session("u", {
+            "execution_session_id": session["execution_session_id"],
+            "request_id": "interrupt-break",
+            "interruption_action": "short_break",
+            "actual_minutes": 5,
+        })
+        self.assertIsNone(result["context_dump"])
+
+    def test_atomic_interrupt_requires_idempotency_key(self):
+        session = self.start()
+        with self.assertRaisesRegex(ValueError, "request_id is required"):
+            self.store.interrupt_execution_session("u", {
+                "execution_session_id": session["execution_session_id"],
+                "interruption_action": "short_break",
+                "actual_minutes": 5,
+            })
+        self.assertEqual("running", self.store.current_execution("u")["session"]["status"])
+
+    def test_context_dump_migration_upgrades_legacy_database(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            database = Path(directory) / "legacy.db"
+            with sqlite3.connect(database) as connection:
+                connection.execute("""CREATE TABLE context_dumps (
+                    id TEXT PRIMARY KEY,user_id TEXT NOT NULL,task_id TEXT NOT NULL,
+                    progress TEXT NOT NULL,open_questions TEXT NOT NULL,next_action TEXT NOT NULL,
+                    stop_reason TEXT NOT NULL,materials TEXT NOT NULL,created_at INTEGER NOT NULL
+                )""")
+            migrated = Store(database)
+            with migrated.connect() as connection:
+                columns = {row["name"] for row in connection.execute("PRAGMA table_info(context_dumps)").fetchall()}
+                indexes = {row["name"] for row in connection.execute("PRAGMA index_list(context_dumps)").fetchall()}
+            self.assertTrue({"execution_session_id", "plan_revision", "request_id", "checkpoint_type", "metadata_json"}.issubset(columns))
+            self.assertIn("idx_context_dump_request", indexes)
 
     def test_10_resume_reuses_same_execution_session(self):
         session = self.start()
