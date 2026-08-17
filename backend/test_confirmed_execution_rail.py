@@ -195,7 +195,8 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
         self.assertEqual("running", self.store.get_task(self.task_id, "u")["status"])
         with self.store.connect() as conn:
             request_count = conn.execute("SELECT COUNT(*) FROM execution_requests WHERE user_id='u' AND request_id='interrupt-rollback'").fetchone()[0]
-        self.assertEqual(0, request_count)
+            evidence_count = conn.execute("SELECT COUNT(*) FROM evidence_items WHERE user_id='u' AND claim_key='execution_behavior.pause'").fetchone()[0]
+        self.assertEqual((0, 0), (request_count, evidence_count))
 
     def test_atomic_short_break_does_not_create_context_dump(self):
         session = self.start()

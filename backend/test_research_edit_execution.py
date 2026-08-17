@@ -78,13 +78,58 @@ class ResearchEditExecutionTests(unittest.TestCase):
     def test_20_start_is_explicit(self):
         self.confirm([self.initial]); current = self.store.current_execution("u"); started = self.store.start_execution_session("u", {"execution_session_id": current["session"]["execution_session_id"], "request_id": "start-1"}); self.assertEqual("running", started["status"])
     def test_21_start_request_is_idempotent(self):
-        self.confirm([self.initial]); current = self.store.current_execution("u"); payload = {"execution_session_id": current["session"]["execution_session_id"], "request_id": "start-same"}; self.store.start_execution_session("u", payload); self.assertEqual("running", self.store.start_execution_session("u", payload)["status"])
+        self.confirm([self.initial]); current = self.store.current_execution("u"); payload = {"execution_session_id": current["session"]["execution_session_id"], "request_id": "start-same"}; self.store.start_execution_session("u", payload); self.assertEqual("running", self.store.start_execution_session("u", payload)["status"]); self.assertEqual(1, len([item for item in self.store.list_personalization_evidence("u") if item["claim_key"] == "execution_behavior.start"]))
     def test_22_pause_preserves_session_remaining(self):
         self.confirm([self.initial]); current = self.store.current_execution("u"); run = self.store.start_execution_session("u", {"execution_session_id": current["session"]["execution_session_id"]}); paused = self.store.pause_execution_session("u", {"execution_session_id": run["execution_session_id"], "actual_minutes": 15}); self.assertEqual(("paused", 45), (paused["status"], paused["session_remaining_minutes"]))
     def test_23_end_does_not_auto_complete_task(self):
         self.confirm([self.initial]); current = self.store.current_execution("u"); run = self.store.start_execution_session("u", {"execution_session_id": current["session"]["execution_session_id"]}); self.store.end_execution_session("u", {"execution_session_id": run["execution_session_id"], "actual_minutes": 60}); self.assertNotEqual("completed", self.store.get_task(self.task["id"], "u")["status"])
     def test_24_feedback_can_complete_task(self):
         self.confirm([self.initial]); current = self.store.current_execution("u"); run = self.store.start_execution_session("u", {"execution_session_id": current["session"]["execution_session_id"]}); self.store.end_execution_session("u", {"execution_session_id": run["execution_session_id"], "actual_minutes": 60}); self.store.save_execution_feedback("u", {"task_id": self.task["id"], "execution_session_id": run["execution_session_id"], "task_evaluation": {"completion": "completed", "actual_minutes": 60, "remaining_duration_minutes": 0}, "state_evaluation": {}, "recommendation_evaluation": {}}); self.assertEqual("completed", self.store.get_task(self.task["id"], "u")["status"])
+
+    def test_execution_lifecycle_projects_scoped_observed_evidence(self):
+        self.confirm([self.initial])
+        current = self.store.current_execution("u")
+        started = self.store.start_execution_session("u", {"execution_session_id": current["session"]["execution_session_id"], "request_id": "evidence-start"})
+        paused = self.store.pause_execution_session("u", {"execution_session_id": started["execution_session_id"], "actual_minutes": 15, "request_id": "evidence-pause"})
+        resumed = self.store.start_execution_session("u", {"execution_session_id": paused["execution_session_id"], "request_id": "evidence-resume"})
+        self.store.end_execution_session("u", {"execution_session_id": resumed["execution_session_id"], "actual_minutes": 30, "request_id": "evidence-end"})
+        evidence = [item for item in self.store.list_personalization_evidence("u") if item["source_type"] == "system_observation"]
+        self.assertEqual(
+            ["execution_behavior.start", "execution_behavior.pause", "execution_behavior.resume", "execution_behavior.end"],
+            [item["claim_key"] for item in evidence],
+        )
+        self.assertTrue(all(item["scope"]["task_id"] == self.task["id"] for item in evidence))
+        end = evidence[-1]
+        self.assertEqual(30, end["structured_value"]["outcome"]["actual_minutes"])
+        self.assertTrue(all(item["profile_write_allowed"] is False for item in evidence))
+
+    def test_feedback_projects_explicit_outcome_without_learning_profile(self):
+        self.confirm([self.initial])
+        current = self.store.current_execution("u")
+        started = self.store.start_execution_session("u", {"execution_session_id": current["session"]["execution_session_id"]})
+        self.store.end_execution_session("u", {"execution_session_id": started["execution_session_id"], "actual_minutes": 50})
+        before_patterns = list(self.store.get_profile("u")["learned_patterns"])
+        self.store.save_execution_feedback("u", {
+            "task_id": self.task["id"], "execution_session_id": started["execution_session_id"],
+            "request_id": "feedback-evidence", "task_evaluation": {
+                "completion": "completed", "actual_minutes": 50, "remaining_duration_minutes": 0,
+            }, "state_evaluation": {"energy": 4}, "recommendation_evaluation": {"helpful": True},
+        })
+        explicit = next(item for item in self.store.list_personalization_evidence("u") if item["claim_key"] == "execution_feedback.outcome")
+        self.assertTrue(explicit["user_explicit"])
+        self.assertEqual(50, explicit["structured_value"]["task_evaluation"]["actual_minutes"])
+        self.assertEqual(before_patterns, self.store.get_profile("u")["learned_patterns"])
+
+    def test_client_reported_transition_cannot_poison_pattern_evidence(self):
+        transition = self.store.record_state_transition("u", {
+            "task_id": self.task["id"],
+            "before_state": {"execution_status": "ready"},
+            "action": {"type": "start"},
+            "actual_state": {"execution_status": "running"},
+        })
+        evidence = next(item for item in self.store.list_personalization_evidence("u") if item["source_id"] == transition["id"])
+        self.assertFalse(evidence["eligible_for_pattern"])
+        self.assertFalse(evidence["structured_value"]["trusted_execution_transition"])
 
     def test_successful_drag_projects_scoped_behavior_evidence(self):
         self.store.record_plan_edit_event("u", {

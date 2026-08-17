@@ -4713,7 +4713,7 @@ class Store:
             and len(group_task_ids) == 2
         )
 
-    def _insert_state_transition(self, conn: sqlite3.Connection, *, user_id: str, task_id: str | None, before_status: str, action_type: str, after_status: str, execution_session_id: str | None = None, action_detail: dict | None = None, outcome: dict | None = None, created_at: int | None = None) -> dict:
+    def _insert_state_transition(self, conn: sqlite3.Connection, *, user_id: str, task_id: str | None, before_status: str, action_type: str, after_status: str, execution_session_id: str | None = None, action_detail: dict | None = None, outcome: dict | None = None, created_at: int | None = None, trusted_execution_transition: bool = True) -> dict:
         transition = {
             "id": new_id("transition"),
             "user_id": user_id,
@@ -4728,6 +4728,22 @@ class Store:
         conn.execute(
             "INSERT INTO state_transitions (id,user_id,task_id,before_state_json,action_json,predicted_state_json,actual_state_json,outcome_json,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
             (transition["id"], user_id, task_id, as_json(transition["before_state"]), as_json(transition["action"]), as_json(transition["predicted_state"]), as_json(transition["actual_state"]), as_json(transition["outcome"]), transition["created_at"]),
+        )
+        task_row = conn.execute("SELECT * FROM tasks WHERE id=? AND user_id=?", (task_id, user_id)).fetchone() if task_id else None
+        from app.application.execution_evidence import project_execution_transition
+
+        behavior, evidence = project_execution_transition(
+            event_id=new_id("behavior"), evidence_id=new_id("evidence"), transition=transition,
+            task=self.task_row(task_row) if task_row else None,
+            trusted_execution_transition=trusted_execution_transition,
+        )
+        conn.execute(
+            "INSERT INTO behavior_events (id,user_id,source_type,source_id,event_json,effective,created_at) VALUES (?,?,?,?,?,?,?)",
+            (behavior.event_id, user_id, behavior.source_type, behavior.source_id, behavior.model_dump_json(), 1, transition["created_at"]),
+        )
+        conn.execute(
+            "INSERT INTO evidence_items (id,user_id,source_type,source_id,claim_key,evidence_json,eligible_for_pattern,created_at) VALUES (?,?,?,?,?,?,?,?)",
+            (evidence.evidence_id, user_id, evidence.source_type, evidence.source_id, evidence.claim_key, evidence.model_dump_json(), 1 if evidence.eligible_for_pattern else 0, transition["created_at"]),
         )
         return transition
 
@@ -5126,6 +5142,15 @@ class Store:
                     "UPDATE profiles SET active_plan_revision=NULL,updated_at=? WHERE user_id=?",
                     (feedback["created_at"], user_id),
                 )
+            from app.application.execution_evidence import project_execution_feedback
+
+            feedback_evidence = project_execution_feedback(
+                evidence_id=new_id("evidence"), feedback=feedback, task=task,
+            )
+            conn.execute(
+                "INSERT INTO evidence_items (id,user_id,source_type,source_id,claim_key,evidence_json,eligible_for_pattern,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                (feedback_evidence.evidence_id, user_id, feedback_evidence.source_type, feedback_evidence.source_id, feedback_evidence.claim_key, feedback_evidence.model_dump_json(), 1 if feedback_evidence.eligible_for_pattern else 0, feedback["created_at"]),
+            )
         self.add_memory(
             user_id=user_id,
             source_type="episodic_memory",
@@ -5178,6 +5203,7 @@ class Store:
                 execution_session_id=execution_session_id,
                 action_detail={key: value for key, value in action.items() if key not in {"type", "execution_session_id"}},
                 outcome=payload.get("outcome") or {},
+                trusted_execution_transition=False,
             )
         self.log_event(user_id, "state_transition_recorded", transition)
         return transition
