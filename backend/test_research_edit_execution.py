@@ -61,6 +61,7 @@ class ResearchEditExecutionTests(unittest.TestCase):
         payload = {"edit_episode_id": self.plan["edit_episode_id"], "event_type": "move_session", "validation_result": {"valid": True}, "request_id": "same-event"}
         self.store.record_plan_edit_event("u", payload)
         self.assertTrue(self.store.record_plan_edit_event("u", payload)["replayed"])
+        self.assertEqual(1, len(self.store.list_personalization_evidence("u")))
     def test_12_move_is_not_misclassified_as_resize(self):
         diff = self.store.canonical_plan_diff([self.initial], [self.moved()])
         self.assertEqual((1, 0), (len(diff["moved"]), len(diff["resized"])))
@@ -84,6 +85,62 @@ class ResearchEditExecutionTests(unittest.TestCase):
         self.confirm([self.initial]); current = self.store.current_execution("u"); run = self.store.start_execution_session("u", {"execution_session_id": current["session"]["execution_session_id"]}); self.store.end_execution_session("u", {"execution_session_id": run["execution_session_id"], "actual_minutes": 60}); self.assertNotEqual("completed", self.store.get_task(self.task["id"], "u")["status"])
     def test_24_feedback_can_complete_task(self):
         self.confirm([self.initial]); current = self.store.current_execution("u"); run = self.store.start_execution_session("u", {"execution_session_id": current["session"]["execution_session_id"]}); self.store.end_execution_session("u", {"execution_session_id": run["execution_session_id"], "actual_minutes": 60}); self.store.save_execution_feedback("u", {"task_id": self.task["id"], "execution_session_id": run["execution_session_id"], "task_evaluation": {"completion": "completed", "actual_minutes": 60, "remaining_duration_minutes": 0}, "state_evaluation": {}, "recommendation_evaluation": {}}); self.assertEqual("completed", self.store.get_task(self.task["id"], "u")["status"])
+
+    def test_successful_drag_projects_scoped_behavior_evidence(self):
+        self.store.record_plan_edit_event("u", {
+            "edit_episode_id": self.plan["edit_episode_id"], "task_id": self.task["id"],
+            "block_id": "block-1", "event_type": "move_session", "before": self.initial,
+            "after": self.moved(), "interaction_source": "calendar_drag",
+            "validation_result": {"valid": True}, "request_id": "scoped-drag",
+        })
+        evidence = self.store.list_personalization_evidence("u")[0]
+        behavior = self.store.list_behavior_events("u")[0]
+        self.assertEqual("schedule_behavior.move_session", evidence["claim_key"])
+        self.assertEqual("move_session", behavior["event_type"])
+        self.assertEqual(evidence["source_id"], behavior["source_id"])
+        self.assertEqual(self.task["id"], evidence["scope"]["task_id"])
+        self.assertEqual("flexible_task", evidence["scope"]["task_schedule_type"])
+        self.assertTrue(evidence["eligible_for_pattern"])
+        self.assertFalse(evidence["profile_write_allowed"])
+
+    def test_failed_or_undone_edit_is_not_pattern_evidence(self):
+        failed = self.store.record_plan_edit_event("u", {
+            "edit_episode_id": self.plan["edit_episode_id"], "task_id": self.task["id"],
+            "event_type": "edit_attempt_failed", "validation_result": {"valid": False},
+            "request_id": "failed-projection",
+        })
+        moved = self.store.record_plan_edit_event("u", {
+            "edit_episode_id": self.plan["edit_episode_id"], "task_id": self.task["id"],
+            "event_type": "move_session", "before": self.initial, "after": self.moved(),
+            "request_id": "move-before-undo",
+        })
+        self.store.record_plan_edit_event("u", {
+            "edit_episode_id": self.plan["edit_episode_id"], "event_type": "undo_edit",
+            "reverts_event_id": moved["event_id"], "request_id": "undo-projection",
+        })
+        evidence = {item["source_id"]: item for item in self.store.list_personalization_evidence("u")}
+        behavior = {item["source_id"]: item for item in self.store.list_behavior_events("u")}
+        self.assertFalse(evidence[failed["event_id"]]["eligible_for_pattern"])
+        self.assertFalse(evidence[moved["event_id"]]["eligible_for_pattern"])
+        self.assertFalse(behavior[moved["event_id"]]["effective"])
+
+    def test_answered_rationale_becomes_explicit_evidence_without_updating_profile(self):
+        before_patterns = list(self.store.get_profile("u")["learned_patterns"])
+        payload = {
+            "plan_id": self.plan["plan_id"], "plan_revision": self.plan["plan_revision"],
+            "week_id": "2026-08-03", "plan_patch": [self.moved()], "unscheduled_tasks": [],
+            "ai_task_analysis": {}, "decision": self.plan,
+            "rationale": {
+                "reason_codes": ["better_timing"], "raw_user_response": "I focus better later today",
+                "generalizability": "only_this_week", "response_status": "answered",
+                "affected_task_ids": [self.task["id"]], "request_id": "rationale-evidence",
+            },
+        }
+        self.store.confirm_plan("u", payload)
+        rationale = next(item for item in self.store.list_personalization_evidence("u") if item["claim_key"] == "schedule_edit.rationale")
+        self.assertTrue(rationale["user_explicit"])
+        self.assertEqual("self_report", rationale["source_type"])
+        self.assertEqual(before_patterns, self.store.get_profile("u")["learned_patterns"])
 
 
 if __name__ == "__main__":

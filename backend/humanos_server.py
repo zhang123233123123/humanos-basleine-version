@@ -805,6 +805,31 @@ class Store:
                   created_at INTEGER NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS behavior_events (
+                  id TEXT PRIMARY KEY,
+                  user_id TEXT NOT NULL,
+                  source_type TEXT NOT NULL,
+                  source_id TEXT NOT NULL,
+                  event_json TEXT NOT NULL,
+                  effective INTEGER NOT NULL DEFAULT 1,
+                  created_at INTEGER NOT NULL,
+                  UNIQUE(user_id, source_type, source_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS evidence_items (
+                  id TEXT PRIMARY KEY,
+                  user_id TEXT NOT NULL,
+                  source_type TEXT NOT NULL,
+                  source_id TEXT NOT NULL,
+                  claim_key TEXT NOT NULL,
+                  evidence_json TEXT NOT NULL,
+                  eligible_for_pattern INTEGER NOT NULL DEFAULT 0,
+                  created_at INTEGER NOT NULL,
+                  UNIQUE(user_id, source_type, source_id, claim_key)
+                );
+                CREATE INDEX IF NOT EXISTS idx_evidence_items_user_eligible
+                ON evidence_items(user_id, eligible_for_pattern, created_at);
+
                 CREATE TABLE IF NOT EXISTS chat_turns (
                   id TEXT PRIMARY KEY,
                   user_id TEXT NOT NULL,
@@ -1424,6 +1449,8 @@ class Store:
             "context_dumps",
             "memories",
             "events",
+            "behavior_events",
+            "evidence_items",
             "chat_turns",
             "execution_feedback",
             "state_transitions",
@@ -3451,8 +3478,51 @@ class Store:
             )
             if event_type == "undo_edit" and payload.get("reverts_event_id"):
                 conn.execute("UPDATE plan_edit_events SET effective=0 WHERE id=? AND edit_episode_id=?", (payload.get("reverts_event_id"), episode_id))
+                conn.execute("UPDATE behavior_events SET effective=0 WHERE user_id=? AND source_type='plan_edit' AND source_id=?", (user_id, payload.get("reverts_event_id")))
+                conn.execute("UPDATE evidence_items SET eligible_for_pattern=0 WHERE user_id=? AND source_type='plan_edit' AND source_id=?", (user_id, payload.get("reverts_event_id")))
+            task_row = conn.execute("SELECT * FROM tasks WHERE id=? AND user_id=?", (payload.get("task_id"), user_id)).fetchone() if payload.get("task_id") else None
+            from app.application.plan_edit_evidence import project_plan_edit
+
+            behavior, evidence = project_plan_edit(
+                event_id=new_id("behavior"), evidence_id=new_id("evidence"), user_id=user_id,
+                source_event_id=event_id, occurred_at=timestamp, event_type=event_type,
+                before=dict(payload.get("before") or {}), after=dict(payload.get("after") or {}),
+                actor=str(payload.get("actor") or "user"), interaction_source=str(payload.get("interaction_source") or "calendar"),
+                effective=effective, edit_episode_id=episode_id, block_id=str(payload.get("block_id") or "") or None,
+                validation_result=validation_result, task=self.task_row(task_row) if task_row else None,
+            )
+            conn.execute(
+                "INSERT INTO behavior_events (id,user_id,source_type,source_id,event_json,effective,created_at) VALUES (?,?,?,?,?,?,?)",
+                (behavior.event_id, user_id, behavior.source_type, behavior.source_id, behavior.model_dump_json(), 1 if effective else 0, timestamp),
+            )
+            conn.execute(
+                "INSERT INTO evidence_items (id,user_id,source_type,source_id,claim_key,evidence_json,eligible_for_pattern,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                (evidence.evidence_id, user_id, evidence.source_type, evidence.source_id, evidence.claim_key, evidence.model_dump_json(), 1 if evidence.eligible_for_pattern else 0, timestamp),
+            )
             conn.execute("UPDATE plan_edit_episodes SET status='open',updated_at=? WHERE id=? AND user_id=?", (timestamp, episode_id, user_id))
         return {"event_id": event_id, "replayed": False, "sequence_number": sequence, "effective": effective}
+
+    def list_personalization_evidence(self, user_id: str) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT evidence_json,eligible_for_pattern FROM evidence_items WHERE user_id=? ORDER BY created_at,id",
+                (user_id,),
+            ).fetchall()
+        return [
+            {**from_json(row["evidence_json"], {}), "eligible_for_pattern": bool(row["eligible_for_pattern"])}
+            for row in rows
+        ]
+
+    def list_behavior_events(self, user_id: str) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT event_json,effective FROM behavior_events WHERE user_id=? ORDER BY created_at,id",
+                (user_id,),
+            ).fetchall()
+        return [
+            {**from_json(row["event_json"], {}), "effective": bool(row["effective"])}
+            for row in rows
+        ]
 
     def save_proposed_plan(self, user_id: str, decision: dict, payload: dict) -> dict:
         profile = self.ensure_profile(user_id)
@@ -3832,9 +3902,23 @@ class Store:
                         raw_response = str(rationale_payload.get("raw_user_response") or "")
                         reason_codes = list(rationale_payload.get("reason_codes") or [])
                         parsed_reason = dict(rationale_payload.get("parsed_reason") or {"reason_codes": reason_codes, "raw_text": raw_response})
+                        rationale_id = new_id("rationale")
                         conn.execute(
                             "INSERT INTO plan_change_rationales (id,edit_episode_id,user_id,plan_id,plan_revision,final_plan_hash,reason_codes_json,raw_user_response,parsed_reason_json,generalizability,affected_task_ids_json,response_status,source_json,request_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                            (new_id("rationale"), episode_id, user_id, plan_id, revision, final_hash, as_json(reason_codes), raw_response, as_json(parsed_reason), rationale_payload.get("generalizability") or "not_sure", as_json(rationale_payload.get("affected_task_ids") or []), rationale_payload.get("response_status") or "answered", as_json({"observed": "system_observed", "reported": "user_self_report", "parsed": "ai_inference" if raw_response else None}), rationale_request_id, timestamp),
+                            (rationale_id, episode_id, user_id, plan_id, revision, final_hash, as_json(reason_codes), raw_response, as_json(parsed_reason), rationale_payload.get("generalizability") or "not_sure", as_json(rationale_payload.get("affected_task_ids") or []), rationale_payload.get("response_status") or "answered", as_json({"observed": "system_observed", "reported": "user_self_report", "parsed": "ai_inference" if raw_response else None}), rationale_request_id, timestamp),
+                        )
+                        affected_ids = [str(item) for item in (rationale_payload.get("affected_task_ids") or []) if str(item)]
+                        rationale_task_row = conn.execute("SELECT * FROM tasks WHERE id=? AND user_id=?", (affected_ids[0], user_id)).fetchone() if len(affected_ids) == 1 else None
+                        from app.application.plan_edit_evidence import project_plan_rationale
+
+                        rationale_evidence = project_plan_rationale(
+                            evidence_id=new_id("evidence"), user_id=user_id, rationale_id=rationale_id,
+                            observed_at=timestamp, rationale=rationale_payload, canonical_diff=canonical_diff,
+                            task=self.task_row(rationale_task_row) if rationale_task_row else None,
+                        )
+                        conn.execute(
+                            "INSERT INTO evidence_items (id,user_id,source_type,source_id,claim_key,evidence_json,eligible_for_pattern,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                            (rationale_evidence.evidence_id, user_id, rationale_evidence.source_type, rationale_evidence.source_id, rationale_evidence.claim_key, rationale_evidence.model_dump_json(), 1 if rationale_evidence.eligible_for_pattern else 0, timestamp),
                         )
                 conn.execute(
                     "UPDATE plan_edit_episodes SET final_plan_json=?,final_plan_hash=?,canonical_diff_json=?,status='confirmed',confirmed_at=?,updated_at=? WHERE id=? AND user_id=?",
