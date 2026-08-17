@@ -6069,7 +6069,10 @@ class Store:
         task_map = {str(task.get("id")): task for task in tasks}
         context = build_scheduling_context(profile)
         rest_minutes = int(context.get("rest_minutes") or 15)
-        validation_windows = context.get("full_available_windows") or context.get("movable_routine_windows") or context["windows"]
+        # AI candidates may occupy a recurring routine's preferred slot only
+        # when the routine can be moved inside its approved shift window. The
+        # later routine-adjustment pass chooses and validates that movement.
+        validation_windows = context.get("movable_routine_windows") or context.get("full_available_windows") or context["windows"]
         now = profile_now(profile)
         today_index = now.weekday()
         next_quarter = math.ceil((now.hour + now.minute / 60) * 4) / 4

@@ -201,7 +201,7 @@ class PromptAndTemporalContractTests(unittest.TestCase):
             demands,
         )
         self.assertFalse(allowed)
-        self.assertIn("only permits", reason)
+        self.assertIn("compete for", reason)
 
     def test_only_confirmed_same_parallel_group_may_overlap(self) -> None:
         first = {"task_id": "laundry", "start": 18.0, "end": 19.0, "parallel_group_id": "g1", "parallel_user_confirmed": True, "parallel_task_ids": ["laundry", "podcast"], "allowed_overlap_minutes": 30}
@@ -284,7 +284,7 @@ class PromptAndTemporalContractTests(unittest.TestCase):
             candidates = store.validate_llm_schedule_candidates(
                 {"profile": profile, "tasks": [task], "ai_task_analysis": {"task_demands": [{"task_id": "paper", "level": "high"}]}},
                 {"plan_patch": []},
-                {"candidate_plans": [{"id": "ai", "label": "AI", "blocks": [{"task_id": "paper", "day_index": 0, "start": 9.0, "end": 10.0, "reason": "高负荷窗口"}]}]},
+                {"candidate_plans": [{"id": "ai", "label": "AI", "blocks": [{"task_id": "paper", "day_index": 0, "start": 9.0, "end": 10.0, "reason": "高负荷窗口", "capacity_fit": "acceptable", "capacity_evidence": ["高专注窗口匹配高负荷任务"]}]}]},
             )
         self.assertTrue(candidates[0]["validation"]["valid"])
         block = candidates[0]["plan_patch"][0]
@@ -327,16 +327,16 @@ class PromptAndTemporalContractTests(unittest.TestCase):
         ]
         analysis = {"task_demands": [{"task_id": "analysis", "level": "high"}, {"task_id": "admin", "level": "low"}]}
         high_focus_wrong = {"candidate_plans": [{"id": "wrong", "blocks": [
-            {"task_id": "admin", "day_index": 0, "start": 8.0, "end": 8.5},
-            {"task_id": "analysis", "day_index": 0, "start": 9.0, "end": 9.75},
+            {"task_id": "admin", "day_index": 0, "start": 8.0, "end": 8.5, "capacity_fit": "acceptable", "capacity_evidence": ["runtime focus is high"]},
+            {"task_id": "analysis", "day_index": 0, "start": 9.0, "end": 9.75, "capacity_fit": "acceptable", "capacity_evidence": ["deep-work window"]},
         ]}]}
         high_focus_right = {"candidate_plans": [{"id": "right", "blocks": [
-            {"task_id": "analysis", "day_index": 0, "start": 8.0, "end": 8.75},
-            {"task_id": "admin", "day_index": 0, "start": 9.0, "end": 9.5},
+            {"task_id": "analysis", "day_index": 0, "start": 8.0, "end": 8.75, "capacity_fit": "acceptable", "capacity_evidence": ["runtime focus and energy are high"]},
+            {"task_id": "admin", "day_index": 0, "start": 9.0, "end": 9.5, "capacity_fit": "acceptable", "capacity_evidence": ["low-demand follow-up"]},
         ]}]}
         low_focus_wrong = {"candidate_plans": [{"id": "low-wrong", "blocks": [
-            {"task_id": "analysis", "day_index": 0, "start": 8.0, "end": 8.75},
-            {"task_id": "admin", "day_index": 0, "start": 9.0, "end": 9.5},
+            {"task_id": "analysis", "day_index": 0, "start": 8.0, "end": 8.75, "capacity_fit": "acceptable", "capacity_evidence": ["runtime state supplied"]},
+            {"task_id": "admin", "day_index": 0, "start": 9.0, "end": 9.5, "capacity_fit": "acceptable", "capacity_evidence": ["runtime state supplied"]},
         ]}]}
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             store = Store(Path(temp_dir) / "state-causality.db")
@@ -367,7 +367,7 @@ class PromptAndTemporalContractTests(unittest.TestCase):
                 {"profile": profile, "tasks": [task], "ai_task_analysis": {"task_demands": []}},
                 {"plan_patch": []},
                 {"candidate_plans": [{"id": "ai", "label": "AI", "blocks": [
-                    {"task_id": "experiment", "day_index": 0, "start": 8.0, "end": 11.5},
+                    {"task_id": "experiment", "day_index": 0, "start": 8.0, "end": 11.5, "capacity_fit": "acceptable", "capacity_evidence": ["within the available window"]},
                 ]}]},
             )
         self.assertTrue(candidates[0]["validation"]["valid"])
@@ -401,7 +401,7 @@ class PromptAndTemporalContractTests(unittest.TestCase):
             candidates = store.validate_llm_schedule_candidates(
                 {"profile": profile, "tasks": [task], "ai_task_analysis": {"task_demands": []}},
                 {"plan_patch": []},
-                {"candidate_plans": [{"id": "ai", "blocks": [{"task_id": "urgent", "day_index": 0, "start": 12.0, "end": 12.5}]}]},
+                {"candidate_plans": [{"id": "ai", "blocks": [{"task_id": "urgent", "day_index": 0, "start": 12.0, "end": 12.5, "capacity_fit": "acceptable", "capacity_evidence": ["urgent deadline requires a bounded routine adjustment"]}]}]},
             )
         self.assertTrue(candidates[0]["validation"]["valid"])
         self.assertEqual(1, len(candidates[0]["routine_adjustments"]))

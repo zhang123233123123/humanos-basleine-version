@@ -29,18 +29,23 @@ def iso(moment: datetime) -> str:
 
 
 def simulate_week(db_path: Path) -> dict:
-    user_id = "accelerated-week-user"
-    week_start = datetime(2026, 8, 3, 0, 0)
-    next_week = "2026-08-10"
+    now = datetime.now(TZ)
+    week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+    week_id = week_start.date().isoformat()
+    next_week = (week_start + timedelta(days=7)).date().isoformat()
     store = Store(db_path)
+    user_id = store.create_user("accelerated-week@example.test", "accelerated-week-password")["user"]["id"]
+    with store.connect() as connection:
+        connection.execute("UPDATE users SET account_type='test' WHERE id=?", (user_id,))
+    store.update_user_clock(user_id, {"set_time": iso(week_start + timedelta(hours=8))})
     store.upsert_profile({
         "user_id": user_id,
         "timezone": "Asia/Shanghai",
         "role": "student",
         "deep_work_window": "09:00-11:30",
-        "active_week_id": "2026-08-03",
+        "active_week_id": week_id,
         "weekly_context": {
-            "week_id": "2026-08-03",
+            "week_id": week_id,
             "weekly_available_windows": "周一至周日 08:00-18:00",
             "context_items": [{
                 "id": "lunch",
@@ -92,12 +97,12 @@ def simulate_week(db_path: Path) -> dict:
     proposal = store.save_proposed_plan(
         user_id,
         {"plan_patch": blocks, "explanation": "Accelerated seven-day QA plan"},
-        {"week_id": "2026-08-03", "request_id": "accelerated-week-proposal"},
+        {"week_id": week_id, "request_id": "accelerated-week-proposal"},
     )
     confirmed = store.confirm_plan(user_id, {
         "plan_id": proposal["plan_id"],
         "plan_revision": proposal["plan_revision"],
-        "week_id": "2026-08-03",
+        "week_id": week_id,
         "plan_patch": blocks,
         "unscheduled_tasks": [],
         "ai_task_analysis": {},
@@ -118,6 +123,7 @@ def simulate_week(db_path: Path) -> dict:
     for day_index, (task, (outcome, actual_minutes)) in enumerate(zip(tasks, outcomes)):
         day = week_start + timedelta(days=day_index)
         local_date = day.strftime("%Y-%m-%d")
+        store.update_user_clock(user_id, {"set_time": iso(day + timedelta(hours=8))})
         store.save_runtime_state(user_id, {
             "focus": max(3, 7 - day_index // 2),
             "energy": max(3, 6 - day_index // 3),
@@ -256,11 +262,11 @@ def simulate_week(db_path: Path) -> dict:
     assert daily_results[3]["task_status"] == "queued"
     assert daily_results[1]["interruption"]["resumed_same_session"]
     assert len(carried) == 2
-    assert store.active_plan(user_id, "2026-08-03") is None
+    assert store.active_plan(user_id, week_id) is None
 
     return {
         "simulation": "7 days accelerated in one process",
-        "week_id": "2026-08-03",
+        "week_id": week_id,
         "confirmed_plan_id": confirmed["plan_id"],
         "daily_results": daily_results,
         "totals": {
@@ -275,7 +281,7 @@ def simulate_week(db_path: Path) -> dict:
         "rollover": {
             "new_week_id": next_week,
             "carried_task_titles": [task["title"] for task in carried],
-            "old_plan_superseded": store.active_plan(user_id, "2026-08-03") is None,
+            "old_plan_superseded": store.active_plan(user_id, week_id) is None,
             "routine_reused": len(rollover_profile["weekly_context"]["context_items"]) == 1,
             "daily_checkin_reset": rollover_profile.get("last_daily_checkin_date") is None,
         },

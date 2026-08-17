@@ -13,6 +13,20 @@ METADATA_ONLY_TITLE = re.compile(
 )
 
 
+def explicit_duration_minutes(text: str) -> set[int]:
+    """Return numeric durations explicitly grounded in a source span."""
+    durations: set[int] = set()
+    pattern = re.compile(
+        r"(\d+(?:\.\d+)?)\s*(minutes?|mins?|hours?|hrs?|分钟|小时)",
+        re.I,
+    )
+    for amount_text, unit in pattern.findall(text):
+        amount = float(amount_text)
+        minutes = amount * 60 if unit.lower() in {"hour", "hours", "hr", "hrs"} or unit == "小时" else amount
+        durations.add(round(minutes))
+    return durations
+
+
 def validate_task_candidates(tasks: list[dict] | None, expected_count: int, source_text: str = "") -> list[str]:
     if not tasks:
         return ["No tasks were returned."]
@@ -35,6 +49,13 @@ def validate_task_candidates(tasks: list[dict] | None, expected_count: int, sour
             errors.append(f"Task {index + 1} has no source_spans grounding its fields in the user input.")
         elif source_text and any(span not in source_text for span in spans):
             errors.append(f"Task {index + 1} contains a source_span that is not an exact quote from the user input.")
+        grounded_durations = explicit_duration_minutes(" ".join(spans))
+        reported_duration = task.get("duration_minutes")
+        if grounded_durations and reported_duration is not None and int(reported_duration) not in grounded_durations:
+            errors.append(
+                f"Task {index + 1} duration {reported_duration} is not grounded by its source_spans; "
+                f"expected one of {sorted(grounded_durations)}."
+            )
         modalities = task.get("resource_modality") or []
         if not modalities:
             errors.append(f"Task {index + 1} has no AI resource_modality classification.")

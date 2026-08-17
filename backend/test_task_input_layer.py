@@ -119,11 +119,16 @@ class TaskInputLayerTests(unittest.TestCase):
         text = """1. Analyze interview transcripts, 150 minutes, high priority, due Wednesday at 18:00.
 2. Revise the literature review, 120 minutes, high priority, due Thursday at 17:00.
 3. Prepare a supervisor update, 45 minutes, high priority, due Thursday at 18:00."""
+        lines = text.splitlines()
         bad_model_result = [
-            {"title": title, "duration_minutes": 150, "schedule_type": "flexible_task"}
-            for title in ("Analyze interview transcripts", "Revise the literature review", "Prepare a supervisor update")
+            {"title": title, "duration_minutes": 150, "schedule_type": "flexible_task", "source_spans": [line], "resource_modality": ["visual"]}
+            for title, line in zip(("Analyze interview transcripts", "Revise the literature review", "Prepare a supervisor update"), lines)
         ]
-        with patch("backend.humanos_server.parse_tasks_with_agent", return_value=bad_model_result):
+        corrected_model_result = [
+            {**item, "duration_minutes": duration}
+            for item, duration in zip(bad_model_result, (150, 120, 45))
+        ]
+        with patch("backend.humanos_server.parse_tasks_with_agent", side_effect=[bad_model_result, corrected_model_result]):
             tasks = self.store.parse_tasks_from_text("user-a", text, create_tasks=False)
         self.assertEqual([150, 120, 45], [task["duration"] for task in tasks])
 
