@@ -9,6 +9,15 @@ from .validator import validate_enriched_task
 from .boundary_validator import validate_task_candidates
 from .change_policy import exact_task_reference_indexes, has_unique_task_identity, is_explicit_change_request, matching_context_item
 from .schedule_projection import TaskScheduleProjection, project_confirmed_task_schedule
+from .resource_profile import (
+    ATTENTION_MODES,
+    RESOURCE_TAGS,
+    normalize_attention_mode,
+    normalize_resource_tags,
+    parallel_compatibility,
+    require_valid_attention_mode,
+    require_valid_resource_tags,
+)
 
 __all__ = [
     "ParsedTask",
@@ -35,4 +44,11 @@ __all__ = [
     "matching_context_item",
     "TaskScheduleProjection",
     "project_confirmed_task_schedule",
+    "ATTENTION_MODES",
+    "RESOURCE_TAGS",
+    "normalize_attention_mode",
+    "normalize_resource_tags",
+    "parallel_compatibility",
+    "require_valid_attention_mode",
+    "require_valid_resource_tags",
 ]

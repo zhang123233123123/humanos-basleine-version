@@ -16,6 +16,9 @@ SCHEDULING_FIELDS = frozenset({
     "cognitive_load",
     "task_demand",
     "dependency",
+    "resource_modality",
+    "attention_mode",
+    "parallelizable",
 })
 
 CONTEXT_WINDOW_FIELDS = frozenset({

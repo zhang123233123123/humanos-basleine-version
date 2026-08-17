@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
+import { TaskResourceFields, type TaskAttentionMode, type TaskResourceTag } from '@/components/task-resource-fields'
 
 interface TaskData {
   id?: string
@@ -23,6 +24,9 @@ interface TaskData {
   progress?: string
   nextStep?: string
   openQuestions?: string
+  resourceModality?: TaskResourceTag[]
+  attentionMode?: TaskAttentionMode
+  parallelizable?: boolean
 }
 
 interface TaskDialogProps {
@@ -40,7 +44,7 @@ export function TaskDialog({
   onDelete,
   initialData,
 }: TaskDialogProps) {
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const [loading, setLoading] = useState(false)
 
   const [title, setTitle] = useState(initialData?.title || '')
@@ -52,8 +56,26 @@ export function TaskDialog({
   const [progress, setProgress] = useState(initialData?.progress || '')
   const [nextStep, setNextStep] = useState(initialData?.nextStep || '')
   const [openQuestions, setOpenQuestions] = useState(initialData?.openQuestions || '')
+  const [resourceModality, setResourceModality] = useState<TaskResourceTag[]>(initialData?.resourceModality || [])
+  const [attentionMode, setAttentionMode] = useState<TaskAttentionMode>(initialData?.attentionMode || 'continuous')
 
   const isEdit = !!initialData?.id
+  const initialResourceKey = (initialData?.resourceModality || []).join('|')
+
+  useEffect(() => {
+    if (!open) return
+    setTitle(initialData?.title || '')
+    setDue(initialData?.due || '')
+    setDuration(initialData?.duration?.toString() || '90')
+    setPriority(initialData?.priority || '中')
+    setStatus(initialData?.status || 'queued')
+    setContext(initialData?.context || '')
+    setProgress(initialData?.progress || '')
+    setNextStep(initialData?.nextStep || '')
+    setOpenQuestions(initialData?.openQuestions || '')
+    setResourceModality(initialResourceKey ? initialResourceKey.split('|') as TaskResourceTag[] : [])
+    setAttentionMode(initialData?.attentionMode || 'continuous')
+  }, [open, initialData?.id, initialData?.title, initialData?.due, initialData?.duration, initialData?.priority, initialData?.status, initialData?.context, initialData?.progress, initialData?.nextStep, initialData?.openQuestions, initialResourceKey, initialData?.attentionMode])
 
   const handleSave = async () => {
     if (!title.trim()) {
@@ -73,6 +95,9 @@ export function TaskDialog({
         progress,
         nextStep,
         openQuestions,
+        resourceModality,
+        attentionMode,
+        parallelizable: attentionMode !== 'continuous',
       })
       onOpenChange(false)
     } catch {
@@ -177,6 +202,9 @@ export function TaskDialog({
               </select>
             </div>
           </div>
+
+          {/* Context */}
+          <TaskResourceFields locale={locale} resourceTags={resourceModality} attentionMode={attentionMode} onResourceTagsChange={setResourceModality} onAttentionModeChange={setAttentionMode} />
 
           {/* Context */}
           <div>

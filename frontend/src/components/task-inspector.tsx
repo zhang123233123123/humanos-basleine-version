@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { DateTimePicker } from '@/components/ui/date-time-picker'
 import { ArrowLeft, Check, Play, Save, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
+import { TaskResourceFields, type TaskAttentionMode, type TaskResourceTag } from '@/components/task-resource-fields'
 
 interface TaskDetail {
   id: string
@@ -28,6 +29,9 @@ interface TaskDetail {
   expectedDifficulty?: number | null
   dependency?: string
   createRequestId?: string
+  resourceModality?: TaskResourceTag[]
+  attentionMode?: TaskAttentionMode
+  parallelizable?: boolean
 }
 
 interface TaskInspectorProps {
@@ -41,7 +45,7 @@ interface TaskInspectorProps {
 }
 
 function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDelete, onBack }: TaskInspectorProps) {
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const [confirming, setConfirming] = useState(false)
   const [saving, setSaving] = useState(false)
   const [openingFocus, setOpeningFocus] = useState(false)
@@ -59,6 +63,8 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
   const [due, setDue] = useState('')
   const [expectedDifficulty, setExpectedDifficulty] = useState<number | undefined>()
   const [dependency, setDependency] = useState('')
+  const [resourceModality, setResourceModality] = useState<TaskResourceTag[]>([])
+  const [attentionMode, setAttentionMode] = useState<TaskAttentionMode>('continuous')
 
   const sourceId = task?.id
   const sourceTitle = task?.title || ''
@@ -72,6 +78,8 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
   const sourceDue = task?.due || task?.deadlineAt || ''
   const sourceExpectedDifficulty = task?.expectedDifficulty ?? undefined
   const sourceDependency = task?.dependency || ''
+  const sourceResourceModality = task?.resourceModality
+  const sourceAttentionMode = task?.attentionMode || 'continuous'
 
   // Sync local state when task changes
   useEffect(() => {
@@ -87,7 +95,9 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
     setDue(sourceDue)
     setExpectedDifficulty(sourceExpectedDifficulty)
     setDependency(sourceDependency)
-  }, [sourceId, sourceTitle, sourcePriority, sourceStatus, sourceContext, sourceProgress, sourceNextStep, sourceOpenQuestions, sourceDuration, sourceDue, sourceExpectedDifficulty, sourceDependency])
+    setResourceModality(sourceResourceModality || [])
+    setAttentionMode(sourceAttentionMode)
+  }, [sourceId, sourceTitle, sourcePriority, sourceStatus, sourceContext, sourceProgress, sourceNextStep, sourceOpenQuestions, sourceDuration, sourceDue, sourceExpectedDifficulty, sourceDependency, sourceResourceModality, sourceAttentionMode])
 
   // Build current editable task object
   const buildTask = useCallback((): TaskDetail => {
@@ -105,8 +115,11 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
       due,
       expectedDifficulty,
       dependency,
+      resourceModality,
+      attentionMode,
+      parallelizable: attentionMode !== 'continuous',
     }
-  }, [task, title, priority, status, context, progress, nextStep, openQuestions, duration, due, expectedDifficulty, dependency])
+  }, [task, title, priority, status, context, progress, nextStep, openQuestions, duration, due, expectedDifficulty, dependency, resourceModality, attentionMode])
 
   if (!task) {
     return (
@@ -194,6 +207,8 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
           </div>}
 
           {task.isPreview && task.missingFields && task.missingFields.length > 0 && <div className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900">{t('workspace.missingTaskFacts')}: {task.missingFields.join(', ')}</div>}
+
+          {(isExistingTask || task.isPreview) && <TaskResourceFields locale={locale} resourceTags={resourceModality} attentionMode={attentionMode} onResourceTagsChange={setResourceModality} onAttentionModeChange={setAttentionMode} />}
 
           {/* Priority selector */}
           <div>

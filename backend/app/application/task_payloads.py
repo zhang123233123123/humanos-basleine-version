@@ -51,7 +51,7 @@ def normalize_parser_items(
             "source_spans": item.get("source_spans") or [],
             "confidence": item.get("confidence") or 0.0,
             "resource_modality": item.get("resource_modality") or [],
-            "resource_loads": item.get("resource_loads") or {},
+            "attention_mode": item.get("attention_mode") or "continuous",
             "parallelizable": bool(item.get("parallelizable")),
             "parser": parser_name,
         })

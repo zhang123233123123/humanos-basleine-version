@@ -15,8 +15,8 @@ class ParsedTask(BaseModel):
     deadline_at: str | None = None
     priority: Literal["高", "中", "低"] | None = None
     domain_type: Literal["general", "writing", "research", "meeting", "admin", "recovery"] = "general"
-    resource_modality: list[Literal["visual", "auditory", "verbal", "manual", "mobility"]] = Field(default_factory=list)
-    resource_loads: dict[Literal["visual", "auditory", "verbal", "manual", "mobility", "cognitive"], Literal["none", "low", "medium", "high"]] = Field(default_factory=dict)
+    resource_modality: list[Literal["visual", "auditory", "verbal", "motor"]] = Field(default_factory=list)
+    attention_mode: Literal["continuous", "intermittent", "passive"] = "continuous"
     parallelizable: bool = False
     context: str = ""
     missing_fields: list[str] = Field(default_factory=list)

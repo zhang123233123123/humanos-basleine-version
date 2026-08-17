@@ -28,6 +28,7 @@ def prepare_task_creation(
     reentry_cost: str,
     execution: dict[str, Any] | None,
     resource_modality: list[str] | None,
+    attention_mode: str | None,
     parallelizable: bool,
     expected_difficulty: str | None,
     week_id: str,
@@ -83,6 +84,8 @@ def prepare_task_creation(
         "history_sessions": [],
     }
     execution_state.setdefault("history_sessions", [])
+    from .resource_profile import normalize_attention_mode, normalize_resource_tags
+
     return TaskAggregate(
         task_id=task_id,
         user_id=user_id,
@@ -101,7 +104,8 @@ def prepare_task_creation(
         ambiguity=ambiguity,
         switch_cost=switch_cost,
         reentry_cost=reentry_cost,
-        resource_modality=resource_modality or [],
+        resource_modality=normalize_resource_tags(resource_modality),
+        attention_mode=normalize_attention_mode(attention_mode),
         parallelizable=parallelizable,
         expected_difficulty=expected_difficulty,
         week_id=week_id,

@@ -242,8 +242,8 @@ class PromptAndTemporalContractTests(unittest.TestCase):
                 "weekly_context": {"weekly_available_windows": "周一至周五 08:00-21:00", "keep_buffer": False},
             })
             for task in (
-                {"id": "laundry", "title": "洗衣", "due": "周五 18:00", "duration": 60, "priority": "低", "parallelizable": True, "resource_modality": ["manual"]},
-                {"id": "podcast", "title": "英语播客", "due": "周五 18:00", "duration": 30, "priority": "低", "parallelizable": True, "resource_modality": ["auditory"]},
+                {"id": "laundry", "title": "洗衣", "due": "周五 18:00", "duration": 60, "priority": "低", "parallelizable": True, "resource_modality": ["manual"], "attention_mode": "intermittent"},
+                {"id": "podcast", "title": "英语播客", "due": "周五 18:00", "duration": 30, "priority": "低", "parallelizable": True, "resource_modality": ["auditory", "verbal"], "attention_mode": "continuous"},
             ):
                 store.create_task("u", task)
             shared = {"day_index": 2, "start": 18.0, "parallel_group_id": "g", "parallel_user_confirmed": True, "parallel_task_ids": ["laundry", "podcast"], "allowed_overlap_minutes": 30}
@@ -255,8 +255,8 @@ class PromptAndTemporalContractTests(unittest.TestCase):
                 "ai_task_analysis": {
                     "task_demands": [{"task_id": "laundry", "level": "low"}, {"task_id": "podcast", "level": "medium"}],
                     "task_resource_profiles": [
-                        {"task_id": "laundry", "resource_modality": ["manual"], "parallelizable": True},
-                        {"task_id": "podcast", "resource_modality": ["auditory"], "parallelizable": True},
+                        {"task_id": "laundry", "resource_modality": ["motor"], "attention_mode": "intermittent", "parallelizable": True},
+                        {"task_id": "podcast", "resource_modality": ["auditory", "verbal"], "attention_mode": "continuous", "parallelizable": True},
                     ],
                 },
             }

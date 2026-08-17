@@ -140,6 +140,9 @@ function TaskInspectorWrapper() {
     progress?: string
     nextStep?: string
     openQuestions?: string
+    resourceModality?: Array<'visual' | 'auditory' | 'verbal' | 'motor'>
+    attentionMode?: 'continuous' | 'intermittent' | 'passive'
+    parallelizable?: boolean
     duration?: number
     deadlineAt?: string
     due?: string
@@ -160,6 +163,9 @@ function TaskInspectorWrapper() {
         progress: task.progress || '',
         next_step: task.nextStep || '',
         open_questions: task.openQuestions || '',
+        resource_modality: task.resourceModality || [],
+        attention_mode: task.attentionMode || 'continuous',
+        parallelizable: Boolean(task.parallelizable),
       }),
     })
     if (previewId) {
@@ -194,6 +200,9 @@ function TaskInspectorWrapper() {
     progress?: string
     nextStep?: string
     openQuestions?: string
+    resourceModality?: Array<'visual' | 'auditory' | 'verbal' | 'motor'>
+    attentionMode?: 'continuous' | 'intermittent' | 'passive'
+    parallelizable?: boolean
     uniqueId: string
     duration?: number
     deadlineAt?: string
@@ -272,6 +281,9 @@ function TaskInspectorWrapper() {
               progress: task.progress || '',
               next_step: task.nextStep || '',
               open_questions: task.openQuestions || '',
+              resource_modality: task.resourceModality || [],
+              attention_mode: task.attentionMode || 'continuous',
+              parallelizable: Boolean(task.parallelizable),
               context_window: task.previewAdjusted
                 ? {
                     last_schedule_change: {
@@ -328,6 +340,9 @@ function TaskInspectorWrapper() {
     progress?: string
     nextStep?: string
     openQuestions?: string
+    resourceModality?: Array<'visual' | 'auditory' | 'verbal' | 'motor'>
+    attentionMode?: 'continuous' | 'intermittent' | 'passive'
+    parallelizable?: boolean
   }) => {
     const taskId = String(activeEvent?.taskId || activeEvent?.id || '').trim()
     if (!taskId) return
@@ -343,6 +358,9 @@ function TaskInspectorWrapper() {
           title: task.title,
           priority: task.priority,
           context: task.context || task.description || '',
+          resource_modality: task.resourceModality || [],
+          attention_mode: task.attentionMode || 'continuous',
+          parallelizable: Boolean(task.parallelizable),
           contextWindow: {
             progress: task.progress || '',
             nextStep: task.nextStep || '',
@@ -415,6 +433,9 @@ function TaskInspectorWrapper() {
           expectedDifficulty: activeEvent.expectedDifficulty,
           dependency: activeEvent.dependency,
           createRequestId: activeEvent.createRequestId,
+          resourceModality: activeEvent.resourceModality,
+          attentionMode: activeEvent.attentionMode,
+          parallelizable: activeEvent.parallelizable,
           isPreview: activeEvent.isPreview,
           start: activeEvent.start,
           end: activeEvent.end,
@@ -809,6 +830,9 @@ function AppContent({
             openQuestions: task.open_questions || '',
             missingFields: task.missing_fields || [],
             expectedDifficulty: task.expected_difficulty ?? null,
+            resourceModality: task.resource_modality || [],
+            attentionMode: task.attention_mode || 'continuous',
+            parallelizable: Boolean(task.parallelizable),
             dependency: task.dependency || '',
             createRequestId: task.create_request_id || `task-import-${task.id || `${Date.now()}-${index}`}`,
           }

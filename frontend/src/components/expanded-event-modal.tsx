@@ -170,6 +170,9 @@ export function ExpandedEventModal() {
           priority: activeEvent.priority,
           status: activeEvent.status,
           context: activeEvent.description,
+          resourceModality: activeEvent.resourceModality || [],
+          attentionMode: activeEvent.attentionMode || 'continuous',
+          parallelizable: Boolean(activeEvent.parallelizable),
         }}
         onSave={async (taskData) => {
           await fetch('/api/tasks', {
@@ -186,6 +189,9 @@ export function ExpandedEventModal() {
               progress: taskData.progress,
               next_step: taskData.nextStep,
               open_questions: taskData.openQuestions,
+              resource_modality: taskData.resourceModality,
+              attention_mode: taskData.attentionMode,
+              parallelizable: taskData.parallelizable,
             }),
           })
           toast(t('event.eventUpdated'))

@@ -43,6 +43,7 @@ class TaskAggregate(BaseModel):
     switch_cost: str
     reentry_cost: str
     resource_modality: list[str] = Field(default_factory=list)
+    attention_mode: Literal["continuous", "intermittent", "passive"] = "continuous"
     parallelizable: bool = False
     expected_difficulty: int | str | None = None
     week_id: str

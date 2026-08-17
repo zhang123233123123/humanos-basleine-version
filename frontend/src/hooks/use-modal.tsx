@@ -35,6 +35,9 @@ type ActiveEvent = {
   planRevision?: number
   missingFields?: string[]
   expectedDifficulty?: number | null
+  resourceModality?: Array<'visual' | 'auditory' | 'verbal' | 'motor'>
+  attentionMode?: 'continuous' | 'intermittent' | 'passive'
+  parallelizable?: boolean
   dependency?: string
   createRequestId?: string
 }

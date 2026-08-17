@@ -70,6 +70,17 @@ function normalizePayloadForBackend(body: any): Record<string, unknown> {
   return normalized
 }
 
+function taskResourceValidationError(body: any): string | null {
+  const allowedTags = new Set(['visual', 'auditory', 'verbal', 'motor'])
+  if (body.resource_modality !== undefined && (!Array.isArray(body.resource_modality) || body.resource_modality.some((tag: unknown) => !allowedTags.has(String(tag))))) {
+    return 'resource_modality must contain only visual, auditory, verbal, or motor'
+  }
+  if (body.attention_mode !== undefined && !['continuous', 'intermittent', 'passive'].includes(String(body.attention_mode))) {
+    return 'attention_mode must be continuous, intermittent, or passive'
+  }
+  return null
+}
+
 function withUserQuery(url: string, userEmail: string | undefined): string {
   const target = new URL(url, `http://localhost`)
   if (userEmail) target.searchParams.set('user_id', userEmail)
@@ -93,6 +104,8 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => ({}))
+    const validationError = taskResourceValidationError(body)
+    if (validationError) return Response.json({ error: validationError }, { status: 400 })
     const normalized = normalizePayloadForBackend({
       ...body,
       user_id: userId,
@@ -110,6 +123,8 @@ export async function PUT(req: Request) {
 
   try {
     const body = await req.json().catch(() => ({}))
+    const validationError = taskResourceValidationError(body)
+    if (validationError) return Response.json({ error: validationError }, { status: 400 })
     const taskId = String(body?.id || body?.task_id || '').trim()
     if (!taskId) {
       return Response.json({ error: 'Task id is required' }, { status: 400 })

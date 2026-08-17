@@ -61,6 +61,9 @@ export interface HumanOSTask {
   is_preview?: boolean
   missing_fields?: string[]
   expected_difficulty?: number | null
+  resource_modality?: Array<'visual' | 'auditory' | 'verbal' | 'motor'>
+  attention_mode?: 'continuous' | 'intermittent' | 'passive'
+  parallelizable?: boolean
   dependency?: string | null
   create_request_id?: string | null
   created_at?: number | string | null

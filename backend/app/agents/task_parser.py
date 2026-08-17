@@ -29,7 +29,11 @@ Rules:
 - Every task must include source_spans containing exact, non-overlapping quotes
   from the user input that ground its title, duration and time fields.
 - Classify domain_type and resource usage in the same task object. Only use
-  visual/auditory/verbal/manual/mobility resource modalities.
+  visual/auditory/verbal/motor resource modalities. These are channel tags,
+  not energy or workload scores.
+- Set attention_mode to continuous, intermittent, or passive. Use passive only
+  for genuine background waiting and intermittent only when attention is
+  required in separate short phases.
 - Set parallelizable=true only when the task can safely be proposed for
   concurrent execution; this is eligibility, not permission to overlap.
 - Never copy a duration, deadline, resource profile, or other field from a
