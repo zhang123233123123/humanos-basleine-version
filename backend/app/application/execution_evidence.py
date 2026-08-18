@@ -91,9 +91,42 @@ def project_execution_feedback(
             "state_evaluation": state_evaluation,
             "recommendation_evaluation": recommendation_evaluation,
             "execution_session_id": str(feedback.get("execution_session_id") or "") or None,
+            "profile_trait_refs": list(feedback.get("profile_trait_refs") or []),
         },
         scope=build_task_evidence_scope(task),
         user_explicit=has_report,
         confidence_level="high" if has_report else "low",
         eligible_for_pattern=has_report,
     )
+
+
+def project_profile_trait_outcomes(
+    *, evidence_id_factory: Any, feedback: dict[str, Any], task: dict[str, Any],
+) -> list[EvidenceItem]:
+    """Link an explicit execution result to traits used by that Session.
+
+    These records are audit/effect evidence only.  They are intentionally not
+    eligible for automatic pattern aggregation, preventing a recommendation
+    from manufacturing evidence in support of itself.
+    """
+    task_evaluation = dict(feedback.get("task_evaluation") or {})
+    state_evaluation = dict(feedback.get("state_evaluation") or {})
+    recommendation_evaluation = dict(feedback.get("recommendation_evaluation") or {})
+    explicit = bool(task_evaluation or state_evaluation or recommendation_evaluation)
+    result = []
+    for trait_id in dict.fromkeys(str(item) for item in feedback.get("profile_trait_refs") or [] if str(item)):
+        result.append(EvidenceItem(
+            evidence_id=evidence_id_factory(), user_id=str(feedback["user_id"]),
+            source_type="execution_feedback", source_id=f"{feedback['id']}:{trait_id}",
+            origin="explicit_user", observed_at=int(feedback["created_at"]),
+            claim_key="profile_trait.execution_outcome",
+            structured_value={
+                "profile_trait_id": trait_id,
+                "execution_session_id": str(feedback.get("execution_session_id") or "") or None,
+                "task_evaluation": task_evaluation, "state_evaluation": state_evaluation,
+                "recommendation_evaluation": recommendation_evaluation,
+            },
+            scope=build_task_evidence_scope(task), user_explicit=explicit,
+            confidence_level="high" if explicit else "low", eligible_for_pattern=False,
+        ))
+    return result

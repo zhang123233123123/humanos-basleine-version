@@ -913,6 +913,7 @@ class Store:
                   execution_session_id TEXT,
                   request_id TEXT,
                   research_context_revision INTEGER NOT NULL DEFAULT 0,
+                  profile_trait_refs_json TEXT NOT NULL DEFAULT '[]',
                   created_at INTEGER NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS state_transitions (
@@ -1035,6 +1036,7 @@ class Store:
                   pause_reason TEXT,
                   interruption_action TEXT,
                   interruption_snapshot_json TEXT NOT NULL DEFAULT '{}',
+                  profile_trait_refs_json TEXT NOT NULL DEFAULT '[]',
                   resume_preference TEXT,
                   preferred_resume_at TEXT,
                   remaining_at_pause INTEGER,
@@ -1114,6 +1116,7 @@ class Store:
                 "last_daily_checkin_date": "TEXT",
                 "research_context_json": "TEXT NOT NULL DEFAULT '{}'",
                 "research_context_revision": "INTEGER NOT NULL DEFAULT 0",
+                "profile_trait_refs_json": "TEXT NOT NULL DEFAULT '[]'",
             }
             for name, definition in profile_migrations.items():
                 if name not in profile_columns:
@@ -1152,6 +1155,7 @@ class Store:
                 "preferred_resume_at": "TEXT",
                 "remaining_at_pause": "INTEGER",
                 "resumed_from_session_id": "TEXT",
+                "profile_trait_refs_json": "TEXT NOT NULL DEFAULT '[]'",
             }
             for name, definition in execution_migrations.items():
                 if name not in execution_columns:
@@ -3950,9 +3954,19 @@ class Store:
                 week_id = str(row["week_id"])
             activation = revision_activation(week_id=week_id, revision=revision, plan_id=plan_id)
             decorated = self._decorate_plan_blocks(plan_patch, week_id, revision, timezone_name)
+            confirmed_trait_ids = {
+                str(item["id"])
+                for item in conn.execute(
+                    "SELECT id FROM profile_traits WHERE user_id=? AND status='confirmed'", (user_id,),
+                ).fetchall()
+            }
             blocks_by_task: dict[str, list[dict]] = {}
             for block in decorated:
                 block["plan_status"] = "confirmed"
+                block["applied_profile_trait_ids"] = sorted({
+                    str(item) for item in block.get("applied_profile_trait_ids") or []
+                    if str(item) in confirmed_trait_ids
+                })
                 block_task_id = str(block.get("task_id") or "").strip()
                 if str(block.get("kind") or "") == "fixed_event" or not block_task_id:
                     continue
@@ -3978,6 +3992,7 @@ class Store:
                     accumulated_active_minutes=inherited_active_minutes,
                     remaining_at_pause=inherited_remaining,
                     interruption_snapshot_json=paused_source["interruption_snapshot_json"] if paused_source else "{}",
+                    profile_trait_refs_json=as_json(block.get("applied_profile_trait_ids") or []),
                     timestamp=timestamp,
                 )
                 if paused_source:
@@ -4766,6 +4781,7 @@ class Store:
 
     def execution_session_row(self, row: sqlite3.Row) -> dict:
         data = dict(row)
+        data["profile_trait_refs"] = from_json(data.pop("profile_trait_refs_json", "[]"), [])
         planned = int(data.get("planned_work_minutes") or 0)
         active = int(data.get("accumulated_active_minutes") or 0)
         if data.get("status") == "running":
@@ -4811,6 +4827,12 @@ class Store:
             if plan.get("plan_status") == "confirmed" and plan.get("plan_patch"):
                 timestamp = now_ms()
                 with self.connect() as conn:
+                    confirmed_trait_ids = {
+                        str(item["id"])
+                        for item in conn.execute(
+                            "SELECT id FROM profile_traits WHERE user_id=? AND status='confirmed'", (user_id,),
+                        ).fetchall()
+                    }
                     for index, block in enumerate(plan.get("plan_patch") or []):
                         if not block.get("task_id"):
                             continue
@@ -4818,8 +4840,8 @@ class Store:
                         block_id = str(block.get("block_id") or f"{block.get('task_id')}-r{plan.get('plan_revision')}-{index + 1}")
                         planned_minutes = int(block.get("planned_work_minutes") or block.get("session_minutes") or round((float(block.get("end", 0)) - float(block.get("start", 0))) * 60))
                         conn.execute(
-                            "INSERT INTO execution_sessions (id,user_id,task_id,block_id,week_id,plan_revision,planned_start_at,planned_end_at,planned_work_minutes,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,block_id,plan_revision) DO NOTHING",
-                            (execution_id, user_id, str(block.get("task_id")), block_id, str(plan.get("week_id") or ""), int(plan.get("plan_revision") or 0), str(block.get("start_at") or ""), str(block.get("end_at") or ""), planned_minutes, "ready", timestamp, timestamp),
+                            "INSERT INTO execution_sessions (id,user_id,task_id,block_id,week_id,plan_revision,planned_start_at,planned_end_at,planned_work_minutes,profile_trait_refs_json,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,block_id,plan_revision) DO NOTHING",
+                            (execution_id, user_id, str(block.get("task_id")), block_id, str(plan.get("week_id") or ""), int(plan.get("plan_revision") or 0), str(block.get("start_at") or ""), str(block.get("end_at") or ""), planned_minutes, as_json(sorted({str(item) for item in block.get("applied_profile_trait_ids") or [] if str(item) in confirmed_trait_ids})), "ready", timestamp, timestamp),
                         )
                 sessions = self.list_execution_sessions(user_id, ["running", "paused", "ended", "ready"])
         running = [item for item in sessions if item["status"] == "running"]
@@ -5198,6 +5220,18 @@ class Store:
         if not task:
             raise KeyError(task_id)
         feedback_profile = self.ensure_profile(user_id)
+        session_trait_refs: list[str] = []
+        if payload.get("execution_session_id"):
+            with self.connect() as conn:
+                source_session = conn.execute(
+                    "SELECT task_id,profile_trait_refs_json FROM execution_sessions WHERE id=? AND user_id=?",
+                    (payload.get("execution_session_id"), user_id),
+                ).fetchone()
+            if not source_session:
+                raise KeyError(payload.get("execution_session_id"))
+            if str(source_session["task_id"]) != str(task_id):
+                raise ValueError("execution session does not belong to the feedback task")
+            session_trait_refs = [str(item) for item in from_json(source_session["profile_trait_refs_json"], []) if str(item)]
         request_id = str(payload.get("request_id") or "").strip() or None
         if request_id:
             with self.connect() as conn:
@@ -5217,6 +5251,7 @@ class Store:
                     "execution_session_id": existing["execution_session_id"],
                     "request_id": existing["request_id"],
                     "research_context_revision": existing["research_context_revision"],
+                    "profile_trait_refs": from_json(existing["profile_trait_refs_json"], []),
                     "created_at": existing["created_at"],
                 }
         feedback = {
@@ -5234,6 +5269,7 @@ class Store:
             "execution_session_id": payload.get("execution_session_id"),
             "request_id": request_id,
             "research_context_revision": int(feedback_profile.get("research_context_revision") or 0),
+            "profile_trait_refs": session_trait_refs,
             "created_at": now_ms(),
         }
         task_eval = feedback["task_evaluation"]
@@ -5251,8 +5287,8 @@ class Store:
                 INSERT INTO execution_feedback (
                   id, user_id, task_id, trigger, task_evaluation_json,
                   state_evaluation_json, recommendation_evaluation_json,
-                  execution_session_id, request_id, research_context_revision, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  execution_session_id, request_id, research_context_revision, profile_trait_refs_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     feedback["id"], user_id, task_id, feedback["trigger"],
@@ -5262,6 +5298,7 @@ class Store:
                     feedback["execution_session_id"],
                     feedback["request_id"],
                     feedback["research_context_revision"],
+                    as_json(feedback["profile_trait_refs"]),
                     feedback["created_at"],
                 ),
             )

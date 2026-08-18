@@ -33,15 +33,16 @@ class ExecutionSessionRepository:
         accumulated_active_minutes: int = 0,
         remaining_at_pause: int | None = None,
         interruption_snapshot_json: str = "{}",
+        profile_trait_refs_json: str = "[]",
         timestamp: int,
     ) -> None:
         self.connection.execute(
-            "INSERT INTO execution_sessions (id,user_id,task_id,block_id,week_id,plan_revision,planned_start_at,planned_end_at,planned_work_minutes,resumed_from_session_id,accumulated_active_minutes,remaining_at_pause,interruption_snapshot_json,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,block_id,plan_revision) DO UPDATE SET planned_start_at=excluded.planned_start_at,planned_end_at=excluded.planned_end_at,planned_work_minutes=excluded.planned_work_minutes,resumed_from_session_id=excluded.resumed_from_session_id,accumulated_active_minutes=excluded.accumulated_active_minutes,remaining_at_pause=excluded.remaining_at_pause,interruption_snapshot_json=excluded.interruption_snapshot_json,updated_at=excluded.updated_at",
+            "INSERT INTO execution_sessions (id,user_id,task_id,block_id,week_id,plan_revision,planned_start_at,planned_end_at,planned_work_minutes,resumed_from_session_id,accumulated_active_minutes,remaining_at_pause,interruption_snapshot_json,profile_trait_refs_json,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,block_id,plan_revision) DO UPDATE SET planned_start_at=excluded.planned_start_at,planned_end_at=excluded.planned_end_at,planned_work_minutes=excluded.planned_work_minutes,resumed_from_session_id=excluded.resumed_from_session_id,accumulated_active_minutes=excluded.accumulated_active_minutes,remaining_at_pause=excluded.remaining_at_pause,interruption_snapshot_json=excluded.interruption_snapshot_json,profile_trait_refs_json=excluded.profile_trait_refs_json,updated_at=excluded.updated_at",
             (
                 execution_id, user_id, task_id, block_id, week_id, revision,
                 planned_start_at, planned_end_at, planned_work_minutes,
                 resumed_from_session_id, accumulated_active_minutes,
-                remaining_at_pause, interruption_snapshot_json or "{}",
+                remaining_at_pause, interruption_snapshot_json or "{}", profile_trait_refs_json or "[]",
                 "ready", timestamp, timestamp,
             ),
         )

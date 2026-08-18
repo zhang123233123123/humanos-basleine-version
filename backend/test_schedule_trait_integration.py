@@ -112,6 +112,60 @@ class ScheduleTraitIntegrationTests(unittest.TestCase):
         self.assertEqual([], decision["personalization"]["available_trait_ids"])
         self.assertEqual([], decision["profile_snapshot"]["applied_profile_trait_ids"])
 
+    def test_confirmed_plan_session_and_feedback_preserve_trait_attribution(self):
+        self.insert_trait()
+        decision = self.decide(
+            request_id="effect-plan",
+            runtime_state={"source": "default", "focus": 4, "energy": 4, "stress": 4},
+        )
+        block = self.task_block(decision)
+        self.assertEqual(["trait-afternoon-energy"], block["applied_profile_trait_ids"])
+        with self.store.connect() as conn:
+            before_trait = conn.execute(
+                "SELECT trait_json FROM profile_traits WHERE id='trait-afternoon-energy'"
+            ).fetchone()["trait_json"]
+
+        self.store.confirm_plan("u", {
+            "plan_id": decision["plan_id"], "week_id": "2026-08-03",
+            "edit_episode_id": decision["edit_episode_id"], "plan_patch": decision["plan_patch"],
+            "unscheduled_tasks": decision.get("unscheduled_tasks") or [],
+            "ai_task_analysis": decision.get("ai_task_analysis") or {}, "decision": decision,
+        })
+        session = self.store.list_execution_sessions("u")[0]
+        self.assertEqual(["trait-afternoon-energy"], session["profile_trait_refs"])
+
+        started = self.store.start_execution_session("u", {"execution_session_id": session["execution_session_id"], "request_id": "effect-start"})
+        self.store.end_execution_session("u", {"execution_session_id": started["execution_session_id"], "actual_minutes": 45, "request_id": "effect-end"})
+        feedback_payload = {
+            "task_id": self.task["id"], "execution_session_id": session["execution_session_id"],
+            "request_id": "effect-feedback", "task_evaluation": {"completion": "completed", "actual_minutes": 45},
+            "state_evaluation": {"energy_after": 4}, "recommendation_evaluation": {"timing_fit": "helpful"},
+        }
+        first = self.store.save_execution_feedback("u", feedback_payload)
+        replay = self.store.save_execution_feedback("u", feedback_payload)
+        self.assertEqual(["trait-afternoon-energy"], first["profile_trait_refs"])
+        self.assertEqual(first["id"], replay["id"])
+
+        outcomes = [item for item in self.store.list_personalization_evidence("u") if item["claim_key"] == "profile_trait.execution_outcome"]
+        self.assertEqual(1, len(outcomes))
+        self.assertEqual("trait-afternoon-energy", outcomes[0]["structured_value"]["profile_trait_id"])
+        self.assertFalse(outcomes[0]["eligible_for_pattern"])
+        with self.store.connect() as conn:
+            after_trait = conn.execute("SELECT trait_json FROM profile_traits WHERE id='trait-afternoon-energy'").fetchone()["trait_json"]
+        self.assertEqual(before_trait, after_trait)
+
+    def test_confirmation_rejects_fabricated_trait_attribution(self):
+        decision = self.decide(request_id="fabricated-plan")
+        decision["plan_patch"][0]["applied_profile_trait_ids"] = ["trait-does-not-exist"]
+        self.store.confirm_plan("u", {
+            "plan_id": decision["plan_id"], "week_id": "2026-08-03",
+            "edit_episode_id": decision["edit_episode_id"], "plan_patch": decision["plan_patch"],
+            "unscheduled_tasks": decision.get("unscheduled_tasks") or [],
+            "ai_task_analysis": decision.get("ai_task_analysis") or {}, "decision": decision,
+        })
+        session = self.store.list_execution_sessions("u")[0]
+        self.assertEqual([], session["profile_trait_refs"])
+
 
 if __name__ == "__main__":
     unittest.main()

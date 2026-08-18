@@ -334,6 +334,7 @@ def build_deterministic_plan(
                     *( [f"Confirmed profile trait used as a weak tiebreak: {trait_id}" for trait_id in used_trait_ids] ),
                     *( ["Protected buffer was used because preferred capacity before the deadline was insufficient."] if used_buffer else [] ),
                 ],
+                "applied_profile_trait_ids": sorted(used_trait_ids),
                 "used_buffer": used_buffer,
                 "state_scope": "weekly_skeleton",
                 "week_id": week_id,
