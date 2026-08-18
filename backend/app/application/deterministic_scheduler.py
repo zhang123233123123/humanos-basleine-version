@@ -347,6 +347,19 @@ def build_deterministic_plan(
             session_index += 1
 
     blocks.sort(key=lambda item: (_axis(int(item["day_index"]), float(item["start"])), str(item.get("task_id"))))
+    applied_traits = [
+        {
+            "trait_id": str(hint["trait_id"]),
+            "trait_key": str(hint["trait_key"]),
+            "daypart": str(hint["daypart"]),
+            "band": str(hint["band"]),
+            "confidence_level": str(hint.get("confidence_level") or "medium"),
+            "evidence_count": len(hint.get("evidence_ids") or []),
+            "authority": "weak_prior",
+        }
+        for hint in scheduling_priors.get("hints") or []
+        if str(hint.get("trait_id") or "") in applied_trait_ids
+    ]
     return {
         "action": "suggest_plan",
         "plan_patch": blocks,
@@ -363,6 +376,7 @@ def build_deterministic_plan(
         "personalization": {
             "authority": "weak_prior",
             "applied_trait_ids": sorted(applied_trait_ids),
+            "applied_traits": applied_traits,
             "available_trait_ids": sorted(str(item.get("trait_id")) for item in scheduling_priors.get("hints") or [] if item.get("trait_id")),
             "today_state_overrode_traits": bool(scheduling_priors.get("today_override")),
         },

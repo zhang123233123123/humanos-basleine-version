@@ -61,6 +61,11 @@ class ScheduleTraitIntegrationTests(unittest.TestCase):
 
         self.assertEqual(14.0, self.task_block(decision)["start"])
         self.assertEqual(["trait-afternoon-energy"], decision["personalization"]["applied_trait_ids"])
+        self.assertEqual({
+            "trait_id": "trait-afternoon-energy", "trait_key": "perceived_state.energy",
+            "daypart": "afternoon", "band": "high", "confidence_level": "high",
+            "evidence_count": 5, "authority": "weak_prior",
+        }, decision["personalization"]["applied_traits"][0])
         self.assertEqual(["trait-afternoon-energy"], decision["profile_snapshot"]["applied_profile_trait_ids"])
 
         persisted = self.store.latest_proposed_plan("u", "2026-08-03")

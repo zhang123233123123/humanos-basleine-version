@@ -15,6 +15,7 @@ import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 import { DateTimePicker } from '@/components/ui/date-time-picker'
 import { WeeklyAvailabilityPicker } from '@/components/weekly-availability-picker'
+import { ScheduleExplanation } from '@/components/schedule-explanation'
 
 type Stage = 'setup' | 'review'
 
@@ -397,6 +398,7 @@ export default function WeeklyPlanPage() {
             <Card>
               <CardHeader><CardTitle>{t('planning.reviewTitle')}</CardTitle><CardDescription>{decision.explanation || t('planning.reviewDescription')}</CardDescription></CardHeader>
               <CardContent className="space-y-3">
+                <ScheduleExplanation decision={decision} locale={locale} />
                 {blocks.map((block, index) => (
                   <div key={block.block_id || `${block.task_id}-${index}`} className="grid items-center gap-3 rounded-xl border p-3 md:grid-cols-[1fr_1fr_1fr]">
                     <div><p className="font-medium">{block.title || taskName.get(block.task_id)}</p><p className="text-xs text-muted-foreground">{block.kind || 'task_session'}</p></div>

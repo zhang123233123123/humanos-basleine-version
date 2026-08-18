@@ -61,6 +61,28 @@ export interface PlanDecision {
   source?: string
   calendar_diff?: LocalCalendarDiff
   reasons?: string[]
+  personalization?: {
+    authority?: 'weak_prior'
+    applied_trait_ids?: string[]
+    available_trait_ids?: string[]
+    applied_traits?: Array<{
+      trait_id: string
+      trait_key: string
+      daypart: 'morning' | 'afternoon' | 'evening' | 'night' | string
+      band: 'high' | 'low' | string
+      confidence_level?: 'low' | 'medium' | 'high'
+      evidence_count?: number
+      authority?: 'weak_prior'
+    }>
+    today_state_overrode_traits?: boolean
+  }
+  constraint_summary?: {
+    hard_constraints?: Array<Record<string, unknown>>
+    windows?: Array<Record<string, unknown>>
+    preferred_session_minutes?: number
+    rest_minutes?: number
+    [key: string]: unknown
+  }
   requires_confirmation?: boolean
   unavailable?: boolean
   error?: string
