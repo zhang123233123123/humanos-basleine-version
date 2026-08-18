@@ -4,19 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.domain.personalization import BehaviorEvent, EvidenceItem, EvidenceScope
-
-
-def _task_scope(task: dict[str, Any] | None) -> EvidenceScope:
-    if not task:
-        return EvidenceScope()
-    return EvidenceScope(
-        task_id=str(task.get("id") or "") or None,
-        task_schedule_type=task.get("task_type"),
-        task_domain_type=str(task.get("type") or "") or None,
-        resource_modality=task.get("resource_modality") or [],
-        attention_mode=task.get("attention_mode"),
-    )
+from app.application.personalization_scope import build_task_evidence_scope
+from app.domain.personalization import BehaviorEvent, EvidenceItem
 
 
 def project_execution_transition(
@@ -32,16 +21,17 @@ def project_execution_transition(
     before = dict(transition.get("before_state") or {})
     after = dict(transition.get("actual_state") or {})
     outcome = dict(transition.get("outcome") or {})
-    scope = _task_scope(task)
+    scope = build_task_evidence_scope(task)
     source_id = str(transition["id"])
     occurred_at = int(transition["created_at"])
     session_id = str(action.get("execution_session_id") or "") or None
-    eligible = trusted_execution_transition and action_type in {"start", "resume", "pause", "end", "submit_feedback"}
+    eligible = trusted_execution_transition and action_type in {"start", "resume", "pause", "end"}
+    source_type = "system_observation" if trusted_execution_transition else "client_reported_transition"
     event = BehaviorEvent(
         event_id=event_id,
         user_id=str(transition["user_id"]),
         event_type=f"execution.{action_type}",
-        source_type="system_observation",
+        source_type=source_type,
         source_id=source_id,
         occurred_at=occurred_at,
         scope=scope,
@@ -57,7 +47,7 @@ def project_execution_transition(
     evidence = EvidenceItem(
         evidence_id=evidence_id,
         user_id=str(transition["user_id"]),
-        source_type="system_observation",
+        source_type=source_type,
         source_id=source_id,
         origin="observed_behavior",
         observed_at=occurred_at,
@@ -102,7 +92,7 @@ def project_execution_feedback(
             "recommendation_evaluation": recommendation_evaluation,
             "execution_session_id": str(feedback.get("execution_session_id") or "") or None,
         },
-        scope=_task_scope(task),
+        scope=build_task_evidence_scope(task),
         user_explicit=has_report,
         confidence_level="high" if has_report else "low",
         eligible_for_pattern=has_report,

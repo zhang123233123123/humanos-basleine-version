@@ -830,6 +830,23 @@ class Store:
                 CREATE INDEX IF NOT EXISTS idx_evidence_items_user_eligible
                 ON evidence_items(user_id, eligible_for_pattern, created_at);
 
+                CREATE TABLE IF NOT EXISTS personalization_outbox (
+                  sequence_number INTEGER PRIMARY KEY AUTOINCREMENT,
+                  id TEXT UNIQUE NOT NULL,
+                  user_id TEXT NOT NULL,
+                  kind TEXT NOT NULL,
+                  source_id TEXT NOT NULL,
+                  payload_json TEXT NOT NULL,
+                  status TEXT NOT NULL DEFAULT 'pending',
+                  attempts INTEGER NOT NULL DEFAULT 0,
+                  last_error TEXT,
+                  created_at INTEGER NOT NULL,
+                  updated_at INTEGER NOT NULL,
+                  UNIQUE(user_id, kind, source_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_personalization_outbox_status_sequence
+                ON personalization_outbox(status, sequence_number);
+
                 CREATE TABLE IF NOT EXISTS chat_turns (
                   id TEXT PRIMARY KEY,
                   user_id TEXT NOT NULL,
@@ -1290,6 +1307,7 @@ class Store:
             event_rows = conn.execute("SELECT * FROM events WHERE user_id=? ORDER BY created_at DESC LIMIT 50", (user_id,)).fetchall()
             edit_rows = conn.execute("SELECT * FROM plan_edit_events WHERE user_id=? ORDER BY server_time DESC LIMIT 50", (user_id,)).fetchall()
             transition_rows = conn.execute("SELECT * FROM state_transitions WHERE user_id=? ORDER BY created_at DESC LIMIT 100", (user_id,)).fetchall()
+            projection_failure_rows = conn.execute("SELECT id,kind,source_id,attempts,last_error,created_at,updated_at FROM personalization_outbox WHERE user_id=? AND status='failed' ORDER BY sequence_number", (user_id,)).fetchall()
         plans = []
         for row in plan_rows:
             plan = from_json(row["plan_json"], {})
@@ -1305,7 +1323,7 @@ class Store:
                 "ordinary_user_visible": False,
                 "aggregate_roots": ["profile", "task"],
                 "coordination_records": ["plans", "execution_sessions"],
-                "evidence_records": ["events", "plan_edit_events", "state_transitions"],
+                "evidence_records": ["events", "plan_edit_events", "state_transitions", "behavior_events", "evidence_items"],
             },
             "generated_at": self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai").isoformat(),
             "account": {"email": user_id, "account_type": "test"},
@@ -1318,6 +1336,7 @@ class Store:
             "events": events,
             "plan_edit_events": plan_edits,
             "state_transitions": state_transitions,
+            "personalization_projection_failures": [dict(row) for row in projection_failure_rows],
             "diagnostics": {"healthy": not issues, "issue_count": len(issues), "issues": issues},
         }
 
@@ -1451,6 +1470,7 @@ class Store:
             "events",
             "behavior_events",
             "evidence_items",
+            "personalization_outbox",
             "chat_turns",
             "execution_feedback",
             "state_transitions",
@@ -3452,6 +3472,15 @@ class Store:
             "confirmed_at": row["confirmed_at"], "updated_at": row["updated_at"],
         }
 
+    @staticmethod
+    def _enqueue_personalization(conn: sqlite3.Connection, *, user_id: str, kind: str, source_id: str, payload: dict, timestamp: int) -> None:
+        from app.repositories import PersonalizationEvidenceRepository
+
+        PersonalizationEvidenceRepository(conn).enqueue(
+            outbox_id=new_id("outbox"), user_id=user_id, kind=kind, source_id=source_id,
+            payload_json=as_json(payload), timestamp=timestamp,
+        )
+
     def record_plan_edit_event(self, user_id: str, payload: dict) -> dict:
         episode_id = str(payload.get("edit_episode_id") or "")
         episode = self.get_edit_episode(user_id, episode_id)
@@ -3478,32 +3507,32 @@ class Store:
             )
             if event_type == "undo_edit" and payload.get("reverts_event_id"):
                 conn.execute("UPDATE plan_edit_events SET effective=0 WHERE id=? AND edit_episode_id=?", (payload.get("reverts_event_id"), episode_id))
-                conn.execute("UPDATE behavior_events SET effective=0 WHERE user_id=? AND source_type='plan_edit' AND source_id=?", (user_id, payload.get("reverts_event_id")))
-                conn.execute("UPDATE evidence_items SET eligible_for_pattern=0 WHERE user_id=? AND source_type='plan_edit' AND source_id=?", (user_id, payload.get("reverts_event_id")))
+                self._enqueue_personalization(
+                    conn, user_id=user_id, kind="invalidate_source", source_id=f"{event_id}:invalidate",
+                    payload={"user_id": user_id, "source_type": "plan_edit", "source_id": str(payload.get("reverts_event_id"))},
+                    timestamp=timestamp,
+                )
             task_row = conn.execute("SELECT * FROM tasks WHERE id=? AND user_id=?", (payload.get("task_id"), user_id)).fetchone() if payload.get("task_id") else None
-            from app.application.plan_edit_evidence import project_plan_edit
-
-            behavior, evidence = project_plan_edit(
-                event_id=new_id("behavior"), evidence_id=new_id("evidence"), user_id=user_id,
-                source_event_id=event_id, occurred_at=timestamp, event_type=event_type,
-                before=dict(payload.get("before") or {}), after=dict(payload.get("after") or {}),
-                actor=str(payload.get("actor") or "user"), interaction_source=str(payload.get("interaction_source") or "calendar"),
-                effective=effective, edit_episode_id=episode_id, block_id=str(payload.get("block_id") or "") or None,
-                validation_result=validation_result, task=self.task_row(task_row) if task_row else None,
-            )
-            conn.execute(
-                "INSERT INTO behavior_events (id,user_id,source_type,source_id,event_json,effective,created_at) VALUES (?,?,?,?,?,?,?)",
-                (behavior.event_id, user_id, behavior.source_type, behavior.source_id, behavior.model_dump_json(), 1 if effective else 0, timestamp),
-            )
-            conn.execute(
-                "INSERT INTO evidence_items (id,user_id,source_type,source_id,claim_key,evidence_json,eligible_for_pattern,created_at) VALUES (?,?,?,?,?,?,?,?)",
-                (evidence.evidence_id, user_id, evidence.source_type, evidence.source_id, evidence.claim_key, evidence.model_dump_json(), 1 if evidence.eligible_for_pattern else 0, timestamp),
+            self._enqueue_personalization(
+                conn, user_id=user_id, kind="plan_edit", source_id=event_id, timestamp=timestamp,
+                payload={
+                    "user_id": user_id, "source_event_id": event_id, "occurred_at": timestamp,
+                    "event_type": event_type, "before": dict(payload.get("before") or {}),
+                    "after": dict(payload.get("after") or {}), "actor": str(payload.get("actor") or "user"),
+                    "interaction_source": str(payload.get("interaction_source") or "calendar"),
+                    "effective": effective, "edit_episode_id": episode_id,
+                    "block_id": str(payload.get("block_id") or "") or None,
+                    "validation_result": validation_result, "task": self.task_row(task_row) if task_row else None,
+                },
             )
             conn.execute("UPDATE plan_edit_episodes SET status='open',updated_at=? WHERE id=? AND user_id=?", (timestamp, episode_id, user_id))
         return {"event_id": event_id, "replayed": False, "sequence_number": sequence, "effective": effective}
 
     def list_personalization_evidence(self, user_id: str) -> list[dict]:
         with self.connect() as conn:
+            from app.application.personalization_projector import drain_personalization_outbox
+
+            drain_personalization_outbox(conn, user_id=user_id)
             rows = conn.execute(
                 "SELECT evidence_json,eligible_for_pattern FROM evidence_items WHERE user_id=? ORDER BY created_at,id",
                 (user_id,),
@@ -3515,6 +3544,9 @@ class Store:
 
     def list_behavior_events(self, user_id: str) -> list[dict]:
         with self.connect() as conn:
+            from app.application.personalization_projector import drain_personalization_outbox
+
+            drain_personalization_outbox(conn, user_id=user_id)
             rows = conn.execute(
                 "SELECT event_json,effective FROM behavior_events WHERE user_id=? ORDER BY created_at,id",
                 (user_id,),
@@ -3523,6 +3555,14 @@ class Store:
             {**from_json(row["event_json"], {}), "effective": bool(row["effective"])}
             for row in rows
         ]
+
+    def list_personalization_projection_failures(self, user_id: str) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id,kind,source_id,attempts,last_error,created_at,updated_at FROM personalization_outbox WHERE user_id=? AND status='failed' ORDER BY sequence_number",
+                (user_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def save_proposed_plan(self, user_id: str, decision: dict, payload: dict) -> dict:
         profile = self.ensure_profile(user_id)
@@ -3909,16 +3949,13 @@ class Store:
                         )
                         affected_ids = [str(item) for item in (rationale_payload.get("affected_task_ids") or []) if str(item)]
                         rationale_task_row = conn.execute("SELECT * FROM tasks WHERE id=? AND user_id=?", (affected_ids[0], user_id)).fetchone() if len(affected_ids) == 1 else None
-                        from app.application.plan_edit_evidence import project_plan_rationale
-
-                        rationale_evidence = project_plan_rationale(
-                            evidence_id=new_id("evidence"), user_id=user_id, rationale_id=rationale_id,
-                            observed_at=timestamp, rationale=rationale_payload, canonical_diff=canonical_diff,
-                            task=self.task_row(rationale_task_row) if rationale_task_row else None,
-                        )
-                        conn.execute(
-                            "INSERT INTO evidence_items (id,user_id,source_type,source_id,claim_key,evidence_json,eligible_for_pattern,created_at) VALUES (?,?,?,?,?,?,?,?)",
-                            (rationale_evidence.evidence_id, user_id, rationale_evidence.source_type, rationale_evidence.source_id, rationale_evidence.claim_key, rationale_evidence.model_dump_json(), 1 if rationale_evidence.eligible_for_pattern else 0, timestamp),
+                        self._enqueue_personalization(
+                            conn, user_id=user_id, kind="plan_rationale", source_id=rationale_id, timestamp=timestamp,
+                            payload={
+                                "user_id": user_id, "rationale_id": rationale_id, "observed_at": timestamp,
+                                "rationale": rationale_payload, "canonical_diff": canonical_diff,
+                                "task": self.task_row(rationale_task_row) if rationale_task_row else None,
+                            },
                         )
                 conn.execute(
                     "UPDATE plan_edit_episodes SET final_plan_json=?,final_plan_hash=?,canonical_diff_json=?,status='confirmed',confirmed_at=?,updated_at=? WHERE id=? AND user_id=?",
@@ -4730,20 +4767,12 @@ class Store:
             (transition["id"], user_id, task_id, as_json(transition["before_state"]), as_json(transition["action"]), as_json(transition["predicted_state"]), as_json(transition["actual_state"]), as_json(transition["outcome"]), transition["created_at"]),
         )
         task_row = conn.execute("SELECT * FROM tasks WHERE id=? AND user_id=?", (task_id, user_id)).fetchone() if task_id else None
-        from app.application.execution_evidence import project_execution_transition
-
-        behavior, evidence = project_execution_transition(
-            event_id=new_id("behavior"), evidence_id=new_id("evidence"), transition=transition,
-            task=self.task_row(task_row) if task_row else None,
-            trusted_execution_transition=trusted_execution_transition,
-        )
-        conn.execute(
-            "INSERT INTO behavior_events (id,user_id,source_type,source_id,event_json,effective,created_at) VALUES (?,?,?,?,?,?,?)",
-            (behavior.event_id, user_id, behavior.source_type, behavior.source_id, behavior.model_dump_json(), 1, transition["created_at"]),
-        )
-        conn.execute(
-            "INSERT INTO evidence_items (id,user_id,source_type,source_id,claim_key,evidence_json,eligible_for_pattern,created_at) VALUES (?,?,?,?,?,?,?,?)",
-            (evidence.evidence_id, user_id, evidence.source_type, evidence.source_id, evidence.claim_key, evidence.model_dump_json(), 1 if evidence.eligible_for_pattern else 0, transition["created_at"]),
+        self._enqueue_personalization(
+            conn, user_id=user_id, kind="execution_transition", source_id=transition["id"], timestamp=transition["created_at"],
+            payload={
+                "transition": transition, "task": self.task_row(task_row) if task_row else None,
+                "trusted_execution_transition": trusted_execution_transition,
+            },
         )
         return transition
 
@@ -5142,14 +5171,9 @@ class Store:
                     "UPDATE profiles SET active_plan_revision=NULL,updated_at=? WHERE user_id=?",
                     (feedback["created_at"], user_id),
                 )
-            from app.application.execution_evidence import project_execution_feedback
-
-            feedback_evidence = project_execution_feedback(
-                evidence_id=new_id("evidence"), feedback=feedback, task=task,
-            )
-            conn.execute(
-                "INSERT INTO evidence_items (id,user_id,source_type,source_id,claim_key,evidence_json,eligible_for_pattern,created_at) VALUES (?,?,?,?,?,?,?,?)",
-                (feedback_evidence.evidence_id, user_id, feedback_evidence.source_type, feedback_evidence.source_id, feedback_evidence.claim_key, feedback_evidence.model_dump_json(), 1 if feedback_evidence.eligible_for_pattern else 0, feedback["created_at"]),
+            self._enqueue_personalization(
+                conn, user_id=user_id, kind="execution_feedback", source_id=feedback["id"], timestamp=feedback["created_at"],
+                payload={"feedback": feedback, "task": task},
             )
         self.add_memory(
             user_id=user_id,

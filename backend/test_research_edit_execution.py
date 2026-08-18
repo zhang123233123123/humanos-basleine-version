@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from backend.humanos_server import Store
 
@@ -116,7 +117,10 @@ class ResearchEditExecutionTests(unittest.TestCase):
             }, "state_evaluation": {"energy": 4}, "recommendation_evaluation": {"helpful": True},
         })
         explicit = next(item for item in self.store.list_personalization_evidence("u") if item["claim_key"] == "execution_feedback.outcome")
+        transition = next(item for item in self.store.list_personalization_evidence("u") if item["claim_key"] == "execution_behavior.submit_feedback")
         self.assertTrue(explicit["user_explicit"])
+        self.assertTrue(explicit["eligible_for_pattern"])
+        self.assertFalse(transition["eligible_for_pattern"])
         self.assertEqual(50, explicit["structured_value"]["task_evaluation"]["actual_minutes"])
         self.assertEqual(before_patterns, self.store.get_profile("u")["learned_patterns"])
 
@@ -129,7 +133,50 @@ class ResearchEditExecutionTests(unittest.TestCase):
         })
         evidence = next(item for item in self.store.list_personalization_evidence("u") if item["source_id"] == transition["id"])
         self.assertFalse(evidence["eligible_for_pattern"])
+        self.assertEqual("client_reported_transition", evidence["source_type"])
         self.assertFalse(evidence["structured_value"]["trusted_execution_transition"])
+
+    def test_execution_commits_before_outbox_projection(self):
+        self.confirm([self.initial])
+        current = self.store.current_execution("u")
+        started = self.store.start_execution_session("u", {
+            "execution_session_id": current["session"]["execution_session_id"], "request_id": "outbox-start",
+        })
+        self.assertEqual("running", started["status"])
+        with self.store.connect() as conn:
+            pending = conn.execute("SELECT COUNT(*) FROM personalization_outbox WHERE user_id='u' AND status='pending'").fetchone()[0]
+            projected = conn.execute("SELECT COUNT(*) FROM evidence_items WHERE user_id='u'").fetchone()[0]
+        self.assertEqual((1, 0), (pending, projected))
+        self.store.list_personalization_evidence("u")
+        with self.store.connect() as conn:
+            processed = conn.execute("SELECT COUNT(*) FROM personalization_outbox WHERE user_id='u' AND status='processed'").fetchone()[0]
+        self.assertEqual(1, processed)
+
+    def test_projection_failure_is_observable_without_rolling_back_core_data(self):
+        with self.store.connect() as conn:
+            self.store._enqueue_personalization(
+                conn, user_id="u", kind="unsupported_kind", source_id="bad-source",
+                payload={}, timestamp=1,
+            )
+        self.assertEqual([], self.store.list_personalization_evidence("u"))
+        failures = self.store.list_personalization_projection_failures("u")
+        self.assertEqual("unsupported_kind", failures[0]["kind"])
+        self.assertEqual(1, failures[0]["attempts"])
+
+    def test_projection_item_is_atomic_and_retryable(self):
+        self.confirm([self.initial])
+        current = self.store.current_execution("u")
+        self.store.start_execution_session("u", {
+            "execution_session_id": current["session"]["execution_session_id"], "request_id": "retryable-start",
+        })
+        with patch("app.repositories.personalization.PersonalizationEvidenceRepository.save_evidence", side_effect=RuntimeError("projection failed")):
+            self.assertEqual([], self.store.list_personalization_evidence("u"))
+        with self.store.connect() as conn:
+            behavior_count = conn.execute("SELECT COUNT(*) FROM behavior_events WHERE user_id='u'").fetchone()[0]
+        self.assertEqual(0, behavior_count)
+        evidence = self.store.list_personalization_evidence("u")
+        self.assertEqual(["execution_behavior.start"], [item["claim_key"] for item in evidence])
+        self.assertEqual([], self.store.list_personalization_projection_failures("u"))
 
     def test_successful_drag_projects_scoped_behavior_evidence(self):
         self.store.record_plan_edit_event("u", {

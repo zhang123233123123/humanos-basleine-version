@@ -4,19 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.domain.personalization import BehaviorEvent, EvidenceItem, EvidenceScope
-
-
-def _task_scope(task: dict[str, Any] | None) -> EvidenceScope:
-    if not task:
-        return EvidenceScope()
-    return EvidenceScope(
-        task_id=str(task.get("id") or "") or None,
-        task_schedule_type=task.get("task_type"),
-        task_domain_type=str(task.get("type") or "") or None,
-        resource_modality=task.get("resource_modality") or [],
-        attention_mode=task.get("attention_mode"),
-    )
+from app.application.personalization_scope import build_task_evidence_scope
+from app.domain.personalization import BehaviorEvent, EvidenceItem
 
 
 def project_plan_edit(
@@ -37,7 +26,7 @@ def project_plan_edit(
     validation_result: dict[str, Any],
     task: dict[str, Any] | None,
 ) -> tuple[BehaviorEvent, EvidenceItem]:
-    scope = _task_scope(task)
+    scope = build_task_evidence_scope(task)
     event = BehaviorEvent(
         event_id=event_id,
         user_id=user_id,
@@ -106,7 +95,7 @@ def project_plan_rationale(
             "generalizability": str(rationale.get("generalizability") or "not_sure"),
             "diff_summary": canonical_diff.get("summary") or {},
         },
-        scope=_task_scope(task),
+        scope=build_task_evidence_scope(task),
         text=raw_response or None,
         user_explicit=answered and bool(raw_response or reason_codes),
         confidence_level="high" if answered and bool(raw_response or reason_codes) else "low",

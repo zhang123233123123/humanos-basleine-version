@@ -23,6 +23,7 @@ EvidenceSource = Literal[
     "state_checkin",
     "context_dump",
     "system_observation",
+    "client_reported_transition",
 ]
 EvidenceOrigin = Literal["explicit_user", "observed_behavior", "ai_extraction", "derived_statistic"]
 ConfidenceLevel = Literal["low", "medium", "high"]
