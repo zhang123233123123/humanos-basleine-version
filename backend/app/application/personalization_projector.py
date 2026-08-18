@@ -7,6 +7,7 @@ import time
 import uuid
 from typing import Any
 
+from app.application.chat_evidence import project_chat_turn
 from app.application.context_dump_evidence import project_context_dump
 from app.application.execution_evidence import project_execution_feedback, project_execution_transition
 from app.application.plan_edit_evidence import project_plan_edit, project_plan_rationale
@@ -49,6 +50,14 @@ def _project(repository: PersonalizationEvidenceRepository, kind: str, payload: 
         )
         repository.save_behavior(event=behavior, timestamp=timestamp)
         repository.save_evidence(evidence=evidence, timestamp=timestamp)
+    elif kind == "chat_turn":
+        behavior, evidence_items = project_chat_turn(
+            event_id=_id("behavior"), explicit_evidence_id=_id("evidence"),
+            hypothesis_evidence_id=_id("evidence"), **payload,
+        )
+        repository.save_behavior(event=behavior, timestamp=timestamp)
+        for evidence in evidence_items:
+            repository.save_evidence(evidence=evidence, timestamp=timestamp)
     elif kind == "invalidate_source":
         repository.invalidate_source(**payload)
     else:

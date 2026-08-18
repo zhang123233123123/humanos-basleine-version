@@ -766,7 +766,7 @@ function AppContent({
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, assistant_mode: 'task_planner', locale }),
+      body: JSON.stringify({ message, assistant_mode: 'task_planner', locale, request_id: requestId('chat') }),
     })
     if (res.ok) {
       await refetchEvents(currentStart, currentEnd)

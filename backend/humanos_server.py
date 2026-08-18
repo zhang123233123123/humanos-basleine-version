@@ -851,6 +851,7 @@ class Store:
                 CREATE TABLE IF NOT EXISTS chat_turns (
                   id TEXT PRIMARY KEY,
                   user_id TEXT NOT NULL,
+                  request_id TEXT,
                   user_text TEXT NOT NULL,
                   assistant_reply TEXT NOT NULL,
                   intent TEXT NOT NULL,
@@ -1032,6 +1033,7 @@ class Store:
                   id TEXT PRIMARY KEY,
                   user_id TEXT NOT NULL,
                   kind TEXT NOT NULL,
+                  request_id TEXT,
                   status TEXT NOT NULL,
                   payload_json TEXT NOT NULL,
                   result_json TEXT,
@@ -1141,6 +1143,20 @@ class Store:
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_context_dump_request "
                 "ON context_dumps(user_id, request_id) WHERE request_id IS NOT NULL"
             )
+            chat_turn_columns = {row["name"] for row in conn.execute("PRAGMA table_info(chat_turns)").fetchall()}
+            if "request_id" not in chat_turn_columns:
+                conn.execute("ALTER TABLE chat_turns ADD COLUMN request_id TEXT")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_turn_request "
+                "ON chat_turns(user_id, request_id) WHERE request_id IS NOT NULL"
+            )
+            background_job_columns = {row["name"] for row in conn.execute("PRAGMA table_info(background_jobs)").fetchall()}
+            if "request_id" not in background_job_columns:
+                conn.execute("ALTER TABLE background_jobs ADD COLUMN request_id TEXT")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_background_job_request "
+                "ON background_jobs(user_id, kind, request_id) WHERE request_id IS NOT NULL"
+            )
             user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
             user_migrations = {
                 "account_type": "TEXT NOT NULL DEFAULT 'normal'",
@@ -1156,11 +1172,19 @@ class Store:
         if kind not in {"chat_parse", "schedule_plan"}:
             raise ValueError("unsupported background job kind")
         job_id = new_id("job")
+        request_id = str(payload.get("request_id") or "").strip() or None
         timestamp = now_ms()
-        with self.connect() as conn:
+        with self.atomic() as conn:
+            if request_id:
+                existing = conn.execute(
+                    "SELECT id FROM background_jobs WHERE user_id=? AND kind=? AND request_id=?",
+                    (user_id, kind, request_id),
+                ).fetchone()
+                if existing:
+                    return self.get_background_job(user_id, str(existing["id"])) or {}
             conn.execute(
-                "INSERT INTO background_jobs (id,user_id,kind,status,payload_json,result_json,error,created_at,started_at,completed_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (job_id, user_id, kind, "queued", as_json(payload), None, None, timestamp, None, None, timestamp),
+                "INSERT INTO background_jobs (id,user_id,kind,request_id,status,payload_json,result_json,error,created_at,started_at,completed_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (job_id, user_id, kind, request_id, "queued", as_json(payload), None, None, timestamp, None, None, timestamp),
             )
         self.start_background_job(job_id)
         return self.get_background_job(user_id, job_id) or {}
@@ -2310,27 +2334,17 @@ class Store:
     def extract_behavior_features(self, user_id: str, text: str, chat_context: dict | None = None, local_only: bool = False) -> dict:
         clean = text.strip()
         llm_result = None if local_only else chat_completion(behavior_feature_messages(clean, chat_context))
+        extraction_provenance = "ai_model"
         if not isinstance(llm_result, dict):
             llm_result = local_behavior_features(clean)
+            extraction_provenance = "local_rules"
         explicit_state = llm_result.get("explicit_state") if isinstance(llm_result.get("explicit_state"), dict) else {}
+        llm_result["explicit_state"] = explicit_state
         intent_decision = classify_intent(clean, str(llm_result.get("intent") or "other"))
         llm_result["intent"] = intent_decision.intent
         llm_result["intent_decision"] = intent_decision.to_dict()
-        evidence_span = str(llm_result.get("evidence_span") or "").strip()
-        if evidence_span and any(value is not None for value in explicit_state.values()):
-            self.add_memory(
-                user_id=user_id,
-                source_type="explicit_user_report",
-                source_id=new_id("chat"),
-                task_id=None,
-                text=f"Explicit user report: {evidence_span}. State: {as_json(explicit_state)}",
-                metadata={
-                    "kind": "explicit_user_report",
-                    "source": "explicit_user_report",
-                    "evidence_span": evidence_span,
-                    "explicit_state": explicit_state,
-                },
-            )
+        llm_result["extraction_provenance"] = extraction_provenance
+        llm_result["prompt_version"] = BEHAVIOR_FEATURE_PROMPT_VERSION
         self.log_event(user_id, "behavior_language_features", {"text": clean, "features": llm_result})
         return llm_result
 
@@ -2422,7 +2436,7 @@ class Store:
         if advisor_requires_planner_handoff(text):
             reply = "这是一个会修改任务或计划的操作。我不会在日程顾问中直接执行，已准备转交给任务规划助手生成预览。" if locale == "zh" else "This would change your tasks or plan. I will not execute it in Calendar Advisor; hand it to Task Planner to create a reviewable preview."
             response = {"intent": "planner_handoff", "assistant_mode": "calendar_advisor", "reply": reply, "tasks": [], "handoff_required": True, "handoff_text": text, "read_only": True}
-            self.save_chat_turn(user_id, text, reply, "planner_handoff", {"intent": "planner_handoff", "assistant_mode": "calendar_advisor"}, [])
+            self.save_chat_turn(user_id, text, reply, "planner_handoff", {"intent": "planner_handoff", "assistant_mode": "calendar_advisor"}, [], request_id=payload.get("request_id"))
             return response
         profile = self.ensure_profile(user_id)
         current = self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai")
@@ -2477,12 +2491,12 @@ class Store:
                 handoff_text = str(advisor_result.get("handoff_text") or text)
                 reply = model_reply or ("这项请求会修改计划，我已将它转交给任务规划助手生成预览。" if locale == "zh" else "This request changes your plan, so I handed it to Task Planner for a reviewable preview.")
                 response = {"intent": "planner_handoff", "assistant_mode": "calendar_advisor", "reply": reply, "tasks": [], "handoff_required": True, "handoff_text": handoff_text, "read_only": True}
-                self.save_chat_turn(user_id, text, reply, "planner_handoff", {"intent": "planner_handoff", "assistant_mode": "calendar_advisor", "model": DEEPSEEK_MODEL}, [])
+                self.save_chat_turn(user_id, text, reply, "planner_handoff", {"intent": "planner_handoff", "assistant_mode": "calendar_advisor", "model": DEEPSEEK_MODEL}, [], request_id=payload.get("request_id"))
                 return response
             if model_reply:
                 reply = model_reply
         response = {"intent": "calendar_query", "assistant_mode": "calendar_advisor", "reply": reply, "tasks": [], "handoff_required": False, "read_only": True, "summary": {"date": current.date().isoformat(), "session_count": len(today_sessions), "sessions": today_sessions}}
-        self.save_chat_turn(user_id, text, reply, "calendar_query", {"intent": "calendar_query", "assistant_mode": "calendar_advisor"}, [])
+        self.save_chat_turn(user_id, text, reply, "calendar_query", {"intent": "calendar_query", "assistant_mode": "calendar_advisor"}, [], request_id=payload.get("request_id"))
         return response
 
     def chat_turn(self, user_id: str, payload: dict) -> dict:
@@ -2495,7 +2509,7 @@ class Store:
         if pending_batch and self.is_pending_task_batch_followup(text):
             tasks = self.complete_pending_task_batch(user_id, pending_batch, text)
             reply = task_preview_reply(text, len(tasks))
-            self.save_chat_turn(user_id, text, reply, "complete_pending_task_batch", {"intent": "complete_pending_task_batch", "pending_batch_id": pending_batch["id"]}, [])
+            self.save_chat_turn(user_id, text, reply, "complete_pending_task_batch", {"intent": "complete_pending_task_batch", "pending_batch_id": pending_batch["id"]}, [], request_id=payload.get("request_id"))
             return {"intent": "add_task", "reply": reply, "tasks": tasks, "pending_batch_id": pending_batch["id"], "resolved_pending_batch": True}
         chat_context = self.build_chat_context(user_id, text)
         chat_context["client_context"] = payload.get("client_context") or {}
@@ -2521,7 +2535,7 @@ class Store:
             response["reply"] = intent_decision.clarification_question or "请补充你要操作的具体任务。"
             response["requires_clarification"] = True
             response["intent_decision"] = intent_decision.to_dict()
-            self.save_chat_turn(user_id, text, response["reply"], intent, features, [])
+            self.save_chat_turn(user_id, text, response["reply"], intent, features, [], request_id=payload.get("request_id"))
             return response
         context_update = self.update_weekly_context_from_chat(user_id, text)
         if context_update:
@@ -2555,7 +2569,7 @@ class Store:
                     "estimated_task_count": estimated_count,
                     "max_tasks_per_batch": MAX_TASKS_PER_PARSE_BATCH,
                 })
-                self.save_chat_turn(user_id, text, response["reply"], intent, features, [])
+                self.save_chat_turn(user_id, text, response["reply"], intent, features, [], request_id=payload.get("request_id"))
                 return response
             response["tasks"] = self.parse_tasks_from_text(
                 user_id,
@@ -2576,6 +2590,7 @@ class Store:
             intent=intent,
             features=features,
             task_ids=[task["id"] for task in response["tasks"] if not task.get("is_preview")],
+            request_id=payload.get("request_id"),
         )
         return response
 
@@ -2625,6 +2640,7 @@ class Store:
             conn.execute("UPDATE pending_task_batches SET tasks_json=?,missing_fields_json=?,status='resolved',updated_at=? WHERE id=? AND user_id=?", (as_json(completed), as_json(sorted({field for task in completed for field in task.get("missing_fields", [])})), now_ms(), batch["id"], user_id))
         return completed
 
+    @transactional
     def save_chat_turn(
         self,
         user_id: str,
@@ -2633,10 +2649,29 @@ class Store:
         intent: str,
         features: dict,
         task_ids: list[str],
+        request_id: str | None = None,
     ) -> dict:
+        request_id = str(request_id or "").strip() or None
+        if request_id:
+            with self.connect() as conn:
+                existing = conn.execute(
+                    "SELECT * FROM chat_turns WHERE user_id=? AND request_id=?",
+                    (user_id, request_id),
+                ).fetchone()
+            if existing:
+                return {
+                    **dict(existing),
+                    "features": from_json(existing["features_json"], {}),
+                    "task_ids": from_json(existing["task_ids_json"], []),
+                    "replayed": True,
+                }
+        profile = self.ensure_profile(user_id)
+        timezone_name = str(profile.get("timezone") or "Asia/Shanghai")
+        local_time = self.user_clock_now(user_id, timezone_name).isoformat()
         turn = {
             "id": new_id("turn"),
             "user_id": user_id,
+            "request_id": request_id,
             "user_text": user_text,
             "assistant_reply": assistant_reply,
             "intent": intent,
@@ -2648,14 +2683,15 @@ class Store:
             conn.execute(
                 """
                 INSERT INTO chat_turns (
-                  id, user_id, user_text, assistant_reply, intent,
+                  id, user_id, request_id, user_text, assistant_reply, intent,
                   features_json, task_ids_json, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     turn["id"],
                     user_id,
+                    request_id,
                     user_text,
                     assistant_reply,
                     intent,
@@ -2663,6 +2699,16 @@ class Store:
                     as_json(task_ids),
                     turn["created_at"],
                 ),
+            )
+            self._enqueue_personalization(
+                conn, user_id=user_id, kind="chat_turn", source_id=turn["id"],
+                payload={"turn": {
+                    "id": turn["id"], "user_id": user_id, "created_at": turn["created_at"],
+                    "user_text": user_text, "intent": intent, "features": features,
+                    "task_ids": task_ids, "timezone": timezone_name,
+                    "local_time": local_time,
+                }},
+                timestamp=turn["created_at"],
             )
         self.log_event(user_id, "chat_turn_saved", {"turn_id": turn["id"], "intent": intent, "task_ids": task_ids})
         return turn
