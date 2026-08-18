@@ -150,6 +150,25 @@ class ScheduleTraitIntegrationTests(unittest.TestCase):
         self.assertEqual(1, len(outcomes))
         self.assertEqual("trait-afternoon-energy", outcomes[0]["structured_value"]["profile_trait_id"])
         self.assertFalse(outcomes[0]["eligible_for_pattern"])
+        effects = self.store.profile_trait_effects("u")
+        self.assertEqual(1, effects[0]["usage_with_feedback_count"])
+        self.assertEqual(1, effects[0]["completion"]["completed"])
+        self.assertEqual(1, effects[0]["timing_feedback"]["helpful"])
+        self.assertEqual("insufficient_data", effects[0]["assessment"])
+        self.assertFalse(effects[0]["causal_claim_allowed"])
+        self.assertFalse(effects[0]["profile_write_allowed"])
+        response = {}
+        handler = object.__new__(Handler)
+        handler.command = "GET"
+        handler.path = "/api/profile-traits/effects?user_id=u"
+        handler.send_json = lambda body, status=200: response.update({"body": body, "status": status})
+        with patch.object(server_module, "store", self.store):
+            handler.route()
+        self.assertEqual(200, response["status"])
+        self.assertEqual("profile_trait_effects", response["body"]["meta"]["resource"])
+        self.assertFalse(response["body"]["meta"]["causal_claim_allowed"])
+        self.assertFalse(response["body"]["meta"]["profile_write_allowed"])
+        self.assertEqual("trait-afternoon-energy", response["body"]["data"]["effects"][0]["trait_id"])
         with self.store.connect() as conn:
             after_trait = conn.execute("SELECT trait_json FROM profile_traits WHERE id='trait-afternoon-energy'").fetchone()["trait_json"]
         self.assertEqual(before_trait, after_trait)

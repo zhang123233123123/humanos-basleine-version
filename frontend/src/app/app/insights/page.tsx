@@ -2,13 +2,13 @@
 
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, BookOpenText, BrainCircuit, Check, CheckCircle2, Clock3, Database, Loader2, LockKeyhole, Pencil, Search, Sparkles, Trash2, X } from 'lucide-react'
+import { ArrowLeft, BarChart3, BookOpenText, BrainCircuit, Check, CheckCircle2, Clock3, Database, Loader2, LockKeyhole, Pencil, Search, Sparkles, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { apiRequest } from '@/lib/client/api'
 import type { ResourceEnvelope } from '@/lib/contracts/api-contracts'
-import type { LearnedPattern, LearningResourceEnvelope, MemoryResult, PatternCandidate } from '@/lib/contracts/insights-contracts'
+import type { LearnedPattern, LearningResourceEnvelope, MemoryResult, PatternCandidate, ProfileTraitEffect } from '@/lib/contracts/insights-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 import { requestId } from '@/lib/client/request-id'
@@ -20,11 +20,12 @@ function confirmedDate(value: string | number | undefined) {
 }
 
 export default function InsightsPage() {
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const [loading, setLoading] = useState(true)
   const [promoting, setPromoting] = useState('')
   const [candidates, setCandidates] = useState<PatternCandidate[]>([])
   const [learned, setLearned] = useState<LearnedPattern[]>([])
+  const [effects, setEffects] = useState<ProfileTraitEffect[]>([])
   const [query, setQuery] = useState('')
   const [topK, setTopK] = useState(5)
   const [searching, setSearching] = useState(false)
@@ -35,12 +36,14 @@ export default function InsightsPage() {
   const loadInsights = useCallback(async () => {
     setLoading(true)
     try {
-      const [patternData, profileData] = await Promise.all([
+      const [patternData, profileData, effectData] = await Promise.all([
         apiRequest<LearningResourceEnvelope<{ patterns: PatternCandidate[] }>>('/api/patterns/candidates'),
         apiRequest<ResourceEnvelope<{ profile: { learned_patterns?: LearnedPattern[] } }>>('/api/profile'),
+        apiRequest<LearningResourceEnvelope<{ effects: ProfileTraitEffect[] }>>('/api/profile-traits/effects'),
       ])
       setCandidates(patternData.data.patterns || [])
       setLearned((profileData.data.profile.learned_patterns || []).filter((pattern) => pattern.user_confirmed))
+      setEffects(effectData.data.effects || [])
     } catch (error) {
       toast(error instanceof Error ? error.message : t('insights.loadFailed'))
     } finally {
@@ -143,6 +146,22 @@ export default function InsightsPage() {
         </header>
 
         <Card><CardHeader><CardTitle>{t('insights.recentObservations')}</CardTitle><CardDescription>{t('insights.recentDescription')}</CardDescription></CardHeader><CardContent className="grid gap-3 md:grid-cols-2">{recent.map((memory) => <article key={memory.memory_id} className="rounded-xl border bg-background/75 p-4"><p className="text-sm leading-relaxed">{memory.text}</p><p className="mt-3 text-xs text-muted-foreground">{memory.source_type} · {confirmedDate(memory.created_at)}</p><details className="mt-3 text-xs text-muted-foreground"><summary className="cursor-pointer">{t('insights.technicalDetails')}</summary><pre className="mt-2 overflow-auto whitespace-pre-wrap">{JSON.stringify({ score: memory.score, metadata: memory.metadata, evidence_role: memory.evidence_role, plan_write_allowed: memory.plan_write_allowed }, null, 2)}</pre></details></article>)}</CardContent></Card>
+
+        <Card>
+          <CardHeader><div className="mb-2 grid h-10 w-10 place-items-center rounded-xl bg-violet-600 text-white"><BarChart3 className="h-5 w-5" /></div><CardTitle>{locale === 'zh' ? '个人节奏的使用结果' : 'Personal rhythm outcomes'}</CardTitle><CardDescription>{locale === 'zh' ? '仅汇总使用该画像后的实际反馈，不代表画像造成了这些结果，也不会自动修改画像。' : 'Descriptive outcomes after a trait was used. These are not causal claims and never update your profile automatically.'}</CardDescription></CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-2">
+            {effects.length === 0 && <p className="text-sm text-muted-foreground">{locale === 'zh' ? '目前没有已确认画像或相关执行反馈。' : 'No confirmed traits or linked execution feedback yet.'}</p>}
+            {effects.map((effect) => {
+              const assessment = {
+                insufficient_data: locale === 'zh' ? '样本不足' : 'Not enough data',
+                initially_consistent: locale === 'zh' ? '初步一致' : 'Initially consistent',
+                mixed: locale === 'zh' ? '结果混合' : 'Mixed results',
+                possible_mismatch: locale === 'zh' ? '可能不匹配，建议审查' : 'Possible mismatch; review suggested',
+              }[effect.assessment]
+              return <article key={effect.trait_id} className="rounded-xl border bg-background/80 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-medium">{effect.pattern_label || effect.trait_key}</p><p className="mt-1 text-xs text-muted-foreground">{effect.usage_with_feedback_count} {locale === 'zh' ? '次有反馈的使用' : 'uses with feedback'} · {effect.execution_session_count} Session</p></div><span className="rounded-full bg-muted px-2.5 py-1 text-[11px] text-muted-foreground">{assessment}</span></div><div className="mt-3 grid grid-cols-2 gap-2 text-xs"><div className="rounded-lg bg-emerald-500/10 p-2">{locale === 'zh' ? '完成' : 'Completed'}: {effect.completion.completed}<br />{locale === 'zh' ? '部分完成' : 'Partial'}: {effect.completion.partial}</div><div className="rounded-lg bg-violet-500/10 p-2">{locale === 'zh' ? '时机合适' : 'Timing helpful'}: {effect.timing_feedback.helpful}<br />{locale === 'zh' ? '时机不合适' : 'Timing unhelpful'}: {effect.timing_feedback.unhelpful}</div></div><details className="mt-3 text-xs text-muted-foreground"><summary className="cursor-pointer">{t('insights.technicalDetails')}</summary><pre className="mt-2 overflow-auto whitespace-pre-wrap">{JSON.stringify({ trait_id: effect.trait_id, value: effect.value, evidence_ids: effect.evidence_ids, causal_claim_allowed: effect.causal_claim_allowed, profile_write_allowed: effect.profile_write_allowed }, null, 2)}</pre></details></article>
+            })}
+          </CardContent>
+        </Card>
 
         <section className="grid gap-6 lg:grid-cols-2">
           <Card className="border-emerald-500/30 bg-emerald-500/5">

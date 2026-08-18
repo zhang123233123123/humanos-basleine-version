@@ -5442,6 +5442,27 @@ class Store:
             )
         ]
 
+    def profile_trait_effects(self, user_id: str) -> list[dict]:
+        """Return descriptive execution outcomes without changing Profile."""
+        from app.application.trait_effects import summarize_trait_effects
+
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT trait_json,candidate_id FROM profile_traits WHERE user_id=? AND status='confirmed' ORDER BY confirmed_at",
+                (user_id,),
+            ).fetchall()
+            label_rows = conn.execute(
+                "SELECT candidate_id,pattern_label FROM pattern_decisions WHERE user_id=? AND action='confirm' ORDER BY created_at",
+                (user_id,),
+            ).fetchall()
+        traits = [from_json(row["trait_json"], {}) for row in rows]
+        labels_by_candidate = {str(row["candidate_id"]): str(row["pattern_label"]) for row in label_rows}
+        labels = {
+            str(trait.get("trait_id")): labels_by_candidate.get(str(trait.get("source_candidate_id") or ""), "")
+            for trait in traits
+        }
+        return summarize_trait_effects(traits, self.list_personalization_evidence(user_id), labels)
+
     def _find_pattern_candidate(self, user_id: str, payload: dict) -> dict:
         candidate_id = str(payload.get("candidate_id") or "").strip()
         label = str(payload.get("pattern_label") or "").strip()
@@ -7903,6 +7924,12 @@ class Handler(BaseHTTPRequestHandler):
                 user_id = query.get("user_id", ["demo"])[0]
                 store.ensure_profile(user_id)
                 self.send_json({"data": {"patterns": store.pattern_candidates(user_id)}, "resources": {"profile": "/api/profile", "memories": "/api/memories/search"}, "meta": {"resource": "pattern_candidates", "aggregate_root": "profile", "read_only": True, "confirmation_required": True, "plan_write_allowed": False}})
+                return
+
+            if path == "/api/profile-traits/effects" and method == "GET":
+                user_id = query.get("user_id", ["demo"])[0]
+                store.ensure_profile(user_id)
+                self.send_json({"data": {"effects": store.profile_trait_effects(user_id)}, "resources": {"profile": "/api/profile", "patterns": "/api/patterns/candidates"}, "meta": {"resource": "profile_trait_effects", "aggregate_root": "profile", "read_only": True, "causal_claim_allowed": False, "profile_write_allowed": False, "plan_write_allowed": False}})
                 return
 
             if path == "/api/patterns/promote" and method == "POST":
