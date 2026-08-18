@@ -9,6 +9,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from humanos_graph import build_scheduling_context, day_index_from_due, parse_due_start_hour, profile_now
 from app.domain.timeline import WeeklySegment, WeeklyTimeAxis
+try:
+    from app.application.scheduling_traits import weak_prior_score
+except ImportError:  # package import via ``backend.app`` in repository-root tests
+    from backend.app.application.scheduling_traits import weak_prior_score
 
 
 GRID_MINUTES = 15
@@ -61,6 +65,33 @@ def _overlaps(start: int, end: int, occupied: list[tuple[int, int]]) -> bool:
     return any(candidate.overlaps(WeeklySegment(occupied_start, occupied_end)) for occupied_start, occupied_end in occupied)
 
 
+def _find_slot(
+    available: list[WeeklySegment], occupied: list[WeeklySegment], *, duration_minutes: int,
+    not_before: int, deadline: int | None, rest_after_minutes: int, priors: dict[str, Any],
+    task_demand: str, today_index: int,
+) -> tuple[WeeklySegment | None, list[str]]:
+    """Choose among feasible slots using traits only as a soft tiebreak."""
+    boundary = 10080 if deadline is None else min(max(deadline, 0), 10080)
+    candidates: list[tuple[int, int, WeeklySegment, list[str]]] = []
+    free = WeeklyTimeAxis.subtract(available, occupied)
+    for segment in free:
+        start = math.ceil(max(segment.start, not_before) / GRID_MINUTES) * GRID_MINUTES
+        while start + duration_minutes <= min(segment.end, boundary):
+            end = start + duration_minutes
+            day_end = min((start // 1440 + 1) * 1440, 10080)
+            protected = WeeklySegment(start, min(end + rest_after_minutes, day_end))
+            if any(item.contains(protected) for item in free):
+                score, trait_ids = weak_prior_score(
+                    start_minute=start, task_demand=task_demand, priors=priors, today_index=today_index,
+                )
+                candidates.append((-score, start, WeeklySegment(start, end), trait_ids))
+            start += GRID_MINUTES
+    if not candidates:
+        return None, []
+    _, _, selected, used = min(candidates, key=lambda item: (item[0], item[1]))
+    return selected, used
+
+
 def _dependency_order(tasks: list[dict[str, Any]], analysis: dict[str, Any], now: datetime) -> list[dict[str, Any]]:
     task_map = {str(task.get("id")): task for task in tasks}
     predecessors: dict[str, set[str]] = {task_id: set() for task_id in task_map}
@@ -104,6 +135,7 @@ def build_deterministic_plan(
     """Allocate task sessions without allowing the model to invent times."""
     payload = payload or {}
     analysis = analysis or {}
+    scheduling_priors = dict(payload.get("scheduling_priors") or {})
     timezone_name = str(profile.get("timezone") or "Asia/Shanghai")
     now = profile_now(profile)
     week_id = str(payload.get("week_id") or profile.get("active_week_id") or (profile.get("weekly_context") or {}).get("week_id") or (now - timedelta(days=now.weekday())).date().isoformat())
@@ -209,6 +241,11 @@ def build_deterministic_plan(
 
     current_axis = max(round((now - week_start).total_seconds() / 60 / GRID_MINUTES) * GRID_MINUTES, 0) if week_start <= now < week_start + timedelta(days=7) else 0
     unscheduled: list[dict[str, Any]] = []
+    applied_trait_ids: set[str] = set()
+    demand_map = {
+        str(item.get("task_id")): str(item.get("level") or "medium")
+        for item in analysis.get("task_demands") or [] if isinstance(item, dict)
+    }
     for task in _dependency_order(list(active_tasks.values()), analysis, now):
         task_id = str(task["id"])
         remaining = _remaining_minutes(task) - allocated[task_id]
@@ -218,26 +255,31 @@ def build_deterministic_plan(
         while remaining > 0:
             work = min(session_minutes, remaining)
             work = max(math.ceil(work / GRID_MINUTES) * GRID_MINUTES if work > GRID_MINUTES else work, GRID_MINUTES)
-            chosen_segment = WeeklyTimeAxis.find_slot(
+            chosen_segment, used_trait_ids = _find_slot(
                 available_segments,
                 [WeeklySegment(start, end) for start, end in occupied],
                 duration_minutes=work,
                 not_before=max(current_axis, dependency_ready),
                 deadline=deadline,
                 rest_after_minutes=rest_minutes,
-                grid_minutes=GRID_MINUTES,
+                priors=scheduling_priors,
+                task_demand=demand_map.get(task_id, "medium"),
+                today_index=now.weekday(),
             )
             used_buffer = False
             if chosen_segment is None and context.get("keep_buffer"):
-                chosen_segment = WeeklyTimeAxis.find_slot(
+                chosen_segment, buffer_trait_ids = _find_slot(
                     full_available_segments,
                     [WeeklySegment(start, end) for start, end in occupied],
                     duration_minutes=work,
                     not_before=max(current_axis, dependency_ready),
                     deadline=deadline,
                     rest_after_minutes=rest_minutes,
-                    grid_minutes=GRID_MINUTES,
+                    priors=scheduling_priors,
+                    task_demand=demand_map.get(task_id, "medium"),
+                    today_index=now.weekday(),
                 )
+                used_trait_ids = buffer_trait_ids
                 used_buffer = chosen_segment is not None
             chosen = (chosen_segment.start, chosen_segment.end) if chosen_segment else None
             if not chosen:
@@ -260,6 +302,7 @@ def build_deterministic_plan(
                 })
                 break
             start, end = chosen
+            applied_trait_ids.update(used_trait_ids)
             start_at = week_start + timedelta(minutes=start)
             end_at = week_start + timedelta(minutes=end)
             actual_work = min(work, remaining)
@@ -286,6 +329,7 @@ def build_deterministic_plan(
                     f"Profile focus-session length: {session_minutes} minutes",
                     f"Profile protected rest after session: {rest_minutes} minutes",
                     "Allocated by deterministic Python weekly timeline",
+                    *( [f"Confirmed profile trait used as a weak tiebreak: {trait_id}" for trait_id in used_trait_ids] ),
                     *( ["Protected buffer was used because preferred capacity before the deadline was insufficient."] if used_buffer else [] ),
                 ],
                 "used_buffer": used_buffer,
@@ -310,10 +354,17 @@ def build_deterministic_plan(
         "ai_task_analysis": analysis,
         "requires_confirmation": True,
         "control_mode": "python_scheduled_user_confirmed",
-        "explanation": f"Python allocated {len(blocks)} focus sessions on the weekly timeline using {session_minutes}-minute sessions and {rest_minutes}-minute protected breaks. AI analysis is retained for demand, dependency, and soft-risk review.",
+        "explanation": f"Python allocated {len(blocks)} focus sessions on the weekly timeline using {session_minutes}-minute sessions and {rest_minutes}-minute protected breaks. Confirmed traits were used only as soft tiebreaks after hard constraints and current-day state.",
         "confidence": {"level": "high" if not unscheduled else "medium", "evidence": ["Profile", "Weekly Context", "Task deadlines", "Task dependencies", "Python timeline allocation"]},
         "constraint_summary": {**context, "preferred_session_minutes": session_minutes, "rest_minutes": rest_minutes},
         "scheduler": {"engine": "python_timeline_v2", "axis_start": 0, "axis_end": 10080, "grid_minutes": GRID_MINUTES, "session_minutes": session_minutes, "rest_minutes": rest_minutes, "initial_available_minutes": WeeklyTimeAxis.capacity(initial_free_segments), "ai_role": "task_analysis_and_soft_review"},
+        "personalization": {
+            "authority": "weak_prior",
+            "applied_trait_ids": sorted(applied_trait_ids),
+            "available_trait_ids": sorted(str(item.get("trait_id")) for item in scheduling_priors.get("hints") or [] if item.get("trait_id")),
+            "today_state_overrode_traits": bool(scheduling_priors.get("today_override")),
+            "current_day_demand": scheduling_priors.get("current_day_demand"),
+        },
         "task_ids": sorted(active_tasks),
         "week_id": week_id,
     }

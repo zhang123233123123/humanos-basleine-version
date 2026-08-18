@@ -6295,6 +6295,7 @@ class Store:
 
     def decide_schedule(self, user_id: str, payload: dict) -> dict:
         from app.application.deterministic_scheduler import build_deterministic_plan
+        from app.application.scheduling_traits import compile_scheduling_priors
 
         request_id = str(payload.get("request_id") or "").strip()
         cache_key = f"{user_id}:{request_id}" if request_id else ""
@@ -6310,6 +6311,13 @@ class Store:
                 and (not week_id or not task.get("week_id") or str(task.get("week_id")) == week_id)
             ]
             runtime_state = payload.get("runtime_state") or self.latest_runtime_state(user_id)
+            with self.connect() as conn:
+                trait_rows = conn.execute(
+                    "SELECT trait_json FROM profile_traits WHERE user_id=? AND status='confirmed' ORDER BY confirmed_at",
+                    (user_id,),
+                ).fetchall()
+            confirmed_traits = [from_json(row["trait_json"], {}) for row in trait_rows]
+            scheduling_priors = compile_scheduling_priors(confirmed_traits, runtime_state)
             query = payload.get("query") or self.build_schedule_query(tasks, runtime_state)
             memories = self.search_memories(user_id, query, top_k=4)
             analysis_state = {
@@ -6331,7 +6339,7 @@ class Store:
                 tasks=tasks,
                 analysis=analysis,
                 existing_plan=existing_plan,
-                payload=payload,
+                payload={**payload, "scheduling_priors": scheduling_priors},
             )
             review_payload = {
                 "profile_rules": decision.get("scheduler"),
@@ -6345,6 +6353,7 @@ class Store:
                 "unscheduled_tasks": decision.get("unscheduled_tasks", []),
                 "task_demands": analysis.get("task_demands", []),
                 "dependencies": analysis.get("dependencies", []),
+                "personalization": decision.get("personalization", {}),
             }
             ai_soft_review = chat_completion([
                 {"role": "system", "content": "Review this Python-generated weekly schedule for soft risks only. Do not change exact times. Return JSON with status, risks, strengths, and user_message. Consider cognitive load, context switching, buffer, deadline pressure, and profile rhythm."},

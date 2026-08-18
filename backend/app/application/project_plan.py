@@ -58,6 +58,7 @@ def project_plan_for_persistence(
             for item in (profile.get("learned_patterns") or [])
             if isinstance(item, dict) and item.get("user_confirmed") and item.get("pattern_label")
         ],
+        "applied_profile_trait_ids": list((decision.get("personalization") or {}).get("applied_trait_ids") or []),
     }
 
     task_ids = {
