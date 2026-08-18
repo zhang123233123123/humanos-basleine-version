@@ -88,7 +88,9 @@ def _find_slot(
             start += GRID_MINUTES
     if not candidates:
         return None, []
-    _, _, selected, used = min(candidates, key=lambda item: (item[0], item[1]))
+    # A weak prior may choose a time within the earliest feasible day, but must
+    # never delay work to a later day merely to match a learned rhythm.
+    _, _, selected, used = min(candidates, key=lambda item: (item[1] // 1440, item[0], item[1]))
     return selected, used
 
 
@@ -363,7 +365,6 @@ def build_deterministic_plan(
             "applied_trait_ids": sorted(applied_trait_ids),
             "available_trait_ids": sorted(str(item.get("trait_id")) for item in scheduling_priors.get("hints") or [] if item.get("trait_id")),
             "today_state_overrode_traits": bool(scheduling_priors.get("today_override")),
-            "current_day_demand": scheduling_priors.get("current_day_demand"),
         },
         "task_ids": sorted(active_tasks),
         "week_id": week_id,

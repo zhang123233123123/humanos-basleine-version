@@ -53,20 +53,10 @@ def compile_scheduling_priors(
             "evidence_ids": list(trait.get("evidence_ids") or []),
             "authority": "weak_prior",
         })
-    current_day_demand = None
-    if runtime_state.get("source") == "self_report":
-        focus = int(runtime_state.get("focus") or 4)
-        energy = int(runtime_state.get("energy") or 4)
-        stress = int(runtime_state.get("stress") or 4)
-        if focus <= 3 or energy <= 3 or stress >= 6:
-            current_day_demand = "low"
-        elif focus >= 5 and energy >= 5 and stress <= 5:
-            current_day_demand = "high"
     return {
         "hints": hints,
         "ignored": ignored,
         "today_override": runtime_state.get("source") == "self_report",
-        "current_day_demand": current_day_demand,
         "authority": "soft_tiebreak_only",
     }
 
@@ -77,8 +67,7 @@ def weak_prior_score(
     """Score a feasible slot; never rejects or moves a slot by itself."""
     day_index = start_minute // 1440
     if priors.get("today_override") and day_index == today_index:
-        current_demand = priors.get("current_day_demand")
-        return (2 if current_demand and task_demand == current_demand else 0), []
+        return 0, []
     minute_of_day = start_minute % 1440
     score = 0
     used: list[str] = []

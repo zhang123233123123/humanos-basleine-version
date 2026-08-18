@@ -38,17 +38,6 @@ class SchedulingTraitTests(unittest.TestCase):
         self.assertEqual((0, []), (today_score, used))
         self.assertEqual((1, ["trait-energy"]), (tomorrow_score, tomorrow_used))
 
-    def test_current_state_has_more_weight_than_long_term_trait(self):
-        priors = compile_scheduling_priors([trait()], {"source": "self_report", "focus": 2, "energy": 2, "stress": 6})
-        low_score, low_used = weak_prior_score(
-            start_minute=0 * 1440 + 14 * 60, task_demand="low", priors=priors, today_index=0,
-        )
-        high_score, high_used = weak_prior_score(
-            start_minute=0 * 1440 + 14 * 60, task_demand="high", priors=priors, today_index=0,
-        )
-        self.assertEqual((2, []), (low_score, low_used))
-        self.assertEqual((0, []), (high_score, high_used))
-
     def test_weak_prior_selects_feasible_matching_slot_and_is_explained(self):
         profile = {
             "timezone": "Asia/Shanghai",
@@ -86,6 +75,22 @@ class SchedulingTraitTests(unittest.TestCase):
         )
         block = next(item for item in result["plan_patch"] if item.get("task_id") == "hard")
         self.assertEqual(9.0, block["start"])
+        self.assertEqual([], result["personalization"]["applied_trait_ids"])
+
+    def test_weak_prior_never_delays_work_to_a_later_day(self):
+        profile = {
+            "timezone": "Asia/Shanghai", "_client_now": "2026-08-03T07:00:00+08:00",
+            "task_preferences": {"preferred_session_minutes": 45, "rest_between_tasks_minutes": 15},
+            "weekly_context": {"week_id": "2026-08-03", "weekly_available_windows": "周二 09:00-10:00；周三 14:00-15:00", "fixed_events": [], "temporary_constraints": [], "keep_buffer": False},
+        }
+        result = build_deterministic_plan(
+            profile=profile,
+            tasks=[{"id": "hard", "title": "Hard task", "type": "flexible_task", "duration": 45, "priority": "high", "status": "queued", "due": "周四 18:00"}],
+            analysis={"task_demands": [{"task_id": "hard", "level": "high"}]},
+            payload={"week_id": "2026-08-03", "scheduling_priors": compile_scheduling_priors([trait()])},
+        )
+        block = next(item for item in result["plan_patch"] if item.get("task_id") == "hard")
+        self.assertEqual((1, 9.0), (block["day_index"], block["start"]))
         self.assertEqual([], result["personalization"]["applied_trait_ids"])
 
 
