@@ -1,6 +1,17 @@
 export interface PatternCandidate {
+  candidate_id: string
   pattern_label: string
+  trait_key: string
+  proposed_value: Record<string, unknown>
+  scope: Record<string, unknown>
+  supporting_evidence_ids: string[]
+  counter_evidence_ids: string[]
   episode_count: number
+  counter_evidence_count: number
+  evidence_day_count: number
+  support_day_count: number
+  support_ratio: number
+  confidence_level: 'low' | 'medium' | 'high'
   status: 'candidate' | 'insufficient_evidence' | string
   can_suggest_update: boolean
   requires_user_confirmation: boolean

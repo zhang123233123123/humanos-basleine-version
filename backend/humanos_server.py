@@ -4381,6 +4381,7 @@ class Store:
         accepted = bool(payload.get("accepted"))
         task_id = str(payload.get("task_id") or "") or None
         feedback = {
+            "user_id": user_id,
             "recommendation_id": recommendation_id,
             "accepted": accepted,
             "recommended_action": payload.get("recommended_action"),
@@ -4392,14 +4393,14 @@ class Store:
             selected_action=feedback["selected_action"],
             accepted=accepted,
         )
-        self.add_memory(
-            user_id=user_id,
-            source_type="episodic_memory",
-            source_id=recommendation_id,
-            task_id=task_id,
-            text=f"Help-me-decide recommendation feedback: {as_json(feedback)}",
-            metadata={"kind": "recommendation_feedback", "eligible_for_pattern": True, "pattern_label": pattern_label, "interruption_reason": payload.get("reason"), **feedback},
-        )
+        feedback["pattern_label"] = pattern_label
+        feedback["reason"] = payload.get("reason")
+        task = self.get_task(task_id, user_id) if task_id else None
+        with self.connect() as conn:
+            self._enqueue_personalization(
+                conn, user_id=user_id, kind="recommendation_feedback", source_id=recommendation_id,
+                payload={"feedback": feedback, "task": task}, timestamp=feedback["created_at"],
+            )
         self.log_event(user_id, "help_decide_recommendation_feedback", feedback)
         return feedback
 
@@ -5338,24 +5339,16 @@ class Store:
         return transition
 
     def pattern_candidates(self, user_id: str) -> list[dict]:
-        """Three similar episodes create a candidate; static profile still needs confirmation."""
+        """Aggregate traceable evidence; never infer candidates from legacy memories."""
         profile = self.ensure_profile(user_id)
-        with self.connect() as conn:
-            rows = conn.execute(
-                "SELECT metadata_json, created_at FROM memories WHERE user_id=? AND source_type='episodic_memory'",
-                (user_id,),
-            ).fetchall()
-        from app.domain.profile import build_pattern_candidates
+        from app.application.pattern_aggregation import build_evidence_pattern_candidates
 
-        candidates = build_pattern_candidates(
-            [
-                {"metadata": from_json(row["metadata_json"], {}), "created_at": row["created_at"]}
-                for row in rows
-            ],
+        candidates = build_evidence_pattern_candidates(
+            self.list_personalization_evidence(user_id), user_id=user_id,
             timezone_name=profile.get("timezone") or "Asia/Shanghai",
         )
         dismissed = set((profile.get("research_context") or {}).get("dismissed_pattern_labels") or [])
-        return [{**item, "evidence_role": "profile_learning_evidence", "user_confirmed": False, "plan_write_allowed": False} for item in candidates if item.get("pattern_label") not in dismissed]
+        return [item for item in candidates if item.get("pattern_label") not in dismissed]
 
     def promote_pattern(self, user_id: str, payload: dict) -> dict:
         profile = self.ensure_profile(user_id)
@@ -5367,6 +5360,8 @@ class Store:
             raise ValueError("pattern candidate does not exist")
         if candidate.get("status") != "candidate":
             raise ValueError("pattern candidate has not reached the evidence threshold")
+        if not candidate.get("can_suggest_update"):
+            raise ValueError("pattern candidate needs more cross-day evidence before confirmation")
         if not bool(payload.get("user_confirmed")):
             raise ValueError("user confirmation is required before promoting a pattern")
 
