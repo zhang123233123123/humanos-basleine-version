@@ -291,7 +291,7 @@ const zh = {
   },
   insights: {
     title: '行为洞察与记忆', subtitle: '查看系统观察到的重复情景，并由你决定哪些规律可以成为长期偏好。', workspace: '返回工作台', loadFailed: '加载洞察失败', recentObservations: '近期观察', recentDescription: '这些是执行产生的事实证据，不会直接修改计划。', technicalDetails: '技术细节', confirmedPatterns: '已确认规律', confirmedDescription: '只有你明确确认的规律才会影响长期 Profile。', noConfirmed: '还没有已确认的长期规律。', evidenceCount: '证据次数', confirmedOn: '确认于', editPattern: '编辑', forgetPattern: '遗忘', dismissPattern: '忽略', editPrompt: '修改这条规律的表述', editSaved: '规律已更新', forgetSaved: '规律已遗忘', dismissSaved: '候选已忽略', manageFailed: '更新规律失败',
-    candidatePatterns: '候选观察', candidateDescription: '这些是系统观察，不是关于你的既定事实。', noCandidates: '还没有形成候选观察。', episodes: '次相似情景', readyForReview: '等待确认', gatheringEvidence: '继续收集证据', confirmationNotice: '确认后才会写入长期偏好。', moreDaysRequired: '需要更多跨日证据后才能建议提升。', confirmPattern: '确认规律', confirmed: '已确认', patternConfirmed: '规律已由你确认', promoteFailed: '确认规律失败',
+    candidatePatterns: '候选观察', candidateDescription: '这些是系统观察，不是关于你的既定事实。', noCandidates: '还没有形成候选观察。', episodes: '次相似情景', counterEvidence: '条反证', readyForReview: '等待确认', gatheringEvidence: '继续收集证据', confirmationNotice: '确认后才会写入长期偏好。', moreDaysRequired: '需要更多跨日证据后才能建议提升。', denyPattern: '不符合我', deferPattern: '稍后处理', denySaved: '已记录为反证', deferSaved: '已暂缓 7 天', confirmPattern: '确认规律', confirmed: '已确认', patternConfirmed: '规律已由你确认', promoteFailed: '确认规律失败',
     memorySearch: '个性化记忆搜索', memoryDescription: '搜索任务、执行、中断和反馈形成的可检索摘要。', searchPlaceholder: '例如：什么方法帮助我在中断后恢复？', search: '搜索记忆', searchFailed: '搜索记忆失败', noMemories: '没有找到相关记忆。', taskLinked: '关联任务',
   },
 }

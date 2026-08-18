@@ -848,6 +848,35 @@ class Store:
                 CREATE INDEX IF NOT EXISTS idx_personalization_outbox_status_sequence
                 ON personalization_outbox(status, sequence_number);
 
+                CREATE TABLE IF NOT EXISTS pattern_decisions (
+                  id TEXT PRIMARY KEY,
+                  user_id TEXT NOT NULL,
+                  candidate_id TEXT NOT NULL,
+                  pattern_label TEXT NOT NULL,
+                  action TEXT NOT NULL,
+                  request_id TEXT,
+                  candidate_json TEXT NOT NULL,
+                  defer_until INTEGER,
+                  created_at INTEGER NOT NULL,
+                  updated_at INTEGER NOT NULL
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_pattern_decision_request
+                ON pattern_decisions(user_id, request_id) WHERE request_id IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS idx_pattern_decision_candidate
+                ON pattern_decisions(user_id, candidate_id, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS profile_traits (
+                  id TEXT PRIMARY KEY,
+                  user_id TEXT NOT NULL,
+                  candidate_id TEXT NOT NULL,
+                  trait_key TEXT NOT NULL,
+                  trait_json TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  confirmed_at INTEGER NOT NULL,
+                  updated_at INTEGER NOT NULL,
+                  UNIQUE(user_id, candidate_id)
+                );
+
                 CREATE TABLE IF NOT EXISTS chat_turns (
                   id TEXT PRIMARY KEY,
                   user_id TEXT NOT NULL,
@@ -1500,6 +1529,8 @@ class Store:
             "behavior_events",
             "evidence_items",
             "personalization_outbox",
+            "pattern_decisions",
+            "profile_traits",
             "chat_turns",
             "execution_feedback",
             "state_transitions",
@@ -5338,43 +5369,128 @@ class Store:
         self.log_event(user_id, "state_transition_recorded", transition)
         return transition
 
-    def pattern_candidates(self, user_id: str) -> list[dict]:
-        """Aggregate traceable evidence; never infer candidates from legacy memories."""
+    def _all_pattern_candidates(self, user_id: str) -> list[dict]:
         profile = self.ensure_profile(user_id)
         from app.application.pattern_aggregation import build_evidence_pattern_candidates
 
-        candidates = build_evidence_pattern_candidates(
+        return build_evidence_pattern_candidates(
             self.list_personalization_evidence(user_id), user_id=user_id,
             timezone_name=profile.get("timezone") or "Asia/Shanghai",
         )
+
+    def pattern_candidates(self, user_id: str) -> list[dict]:
+        """Return reviewable candidates while respecting deny and defer decisions."""
+        profile = self.ensure_profile(user_id)
+        candidates = self._all_pattern_candidates(user_id)
         dismissed = set((profile.get("research_context") or {}).get("dismissed_pattern_labels") or [])
-        return [item for item in candidates if item.get("pattern_label") not in dismissed]
+        with self.connect() as conn:
+            decisions = conn.execute(
+                "SELECT * FROM pattern_decisions WHERE user_id=? ORDER BY created_at DESC",
+                (user_id,),
+            ).fetchall()
+        latest = {}
+        for row in decisions:
+            latest.setdefault(str(row["candidate_id"]), dict(row))
+        current_ms = int(time.time() * 1000)
+        return [
+            item for item in candidates
+            if item.get("pattern_label") not in dismissed
+            and item.get("status") != "dismissed"
+            and not (
+                latest.get(str(item["candidate_id"]), {}).get("action") in {"deny", "forget"}
+                or (
+                    latest.get(str(item["candidate_id"]), {}).get("action") == "defer"
+                    and int(latest.get(str(item["candidate_id"]), {}).get("defer_until") or 0) > current_ms
+                )
+            )
+        ]
+
+    def _find_pattern_candidate(self, user_id: str, payload: dict) -> dict:
+        candidate_id = str(payload.get("candidate_id") or "").strip()
+        label = str(payload.get("pattern_label") or "").strip()
+        candidate = next((item for item in self._all_pattern_candidates(user_id) if candidate_id and item.get("candidate_id") == candidate_id), None)
+        if candidate is None and label:
+            candidate = next((item for item in self._all_pattern_candidates(user_id) if item.get("pattern_label") == label), None)
+        if not candidate:
+            raise ValueError("pattern candidate does not exist")
+        return candidate
 
     def promote_pattern(self, user_id: str, payload: dict) -> dict:
         profile = self.ensure_profile(user_id)
         from app.domain.profile import promote_confirmed_pattern
 
-        label = str(payload.get("pattern_label") or "").strip()
-        candidate = next((item for item in self.pattern_candidates(user_id) if item.get("pattern_label") == label), None)
-        if not candidate:
-            raise ValueError("pattern candidate does not exist")
+        candidate = self._find_pattern_candidate(user_id, payload)
+        label = str(candidate["pattern_label"])
         if candidate.get("status") != "candidate":
             raise ValueError("pattern candidate has not reached the evidence threshold")
         if not candidate.get("can_suggest_update"):
             raise ValueError("pattern candidate needs more cross-day evidence before confirmation")
         if not bool(payload.get("user_confirmed")):
             raise ValueError("user confirmation is required before promoting a pattern")
+        from app.domain.personalization import ProfileTrait
 
-        profile["learned_patterns"] = promote_confirmed_pattern(
+        timestamp = now_ms()
+        trait = ProfileTrait(
+            trait_id=new_id("trait"), user_id=user_id, trait_key=str(candidate["trait_key"]),
+            value=candidate["proposed_value"], scope=candidate["scope"],
+            evidence_ids=tuple(candidate["supporting_evidence_ids"]),
+            confidence_level=str(candidate["confidence_level"]), user_confirmed=True,
+            confirmed_at=timestamp, updated_at=timestamp,
+            source_candidate_id=str(candidate["candidate_id"]),
+        )
+        learned_patterns = promote_confirmed_pattern(
             list(profile.get("learned_patterns") or []),
             pattern_label=label,
             evidence_count=int(candidate.get("episode_count") or 0),
             user_confirmed=True,
-            confirmed_at=now_ms(),
+            confirmed_at=timestamp,
         )
-        updated = self.upsert_profile(profile)
+        request_id = str(payload.get("request_id") or "").strip() or None
+        decision_id = new_id("decision")
+        with self.atomic() as conn:
+            if request_id:
+                existing_decision = conn.execute("SELECT id FROM pattern_decisions WHERE user_id=? AND request_id=?", (user_id, request_id)).fetchone()
+                if existing_decision:
+                    existing_trait = conn.execute("SELECT trait_json FROM profile_traits WHERE user_id=? AND candidate_id=?", (user_id, candidate["candidate_id"])).fetchone()
+                    updated = self.get_profile(user_id) or profile
+                    return {"learned_patterns": updated.get("learned_patterns", []), "profile_trait": from_json(existing_trait["trait_json"], None) if existing_trait else None, "replayed": True, "active_plan_revision": updated.get("active_plan_revision")}
+            existing_trait = conn.execute("SELECT trait_json FROM profile_traits WHERE user_id=? AND candidate_id=?", (user_id, candidate["candidate_id"])).fetchone()
+            if existing_trait:
+                updated = self.get_profile(user_id) or profile
+                return {"learned_patterns": updated.get("learned_patterns", []), "profile_trait": from_json(existing_trait["trait_json"], None), "replayed": True, "active_plan_revision": updated.get("active_plan_revision")}
+            conn.execute("INSERT INTO profile_traits (id,user_id,candidate_id,trait_key,trait_json,status,confirmed_at,updated_at) VALUES (?,?,?,?,?,'confirmed',?,?)", (trait.trait_id, user_id, candidate["candidate_id"], trait.trait_key, trait.model_dump_json(), timestamp, timestamp))
+            conn.execute("UPDATE profiles SET learned_patterns_json=?,updated_at=? WHERE user_id=?", (as_json(learned_patterns), timestamp, user_id))
+            conn.execute("INSERT INTO pattern_decisions (id,user_id,candidate_id,pattern_label,action,request_id,candidate_json,defer_until,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)", (decision_id, user_id, candidate["candidate_id"], label, "confirm", request_id, as_json(candidate), None, timestamp, timestamp))
+        updated = self.get_profile(user_id) or profile
         promoted = next((item for item in updated.get("learned_patterns", []) if item.get("pattern_label") == label), None)
-        return {"learned_patterns": updated.get("learned_patterns", []), "promoted_pattern": promoted, "active_plan_revision": updated.get("active_plan_revision")}
+        self.log_event(user_id, "pattern_confirmed", {"candidate_id": candidate["candidate_id"], "trait_id": trait.trait_id, "active_plan_unchanged": True})
+        return {"learned_patterns": updated.get("learned_patterns", []), "promoted_pattern": promoted, "profile_trait": trait.model_dump(mode="json"), "active_plan_revision": updated.get("active_plan_revision")}
+
+    def decide_pattern_candidate(self, user_id: str, payload: dict) -> dict:
+        action = "deny" if str(payload.get("action") or "") == "dismiss" else str(payload.get("action") or "")
+        if action not in {"deny", "defer"}:
+            raise ValueError("candidate decision must be deny or defer")
+        candidate = self._find_pattern_candidate(user_id, payload)
+        with self.connect() as conn:
+            confirmed = conn.execute("SELECT 1 FROM profile_traits WHERE user_id=? AND candidate_id=? AND status='confirmed'", (user_id, candidate["candidate_id"])).fetchone()
+        if confirmed:
+            raise ValueError("confirmed pattern must be forgotten before it can be denied or deferred")
+        timestamp = now_ms()
+        request_id = str(payload.get("request_id") or "").strip() or None
+        defer_until = int(payload.get("defer_until") or timestamp + 7 * 86_400_000) if action == "defer" else None
+        if defer_until is not None and defer_until <= timestamp:
+            raise ValueError("defer_until must be in the future")
+        decision = {"id": new_id("decision"), "user_id": user_id, "candidate_id": candidate["candidate_id"], "pattern_label": candidate["pattern_label"], "action": action, "request_id": request_id, "candidate": candidate, "defer_until": defer_until, "created_at": timestamp}
+        with self.atomic() as conn:
+            if request_id:
+                existing = conn.execute("SELECT * FROM pattern_decisions WHERE user_id=? AND request_id=?", (user_id, request_id)).fetchone()
+                if existing:
+                    return {"decision": {**dict(existing), "candidate": from_json(existing["candidate_json"], {})}, "replayed": True, "active_plan_revision": self.ensure_profile(user_id).get("active_plan_revision")}
+            conn.execute("INSERT INTO pattern_decisions (id,user_id,candidate_id,pattern_label,action,request_id,candidate_json,defer_until,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)", (decision["id"], user_id, candidate["candidate_id"], candidate["pattern_label"], action, request_id, as_json(candidate), defer_until, timestamp, timestamp))
+            if action == "deny":
+                self._enqueue_personalization(conn, user_id=user_id, kind="pattern_denial", source_id=decision["id"], payload={"decision": decision}, timestamp=timestamp)
+        self.log_event(user_id, f"pattern_{action}", {"candidate_id": candidate["candidate_id"], "active_plan_unchanged": True})
+        return {"decision": decision, "active_plan_revision": self.ensure_profile(user_id).get("active_plan_revision")}
 
     def manage_pattern(self, user_id: str, payload: dict) -> dict:
         """Apply an explicit user decision without mutating the active plan."""
@@ -5382,18 +5498,14 @@ class Store:
         label = str(payload.get("pattern_label") or "").strip()
         if action == "confirm":
             return self.promote_pattern(user_id, {**payload, "user_confirmed": True})
-        if action not in {"edit", "dismiss", "forget"} or not label:
+        if action in {"deny", "defer", "dismiss"}:
+            return self.decide_pattern_candidate(user_id, payload)
+        if action not in {"edit", "forget"} or not label:
             raise ValueError("action and pattern_label are required")
         profile = self.ensure_profile(user_id)
         patterns = list(profile.get("learned_patterns") or [])
-        research = dict(profile.get("research_context") or {})
-        if action == "dismiss":
-            if not any(item.get("pattern_label") == label for item in self.pattern_candidates(user_id)):
-                raise ValueError("pattern candidate does not exist")
-            dismissed = set(research.get("dismissed_pattern_labels") or [])
-            dismissed.add(label)
-            research["dismissed_pattern_labels"] = sorted(dismissed)
-        elif action == "forget":
+        timestamp = now_ms()
+        if action == "forget":
             if not any(item.get("pattern_label") == label for item in patterns):
                 raise ValueError("confirmed pattern does not exist")
             patterns = [item for item in patterns if item.get("pattern_label") != label]
@@ -5405,13 +5517,25 @@ class Store:
             for item in patterns:
                 if item.get("pattern_label") == label:
                     item["pattern_label"] = replacement
-                    item["edited_at"] = now_ms()
+                    item["edited_at"] = timestamp
                     found = True
             if not found:
                 raise ValueError("confirmed pattern does not exist")
-        profile["learned_patterns"] = patterns
-        profile["research_context"] = research
-        updated = self.upsert_profile(profile)
+        request_id = str(payload.get("request_id") or "").strip() or None
+        with self.atomic() as conn:
+            if request_id and conn.execute("SELECT 1 FROM pattern_decisions WHERE user_id=? AND request_id=?", (user_id, request_id)).fetchone():
+                updated = self.get_profile(user_id) or profile
+                return {"learned_patterns": updated.get("learned_patterns", []), "action": action, "replayed": True, "active_plan_revision": updated.get("active_plan_revision")}
+            conn.execute("UPDATE profiles SET learned_patterns_json=?,updated_at=? WHERE user_id=?", (as_json(patterns), timestamp, user_id))
+            if action == "forget":
+                trait_row = conn.execute("SELECT candidate_id,trait_json FROM profile_traits WHERE user_id=? AND status='confirmed' AND candidate_id IN (SELECT candidate_id FROM pattern_decisions WHERE user_id=? AND pattern_label=?) LIMIT 1", (user_id, user_id, label)).fetchone()
+                candidate_id = str(trait_row["candidate_id"]) if trait_row else f"legacy_{hashlib.sha256(label.encode('utf-8')).hexdigest()[:20]}"
+                if trait_row:
+                    forgotten_trait = dict(from_json(trait_row["trait_json"], {}))
+                    forgotten_trait.update({"status": "forgotten", "updated_at": timestamp})
+                    conn.execute("UPDATE profile_traits SET trait_json=?,status='forgotten',updated_at=? WHERE user_id=? AND candidate_id=?", (as_json(forgotten_trait), timestamp, user_id, candidate_id))
+                conn.execute("INSERT INTO pattern_decisions (id,user_id,candidate_id,pattern_label,action,request_id,candidate_json,defer_until,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)", (new_id("decision"), user_id, candidate_id, label, "forget", request_id, as_json({"pattern_label": label}), None, timestamp, timestamp))
+        updated = self.get_profile(user_id) or profile
         self.log_event(user_id, f"pattern_{action}", {"pattern_label": label, "replacement_label": payload.get("replacement_label"), "active_plan_unchanged": True})
         return {"learned_patterns": updated.get("learned_patterns", []), "action": action, "active_plan_revision": updated.get("active_plan_revision")}
 

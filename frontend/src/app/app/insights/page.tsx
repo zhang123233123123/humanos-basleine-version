@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, BookOpenText, BrainCircuit, Check, CheckCircle2, Database, Loader2, LockKeyhole, Pencil, Search, Sparkles, Trash2, X } from 'lucide-react'
+import { ArrowLeft, BookOpenText, BrainCircuit, Check, CheckCircle2, Clock3, Database, Loader2, LockKeyhole, Pencil, Search, Sparkles, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -11,6 +11,7 @@ import type { ResourceEnvelope } from '@/lib/contracts/api-contracts'
 import type { LearnedPattern, LearningResourceEnvelope, MemoryResult, PatternCandidate } from '@/lib/contracts/insights-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
+import { requestId } from '@/lib/client/request-id'
 
 function confirmedDate(value: string | number | undefined) {
   if (!value) return ''
@@ -61,14 +62,16 @@ export default function InsightsPage() {
 
   const promote = async (candidate: PatternCandidate) => {
     if (candidate.status !== 'candidate' || !candidate.can_suggest_update) return
-    setPromoting(candidate.pattern_label)
+    setPromoting(candidate.candidate_id)
     try {
       const result = await apiRequest<LearningResourceEnvelope<{ learned_patterns: LearnedPattern[] }>>('/api/patterns/promote', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          candidate_id: candidate.candidate_id,
           pattern_label: candidate.pattern_label,
           evidence_count: candidate.episode_count,
           user_confirmed: true,
+          request_id: requestId('pattern-confirm'),
         }),
       })
       setLearned(result.data.learned_patterns.filter((pattern) => pattern.user_confirmed))
@@ -80,12 +83,31 @@ export default function InsightsPage() {
     }
   }
 
+  const decideCandidate = async (action: 'deny' | 'defer', candidate: PatternCandidate) => {
+    setPromoting(candidate.candidate_id)
+    try {
+      await apiRequest<LearningResourceEnvelope<{ decision: Record<string, unknown> }>>('/api/patterns/manage', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          candidate_id: candidate.candidate_id,
+          pattern_label: candidate.pattern_label,
+          request_id: requestId(`pattern-${action}`),
+          defer_until: action === 'defer' ? Date.now() + 7 * 24 * 60 * 60 * 1000 : undefined,
+        }),
+      })
+      setCandidates((items) => items.filter((item) => item.candidate_id !== candidate.candidate_id))
+      toast(t(action === 'deny' ? 'insights.denySaved' : 'insights.deferSaved'))
+    } catch (error) { toast(error instanceof Error ? error.message : t('insights.manageFailed')) }
+    finally { setPromoting('') }
+  }
+
   const manage = async (action: 'dismiss' | 'forget' | 'edit', patternLabel: string) => {
     const replacement = action === 'edit' ? window.prompt(t('insights.editPrompt'), patternLabel)?.trim() : undefined
     if (action === 'edit' && !replacement) return
     setPromoting(patternLabel)
     try {
-      const result = await apiRequest<LearningResourceEnvelope<{ learned_patterns: LearnedPattern[] }>>('/api/patterns/manage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, pattern_label: patternLabel, replacement_label: replacement }) })
+      const result = await apiRequest<LearningResourceEnvelope<{ learned_patterns: LearnedPattern[] }>>('/api/patterns/manage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, pattern_label: patternLabel, replacement_label: replacement, request_id: requestId(`pattern-${action}`) }) })
       setLearned((result.data.learned_patterns || []).filter((pattern) => pattern.user_confirmed))
       if (action === 'dismiss') setCandidates((items) => items.filter((item) => item.pattern_label !== patternLabel))
       toast(t(`insights.${action}Saved`))
@@ -138,7 +160,7 @@ export default function InsightsPage() {
               {candidates.length === 0 ? <p className="text-sm text-muted-foreground">{t('insights.noCandidates')}</p> : candidates.map((candidate) => {
                 const eligible = candidate.status === 'candidate' && candidate.can_suggest_update
                 const alreadyConfirmed = learned.some((pattern) => pattern.pattern_label === candidate.pattern_label)
-                return <div key={candidate.pattern_label} className="rounded-xl border bg-background/80 p-4"><div className="flex items-start justify-between gap-4"><div><p className="font-medium">{candidate.pattern_label}</p><p className="mt-1 text-xs text-muted-foreground">{candidate.episode_count} {t('insights.episodes')} · {candidate.status}</p></div><span className={`rounded-full px-2.5 py-1 text-[11px] ${eligible ? 'bg-amber-500/15 text-amber-700' : 'bg-muted text-muted-foreground'}`}>{eligible ? t('insights.readyForReview') : t('insights.gatheringEvidence')}</span></div><div className="mt-4 flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-muted-foreground">{eligible ? t('insights.confirmationNotice') : t('insights.moreDaysRequired')}</p><div className="flex gap-2"><Button size="sm" variant="ghost" onClick={() => void manage('dismiss', candidate.pattern_label)} disabled={promoting === candidate.pattern_label}><X className="mr-1 h-3.5 w-3.5" />{t('insights.dismissPattern')}</Button><Button size="sm" disabled={!eligible || alreadyConfirmed || promoting === candidate.pattern_label} onClick={() => promote(candidate)}>{!eligible && <LockKeyhole className="mr-1 h-3.5 w-3.5" />}{alreadyConfirmed ? t('insights.confirmed') : t('insights.confirmPattern')}</Button></div></div></div>
+                return <div key={candidate.candidate_id} className="rounded-xl border bg-background/80 p-4"><div className="flex items-start justify-between gap-4"><div><p className="font-medium">{candidate.pattern_label}</p><p className="mt-1 text-xs text-muted-foreground">{candidate.episode_count} {t('insights.episodes')} · {candidate.counter_evidence_count} {t('insights.counterEvidence')} · {Math.round(candidate.support_ratio * 100)}%</p></div><span className={`rounded-full px-2.5 py-1 text-[11px] ${eligible ? 'bg-amber-500/15 text-amber-700' : 'bg-muted text-muted-foreground'}`}>{eligible ? t('insights.readyForReview') : t('insights.gatheringEvidence')}</span></div><details className="mt-3 text-xs text-muted-foreground"><summary className="cursor-pointer">{t('insights.technicalDetails')}</summary><pre className="mt-2 overflow-auto whitespace-pre-wrap">{JSON.stringify({ candidate_id: candidate.candidate_id, trait_key: candidate.trait_key, proposed_value: candidate.proposed_value, scope: candidate.scope, supporting_evidence_ids: candidate.supporting_evidence_ids, counter_evidence_ids: candidate.counter_evidence_ids }, null, 2)}</pre></details><div className="mt-4 flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-muted-foreground">{eligible ? t('insights.confirmationNotice') : t('insights.moreDaysRequired')}</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="ghost" onClick={() => void decideCandidate('deny', candidate)} disabled={promoting === candidate.candidate_id}><X className="mr-1 h-3.5 w-3.5" />{t('insights.denyPattern')}</Button><Button size="sm" variant="outline" onClick={() => void decideCandidate('defer', candidate)} disabled={promoting === candidate.candidate_id}><Clock3 className="mr-1 h-3.5 w-3.5" />{t('insights.deferPattern')}</Button><Button size="sm" disabled={!eligible || alreadyConfirmed || promoting === candidate.candidate_id} onClick={() => promote(candidate)}>{!eligible && <LockKeyhole className="mr-1 h-3.5 w-3.5" />}{alreadyConfirmed ? t('insights.confirmed') : t('insights.confirmPattern')}</Button></div></div></div>
               })}
             </CardContent>
           </Card>

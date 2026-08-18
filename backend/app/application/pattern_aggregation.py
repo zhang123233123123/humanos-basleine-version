@@ -138,6 +138,13 @@ def _signals_for(evidence: dict[str, Any], timezone_name: str) -> list[PatternSi
 def build_evidence_pattern_candidates(
     evidence_items: list[dict[str, Any]], *, user_id: str, timezone_name: str,
 ) -> list[dict[str, Any]]:
+    denials: dict[str, list[tuple[str, str]]] = {}
+    for evidence in evidence_items:
+        if evidence.get("claim_key") != "pattern_decision.denied":
+            continue
+        candidate_id = str(dict(evidence.get("structured_value") or {}).get("candidate_id") or "")
+        if candidate_id:
+            denials.setdefault(candidate_id, []).append((str(evidence["evidence_id"]), _local_date(evidence, timezone_name)))
     signals = [
         signal
         for evidence in evidence_items
@@ -171,8 +178,19 @@ def build_evidence_pattern_candidates(
                 base_proposed["typical_value"] = median(numeric_values)
             base_proposed.update({"support_ratio": round(ratio, 3), "support_day_count": len(support_days)})
             identity = json.dumps({"trait": trait_key, "value": value_key, "scope": json.loads(scope_json)}, sort_keys=True, ensure_ascii=False)
+            candidate_id = f"candidate_{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:20]}"
+            denial_items = denials.get(candidate_id, [])
+            denial_ids = tuple(item[0] for item in denial_items if item[0] not in support_id_set and item[0] not in counter_ids)
+            counter_ids = counter_ids + denial_ids
+            sample_size = len(support_ids) + len(counter_ids)
+            all_days.update(item[1] for item in denial_items)
+            ratio = len(support_ids) / sample_size if sample_size else 0.0
+            denied = bool(denial_ids)
+            candidate_ready = candidate_ready and not denied
+            suggest_ready = suggest_ready and not denied
+            base_proposed["support_ratio"] = round(ratio, 3)
             candidate = PatternCandidate(
-                candidate_id=f"candidate_{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:20]}",
+                candidate_id=candidate_id,
                 user_id=user_id,
                 trait_key=trait_key,
                 proposed_value=base_proposed,
@@ -182,7 +200,7 @@ def build_evidence_pattern_candidates(
                 sample_size=sample_size,
                 evidence_day_count=len(all_days),
                 confidence_level="high" if suggest_ready else "medium" if candidate_ready else "low",
-                status="candidate" if candidate_ready else "insufficient_evidence",
+                status="dismissed" if denied else "candidate" if candidate_ready else "insufficient_evidence",
             ).model_dump(mode="json")
             candidate.update({
                 "pattern_label": support[0].label,
