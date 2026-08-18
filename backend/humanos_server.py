@@ -4437,6 +4437,7 @@ class Store:
                 raise ValueError("progress and next_action are required before leaving the current task")
             context_payload = {
                 "task_id": task_id,
+                "request_id": f"{payload.get('recommendation_id')}:context" if payload.get("recommendation_id") else None,
                 "progress": progress,
                 "progress_percent": min(max(int(payload.get("progress_percent") or 0), 0), 100),
                 "task_remaining_minutes": max(int(
@@ -4547,6 +4548,14 @@ class Store:
         task = self.get_task(task_id, user_id)
         if not task:
             raise KeyError(task_id)
+        profile = self.ensure_profile(user_id)
+        timezone_name = str(profile.get("timezone") or "Asia/Shanghai")
+        local_time = self.user_clock_now(user_id, timezone_name).isoformat()
+        submitted_fields = {
+            key: payload[key]
+            for key in ("progress", "progress_percent", "task_remaining_minutes", "open_questions", "next_action", "stop_reason", "materials")
+            if key in payload
+        }
         raw_questions = payload.get("open_questions") or []
         open_questions = [str(item).strip() for item in raw_questions if str(item).strip()] if isinstance(raw_questions, list) else [line.strip() for line in str(raw_questions).splitlines() if line.strip()]
         dump = {
@@ -4620,6 +4629,20 @@ class Store:
                 (next_status, as_json(checkpoints), as_json(execution), as_json(context_window), dump["created_at"], task_id, user_id),
             )
             self._insert_state_transition(conn, user_id=user_id, task_id=task_id, before_status=str(task.get("status") or "unknown"), action_type="capture_context", after_status=next_status, action_detail={"context_dump_id": dump_id, "stop_reason": dump["stop_reason"]}, outcome={"persisted": True, "remaining_minutes": execution["remaining_duration_minutes"]}, created_at=dump["created_at"])
+            self._enqueue_personalization(
+                conn, user_id=user_id, kind="context_dump", source_id=dump_id,
+                payload={
+                    "context_dump": {
+                        "id": dump_id, "user_id": user_id, "created_at": dump["created_at"],
+                        "execution_session_id": dump["execution_session_id"],
+                        "checkpoint_type": dump["checkpoint_type"],
+                        "timezone": timezone_name, "local_time": local_time,
+                        "submitted_fields": submitted_fields,
+                    },
+                    "task": task,
+                },
+                timestamp=dump["created_at"],
+            )
         if not payload.get("skip_memory_index"):
             self.index_context_dump_memory(user_id, dump)
         self.log_event(user_id, "context_dump_saved", dump)

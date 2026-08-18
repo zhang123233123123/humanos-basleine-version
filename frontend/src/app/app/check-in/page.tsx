@@ -43,6 +43,7 @@ export default function CheckInPage() {
   const [decisionResumeAt, setDecisionResumeAt] = useState('')
   const [resumeTimeCheck, setResumeTimeCheck] = useState<{ valid: boolean; conflicts: Array<{ type: string; [key: string]: unknown }>; alternatives: string[] } | null>(null)
   const checkInRequestId = useRef<string | null>(null)
+  const contextDumpRequestId = useRef<string | null>(null)
 
   const runtimeState: RuntimeState = useMemo(() => ({ focus, energy, stress, mood, readiness }), [focus, energy, stress, mood, readiness])
 
@@ -135,9 +136,11 @@ export default function CheckInPage() {
     }
     setSubmitting(true)
     try {
+      contextDumpRequestId.current ??= crypto.randomUUID()
       const result = await apiRequest<TaskLifecycleResourceEnvelope<{ context_dump: ContextDump }>>('/api/context-dumps', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          request_id: contextDumpRequestId.current,
           task_id: taskId,
           progress,
           progress_percent: progressPercent,
