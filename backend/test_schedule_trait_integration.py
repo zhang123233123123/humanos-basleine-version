@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -184,6 +185,42 @@ class ScheduleTraitIntegrationTests(unittest.TestCase):
         })
         session = self.store.list_execution_sessions("u")[0]
         self.assertEqual([], session["profile_trait_refs"])
+
+    def test_trait_review_is_explicit_idempotent_and_label_independent(self):
+        self.insert_trait()
+        profile = self.store.ensure_profile("u")
+        profile["learned_patterns"] = [{
+            "pattern_label": "User edited label", "evidence_count": 5,
+            "user_confirmed": True, "confirmed_at": 1_700_000_000_000,
+        }]
+        self.store.upsert_profile(profile)
+        active_revision = self.store.ensure_profile("u").get("active_plan_revision")
+
+        keep_payload = {"trait_id": "trait-afternoon-energy", "action": "keep", "request_id": "review-keep"}
+        first = self.store.review_profile_trait("u", keep_payload)
+        replay = self.store.review_profile_trait("u", keep_payload)
+        self.assertEqual(first["review"]["id"], replay["review"]["id"])
+        self.assertTrue(replay["replayed"])
+        after_keep = self.store.profile_trait_effects("u")[0]
+        self.assertFalse(after_keep["review_prompt_allowed"])
+        self.assertEqual("keep", after_keep["latest_review"]["action"])
+        later = self.store.review_profile_trait("u", {"trait_id": "trait-afternoon-energy", "action": "later", "request_id": "review-later"})
+        self.assertGreater(later["review"]["defer_until"], later["review"]["created_at"])
+        after_later = self.store.profile_trait_effects("u")[0]
+        self.assertFalse(after_later["review_prompt_allowed"])
+        self.assertEqual("later", after_later["latest_review"]["action"])
+
+        forgotten = self.store.review_profile_trait("u", {"trait_id": "trait-afternoon-energy", "action": "forget", "request_id": "review-forget"})
+        self.assertTrue(forgotten["profile_write"])
+        self.assertEqual(active_revision, forgotten["active_plan_revision"])
+        with self.store.connect() as conn:
+            trait_row = conn.execute("SELECT status,trait_json FROM profile_traits WHERE id='trait-afternoon-energy'").fetchone()
+            review_count = conn.execute("SELECT COUNT(*) FROM trait_reviews WHERE user_id='u'").fetchone()[0]
+        self.assertEqual("forgotten", trait_row["status"])
+        self.assertEqual("forgotten", json.loads(trait_row["trait_json"])["status"])
+        self.assertEqual(3, review_count)
+        self.assertEqual([], self.store.ensure_profile("u")["learned_patterns"])
+        self.assertEqual([], self.store.profile_trait_effects("u"))
 
 
 if __name__ == "__main__":

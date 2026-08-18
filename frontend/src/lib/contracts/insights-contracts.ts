@@ -37,6 +37,8 @@ export interface ProfileTraitEffect {
   evidence_ids: string[]
   causal_claim_allowed: false
   profile_write_allowed: false
+  latest_review?: { action: 'keep' | 'later' | 'forget'; defer_until?: number; created_at: number } | null
+  review_prompt_allowed?: boolean
 }
 
 export interface MemoryResult {
@@ -56,7 +58,7 @@ export interface LearningResourceEnvelope<T> {
   data: T
   resources: Record<string, string>
   meta: {
-    resource: 'pattern_candidates' | 'learned_pattern' | 'memory_evidence' | 'profile_trait_effects'
+    resource: 'pattern_candidates' | 'learned_pattern' | 'memory_evidence' | 'profile_trait_effects' | 'profile_trait_review'
     aggregate_root: 'profile'
     read_only: boolean
     plan_write_allowed: false

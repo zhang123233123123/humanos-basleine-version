@@ -877,6 +877,21 @@ class Store:
                   UNIQUE(user_id, candidate_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS trait_reviews (
+                  id TEXT PRIMARY KEY,
+                  user_id TEXT NOT NULL,
+                  trait_id TEXT NOT NULL,
+                  action TEXT NOT NULL,
+                  request_id TEXT,
+                  effect_snapshot_json TEXT NOT NULL,
+                  defer_until INTEGER,
+                  created_at INTEGER NOT NULL
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_trait_review_request
+                ON trait_reviews(user_id, request_id) WHERE request_id IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS idx_trait_review_trait
+                ON trait_reviews(user_id, trait_id, created_at DESC);
+
                 CREATE TABLE IF NOT EXISTS chat_turns (
                   id TEXT PRIMARY KEY,
                   user_id TEXT NOT NULL,
@@ -1535,6 +1550,7 @@ class Store:
             "personalization_outbox",
             "pattern_decisions",
             "profile_traits",
+            "trait_reviews",
             "chat_turns",
             "execution_feedback",
             "state_transitions",
@@ -5455,13 +5471,82 @@ class Store:
                 "SELECT candidate_id,pattern_label FROM pattern_decisions WHERE user_id=? AND action='confirm' ORDER BY created_at",
                 (user_id,),
             ).fetchall()
+            review_rows = conn.execute(
+                "SELECT * FROM trait_reviews WHERE user_id=? ORDER BY created_at DESC", (user_id,),
+            ).fetchall()
         traits = [from_json(row["trait_json"], {}) for row in rows]
         labels_by_candidate = {str(row["candidate_id"]): str(row["pattern_label"]) for row in label_rows}
         labels = {
             str(trait.get("trait_id")): labels_by_candidate.get(str(trait.get("source_candidate_id") or ""), "")
             for trait in traits
         }
-        return summarize_trait_effects(traits, self.list_personalization_evidence(user_id), labels)
+        effects = summarize_trait_effects(traits, self.list_personalization_evidence(user_id), labels)
+        latest_reviews = {}
+        for row in review_rows:
+            latest_reviews.setdefault(str(row["trait_id"]), {
+                "action": row["action"], "defer_until": row["defer_until"], "created_at": row["created_at"],
+                "effect_snapshot": from_json(row["effect_snapshot_json"], {}),
+            })
+        current_ms = now_ms()
+        for effect in effects:
+            review = latest_reviews.get(str(effect["trait_id"]))
+            effect["latest_review"] = review
+            effect["review_prompt_allowed"] = not review or (
+                review["action"] == "later" and int(review.get("defer_until") or 0) <= current_ms
+            ) or (
+                review["action"] == "keep"
+                and int(effect.get("usage_with_feedback_count") or 0)
+                > int((review.get("effect_snapshot") or {}).get("usage_with_feedback_count") or 0)
+            )
+        return effects
+
+    def review_profile_trait(self, user_id: str, payload: dict) -> dict:
+        """Record an explicit review; only forget mutates the confirmed trait."""
+        trait_id = str(payload.get("trait_id") or "").strip()
+        action = str(payload.get("action") or "").strip()
+        if not trait_id or action not in {"keep", "later", "forget"}:
+            raise ValueError("trait_id and a valid review action are required")
+        request_id = str(payload.get("request_id") or "").strip() or None
+        timestamp = now_ms()
+        defer_until = int(payload.get("defer_until") or timestamp + 7 * 86_400_000) if action == "later" else None
+        if defer_until is not None and defer_until <= timestamp:
+            raise ValueError("defer_until must be in the future")
+        profile = self.ensure_profile(user_id)
+        active_revision = profile.get("active_plan_revision")
+        with self.atomic() as conn:
+            if request_id:
+                replay = conn.execute("SELECT * FROM trait_reviews WHERE user_id=? AND request_id=?", (user_id, request_id)).fetchone()
+                if replay:
+                    return {"review": dict(replay), "replayed": True, "active_plan_revision": active_revision}
+            row = conn.execute("SELECT * FROM profile_traits WHERE id=? AND user_id=? AND status='confirmed'", (trait_id, user_id)).fetchone()
+            if not row:
+                raise ValueError("confirmed profile trait does not exist")
+            trait = dict(from_json(row["trait_json"], {}))
+            effect = next((item for item in self.profile_trait_effects(user_id) if item["trait_id"] == trait_id), {})
+            effect_snapshot = {
+                "usage_with_feedback_count": int(effect.get("usage_with_feedback_count") or 0),
+                "assessment": effect.get("assessment"),
+                "evidence_ids": list(effect.get("evidence_ids") or []),
+            }
+            review_id = new_id("trait_review")
+            if action == "forget":
+                trait.update({"status": "forgotten", "updated_at": timestamp})
+                conn.execute("UPDATE profile_traits SET trait_json=?,status='forgotten',updated_at=? WHERE id=? AND user_id=?", (as_json(trait), timestamp, trait_id, user_id))
+                patterns = list(profile.get("learned_patterns") or [])
+                confirmed_at = int(trait.get("confirmed_at") or 0)
+                original_label = str(effect.get("pattern_label") or "")
+                patterns = [item for item in patterns if not (
+                    (confirmed_at and int(item.get("confirmed_at") or 0) == confirmed_at)
+                    or (original_label and item.get("pattern_label") == original_label)
+                )]
+                conn.execute("UPDATE profiles SET learned_patterns_json=?,updated_at=? WHERE user_id=?", (as_json(patterns), timestamp, user_id))
+            conn.execute(
+                "INSERT INTO trait_reviews (id,user_id,trait_id,action,request_id,effect_snapshot_json,defer_until,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                (review_id, user_id, trait_id, action, request_id, as_json(effect_snapshot), defer_until, timestamp),
+            )
+        review = {"id": review_id, "trait_id": trait_id, "action": action, "defer_until": defer_until, "created_at": timestamp}
+        self.log_event(user_id, f"profile_trait_review_{action}", {**review, "active_plan_unchanged": True})
+        return {"review": review, "active_plan_revision": active_revision, "profile_write": action == "forget"}
 
     def _find_pattern_candidate(self, user_id: str, payload: dict) -> dict:
         candidate_id = str(payload.get("candidate_id") or "").strip()
@@ -7930,6 +8015,14 @@ class Handler(BaseHTTPRequestHandler):
                 user_id = query.get("user_id", ["demo"])[0]
                 store.ensure_profile(user_id)
                 self.send_json({"data": {"effects": store.profile_trait_effects(user_id)}, "resources": {"profile": "/api/profile", "patterns": "/api/patterns/candidates"}, "meta": {"resource": "profile_trait_effects", "aggregate_root": "profile", "read_only": True, "causal_claim_allowed": False, "profile_write_allowed": False, "plan_write_allowed": False}})
+                return
+
+            if path == "/api/profile-traits/review" and method == "POST":
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                store.ensure_profile(user_id)
+                result = store.review_profile_trait(user_id, payload)
+                self.send_json({"data": result, "resources": {"profile": "/api/profile", "effects": "/api/profile-traits/effects"}, "meta": {"resource": "profile_trait_review", "aggregate_root": "profile", "read_only": False, "active_plan_unchanged": True, "automatic_profile_update": False}})
                 return
 
             if path == "/api/patterns/promote" and method == "POST":
