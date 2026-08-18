@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { ArrowLeft, BatteryMedium, Brain, CheckCircle2, CornerDownRight, Gauge, Loader2, PauseCircle, RotateCcw } from 'lucide-react'
@@ -42,15 +42,18 @@ export default function CheckInPage() {
   const [decisionReason, setDecisionReason] = useState(decisionSource === 'break-not-ready' ? 'still_not_ready_after_break' : 'tired')
   const [decisionResumeAt, setDecisionResumeAt] = useState('')
   const [resumeTimeCheck, setResumeTimeCheck] = useState<{ valid: boolean; conflicts: Array<{ type: string; [key: string]: unknown }>; alternatives: string[] } | null>(null)
+  const checkInRequestId = useRef<string | null>(null)
 
   const runtimeState: RuntimeState = useMemo(() => ({ focus, energy, stress, mood, readiness }), [focus, energy, stress, mood, readiness])
 
   const saveDailyCheckIn = async () => {
     setSubmitting(true)
     try {
+      checkInRequestId.current ??= crypto.randomUUID()
       const result = await apiRequest<CheckInResourceEnvelope<{ runtime_state: RuntimeState; daily_plan_review: DailyPlanReview | null }>>('/api/state-checkins', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          request_id: checkInRequestId.current,
           ...runtimeState,
           attention_residue: attentionResidue,
           daily_note: dailyNote,

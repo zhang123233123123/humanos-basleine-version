@@ -757,6 +757,7 @@ class Store:
                 CREATE TABLE IF NOT EXISTS runtime_states (
                   id TEXT PRIMARY KEY,
                   user_id TEXT NOT NULL,
+                  request_id TEXT,
                   focus INTEGER NOT NULL,
                   energy INTEGER NOT NULL,
                   stress INTEGER NOT NULL,
@@ -1089,10 +1090,14 @@ class Store:
             runtime_columns = {
                 row["name"] for row in conn.execute("PRAGMA table_info(runtime_states)").fetchall()
             }
-            runtime_migrations = {"emotion": "TEXT", "readiness": "TEXT", "daily_note": "TEXT"}
+            runtime_migrations = {"emotion": "TEXT", "readiness": "TEXT", "daily_note": "TEXT", "request_id": "TEXT"}
             for name, definition in runtime_migrations.items():
                 if name not in runtime_columns:
                     conn.execute(f"ALTER TABLE runtime_states ADD COLUMN {name} {definition}")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_states_request "
+                "ON runtime_states(user_id, request_id) WHERE request_id IS NOT NULL"
+            )
             feedback_columns = {row["name"] for row in conn.execute("PRAGMA table_info(execution_feedback)").fetchall()}
             feedback_migrations = {
                 "execution_session_id": "TEXT",
@@ -4140,17 +4145,36 @@ class Store:
         self.log_event(current["user_id"], "task_archived", {"task_id": task_id, "title": current["title"]})
         return {"id": task_id, "deleted": False, "archived": True}
 
+    @transactional
     def save_runtime_state(self, user_id: str, payload: dict) -> dict:
+        request_id = str(payload.get("request_id") or "").strip() or None
+        if request_id:
+            with self.connect() as conn:
+                existing = conn.execute(
+                    "SELECT * FROM runtime_states WHERE user_id=? AND request_id=?",
+                    (user_id, request_id),
+                ).fetchone()
+            if existing:
+                return {**dict(existing), "source": "self_report", "confidence_level": "high", "replayed": True}
         if payload.get("daily_checkin"):
             status = self.daily_checkin_status(user_id)
             if not status["required"]:
                 existing = self.latest_runtime_state(user_id)
                 existing["already_completed"] = True
                 return existing
+        profile = self.ensure_profile(user_id)
+        timezone_name = str(profile.get("timezone") or "Asia/Shanghai")
+        local_time = self.user_clock_now(user_id, timezone_name).isoformat()
+        submitted_fields = {
+            key: payload[key]
+            for key in ("focus", "energy", "stress", "mood", "attention_residue", "emotion", "readiness", "daily_note")
+            if key in payload
+        }
         state_id = new_id("state")
         state = {
             "id": state_id,
             "user_id": user_id,
+            "request_id": request_id,
             "focus": int(payload.get("focus", 4)),
             "energy": int(payload.get("energy", 4)),
             "stress": int(payload.get("stress", 4)),
@@ -4167,14 +4191,15 @@ class Store:
             conn.execute(
                 """
                 INSERT INTO runtime_states (
-                  id, user_id, focus, energy, stress, mood,
+                  id, user_id, request_id, focus, energy, stress, mood,
                   attention_residue, emotion, readiness, daily_note, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     state["id"],
                     user_id,
+                    request_id,
                     state["focus"],
                     state["energy"],
                     state["stress"],
@@ -4189,8 +4214,19 @@ class Store:
             if payload.get("daily_checkin"):
                 conn.execute(
                     "UPDATE profiles SET last_daily_checkin_date=?,updated_at=? WHERE user_id=?",
-                    (str(payload.get("local_date") or self.daily_checkin_status(user_id)["local_date"]), state["created_at"], user_id),
+                    (str(payload.get("local_date") or status["local_date"]), state["created_at"], user_id),
                 )
+            self._enqueue_personalization(
+                conn, user_id=user_id, kind="state_checkin", source_id=state_id,
+                payload={"checkin": {
+                    "id": state_id, "user_id": user_id, "created_at": state["created_at"],
+                    "daily_checkin": bool(payload.get("daily_checkin")),
+                    "submission_source": str(payload.get("source") or "check_in"),
+                    "timezone": timezone_name, "local_time": local_time,
+                    "submitted_fields": submitted_fields,
+                }},
+                timestamp=state["created_at"],
+            )
         self.log_event(user_id, "runtime_state_saved", state)
         return state
 

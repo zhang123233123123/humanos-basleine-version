@@ -9,6 +9,7 @@ from typing import Any
 
 from app.application.execution_evidence import project_execution_feedback, project_execution_transition
 from app.application.plan_edit_evidence import project_plan_edit, project_plan_rationale
+from app.application.state_checkin_evidence import project_state_checkin
 from app.repositories.personalization import PersonalizationEvidenceRepository
 
 
@@ -34,6 +35,12 @@ def _project(repository: PersonalizationEvidenceRepository, kind: str, payload: 
         repository.save_evidence(evidence=evidence, timestamp=timestamp)
     elif kind == "execution_feedback":
         evidence = project_execution_feedback(evidence_id=_id("evidence"), **payload)
+        repository.save_evidence(evidence=evidence, timestamp=timestamp)
+    elif kind == "state_checkin":
+        behavior, evidence = project_state_checkin(
+            event_id=_id("behavior"), evidence_id=_id("evidence"), **payload,
+        )
+        repository.save_behavior(event=behavior, timestamp=timestamp)
         repository.save_evidence(evidence=evidence, timestamp=timestamp)
     elif kind == "invalidate_source":
         repository.invalidate_source(**payload)
