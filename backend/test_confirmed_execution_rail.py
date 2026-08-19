@@ -94,6 +94,11 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
         self.start()
         self.assertEqual("running", self.store.get_task(self.task_id, "u")["status"])
 
+    def test_execution_history_includes_the_task_title(self):
+        sessions = self.store.list_execution_sessions("u")
+        self.assertTrue(sessions)
+        self.assertTrue(all(item["task_title"] == "Analyze interviews" for item in sessions))
+
     def test_07_now_card_labels_both_remaining_values(self):
         js = legacy_frontend("app.js")
         self.assertIn("min left <small>in this session", js)

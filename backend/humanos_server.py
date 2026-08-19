@@ -4917,11 +4917,11 @@ class Store:
             if statuses:
                 placeholders = ",".join("?" for _ in statuses)
                 rows = conn.execute(
-                    f"SELECT * FROM execution_sessions WHERE user_id=? AND status IN ({placeholders}) ORDER BY planned_start_at",
+                    f"SELECT execution_sessions.*, tasks.title AS task_title FROM execution_sessions LEFT JOIN tasks ON tasks.id=execution_sessions.task_id AND tasks.user_id=execution_sessions.user_id WHERE execution_sessions.user_id=? AND execution_sessions.status IN ({placeholders}) ORDER BY execution_sessions.planned_start_at",
                     (user_id, *statuses),
                 ).fetchall()
             else:
-                rows = conn.execute("SELECT * FROM execution_sessions WHERE user_id=? ORDER BY planned_start_at", (user_id,)).fetchall()
+                rows = conn.execute("SELECT execution_sessions.*, tasks.title AS task_title FROM execution_sessions LEFT JOIN tasks ON tasks.id=execution_sessions.task_id AND tasks.user_id=execution_sessions.user_id WHERE execution_sessions.user_id=? ORDER BY execution_sessions.planned_start_at", (user_id,)).fetchall()
         return [self.execution_session_row(row) for row in rows]
 
     def current_execution(self, user_id: str) -> dict:
