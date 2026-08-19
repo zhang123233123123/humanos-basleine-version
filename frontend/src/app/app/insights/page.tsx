@@ -13,6 +13,8 @@ import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 import { requestId } from '@/lib/client/request-id'
 import { ProfileTraitAttributionSummary } from '@/components/profile-trait-attribution-summary'
+import { InterruptionRecoverySummary } from '@/components/interruption-recovery-summary'
+import type { InterruptionEpisode, InterruptionRecoverySummary as RecoverySummary } from '@/lib/contracts/execution-contracts'
 
 function confirmedDate(value: string | number | undefined) {
   if (!value) return ''
@@ -33,18 +35,23 @@ export default function InsightsPage() {
   const [searched, setSearched] = useState(false)
   const [memories, setMemories] = useState<MemoryResult[]>([])
   const [recent, setRecent] = useState<MemoryResult[]>([])
+  const [interruptionEpisodes, setInterruptionEpisodes] = useState<InterruptionEpisode[]>([])
+  const [recoverySummary, setRecoverySummary] = useState<RecoverySummary | null>(null)
 
   const loadInsights = useCallback(async () => {
     setLoading(true)
     try {
-      const [patternData, profileData, effectData] = await Promise.all([
+      const [patternData, profileData, effectData, interruptionData] = await Promise.all([
         apiRequest<LearningResourceEnvelope<{ patterns: PatternCandidate[] }>>('/api/patterns/candidates'),
         apiRequest<ResourceEnvelope<{ profile: { learned_patterns?: LearnedPattern[] } }>>('/api/profile'),
         apiRequest<LearningResourceEnvelope<{ effects: ProfileTraitEffect[] }>>('/api/profile-traits/effects'),
+        apiRequest<{ data: { episodes: InterruptionEpisode[]; summary: RecoverySummary } }>('/api/interruption-episodes'),
       ])
       setCandidates(patternData.data.patterns || [])
       setLearned((profileData.data.profile.learned_patterns || []).filter((pattern) => pattern.user_confirmed))
       setEffects(effectData.data.effects || [])
+      setInterruptionEpisodes(interruptionData.data.episodes || [])
+      setRecoverySummary(interruptionData.data.summary)
     } catch (error) {
       toast(error instanceof Error ? error.message : t('insights.loadFailed'))
     } finally {
@@ -183,6 +190,8 @@ export default function InsightsPage() {
             })}
           </CardContent>
         </Card>
+
+        <Card><CardHeader><CardTitle>{locale === 'zh' ? '中断与恢复记录' : 'Interruption and recovery'}</CardTitle><CardDescription>{locale === 'zh' ? '把每次中断与后续恢复尝试、等待时间和执行结果连接起来。' : 'Links each interruption to later resume attempts, wait time, and execution outcomes.'}</CardDescription></CardHeader><CardContent>{recoverySummary ? <InterruptionRecoverySummary summary={recoverySummary} episodes={interruptionEpisodes} locale={locale} /> : <p className="text-sm text-muted-foreground">{locale === 'zh' ? '目前没有中断记录。' : 'No interruption episodes yet.'}</p>}</CardContent></Card>
 
         <section className="grid gap-6 lg:grid-cols-2">
           <Card className="border-emerald-500/30 bg-emerald-500/5">

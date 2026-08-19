@@ -1068,6 +1068,36 @@ class Store:
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_execution_session_request
                 ON execution_sessions(user_id, request_id) WHERE request_id IS NOT NULL;
 
+                CREATE TABLE IF NOT EXISTS interruption_episodes (
+                  id TEXT PRIMARY KEY,
+                  user_id TEXT NOT NULL,
+                  task_id TEXT NOT NULL,
+                  source_execution_session_id TEXT NOT NULL,
+                  context_dump_id TEXT,
+                  interruption_action TEXT NOT NULL,
+                  pause_reason TEXT NOT NULL,
+                  paused_at TEXT NOT NULL,
+                  remaining_minutes INTEGER NOT NULL,
+                  task_demand_snapshot_json TEXT NOT NULL DEFAULT '{}',
+                  runtime_state_snapshot_json TEXT NOT NULL DEFAULT '{}',
+                  profile_trait_refs_json TEXT NOT NULL DEFAULT '[]',
+                  status TEXT NOT NULL,
+                  reentry_guidance_generated_at TEXT,
+                  resumed_execution_session_id TEXT,
+                  resumed_at TEXT,
+                  resume_latency_minutes INTEGER,
+                  active_minutes_before_resume INTEGER,
+                  outcome_json TEXT NOT NULL DEFAULT '{}',
+                  settled_at TEXT,
+                  request_id TEXT,
+                  created_at INTEGER NOT NULL,
+                  updated_at INTEGER NOT NULL
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_interruption_episode_request
+                ON interruption_episodes(user_id, request_id) WHERE request_id IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS idx_interruption_episode_task
+                ON interruption_episodes(user_id, task_id, created_at DESC);
+
                 CREATE TABLE IF NOT EXISTS execution_requests (
                   request_id TEXT NOT NULL,
                   user_id TEXT NOT NULL,
@@ -1180,6 +1210,9 @@ class Store:
             for name, definition in execution_migrations.items():
                 if name not in execution_columns:
                     conn.execute(f"ALTER TABLE execution_sessions ADD COLUMN {name} {definition}")
+            interruption_columns = {row["name"] for row in conn.execute("PRAGMA table_info(interruption_episodes)").fetchall()}
+            if "active_minutes_before_resume" not in interruption_columns:
+                conn.execute("ALTER TABLE interruption_episodes ADD COLUMN active_minutes_before_resume INTEGER")
             context_dump_columns = {row["name"] for row in conn.execute("PRAGMA table_info(context_dumps)").fetchall()}
             context_dump_migrations = {
                 "execution_session_id": "TEXT",
@@ -1565,6 +1598,7 @@ class Store:
             "plan_edit_events",
             "plan_change_rationales",
             "execution_sessions",
+            "interruption_episodes",
             "execution_requests",
         )
 
@@ -4830,6 +4864,38 @@ class Store:
         return data
 
     @staticmethod
+    def interruption_episode_row(row: sqlite3.Row | None) -> dict | None:
+        if not row:
+            return None
+        data = dict(row)
+        data["task_demand_snapshot"] = from_json(data.pop("task_demand_snapshot_json", "{}"), {})
+        data["runtime_state_snapshot"] = from_json(data.pop("runtime_state_snapshot_json", "{}"), {})
+        data["profile_trait_refs"] = from_json(data.pop("profile_trait_refs_json", "[]"), [])
+        data["outcome"] = from_json(data.pop("outcome_json", "{}"), {})
+        return data
+
+    def list_interruption_episodes(self, user_id: str) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM interruption_episodes WHERE user_id=? ORDER BY created_at DESC", (user_id,)).fetchall()
+        return [self.interruption_episode_row(row) for row in rows]
+
+    def interruption_recovery_summary(self, user_id: str) -> dict:
+        from app.application.interruption_recovery import summarize_recovery_episodes
+
+        episodes = self.list_interruption_episodes(user_id)
+        return {"episodes": episodes, "summary": summarize_recovery_episodes(episodes)}
+
+    def _episode_for_resume(self, conn: sqlite3.Connection, user_id: str, session: sqlite3.Row) -> sqlite3.Row | None:
+        source_ids = [str(session["id"])]
+        if session["resumed_from_session_id"]:
+            source_ids.append(str(session["resumed_from_session_id"]))
+        placeholders = ",".join("?" for _ in source_ids)
+        return conn.execute(
+            f"SELECT * FROM interruption_episodes WHERE user_id=? AND source_execution_session_id IN ({placeholders}) AND status='pending' ORDER BY created_at DESC LIMIT 1",
+            (user_id, *source_ids),
+        ).fetchone()
+
+    @staticmethod
     def _execution_request_seen(conn: sqlite3.Connection, user_id: str, request_id: str | None) -> sqlite3.Row | None:
         if not request_id:
             return None
@@ -4983,7 +5049,10 @@ class Store:
         with self.connect() as conn:
             replay = self._execution_request_seen(conn, user_id, request_id)
             if replay:
-                return self.execution_session_row(replay)
+                result = self.execution_session_row(replay)
+                episode = conn.execute("SELECT * FROM interruption_episodes WHERE user_id=? AND resumed_execution_session_id=? ORDER BY updated_at DESC LIMIT 1", (user_id, replay["id"])).fetchone()
+                result["recovery_episode"] = self.interruption_episode_row(episode)
+                return result
             row = conn.execute(
                 "SELECT * FROM execution_sessions WHERE user_id=? AND (id=? OR block_id=?) ORDER BY updated_at DESC LIMIT 1",
                 (user_id, session_id, block_id),
@@ -4996,6 +5065,7 @@ class Store:
             from app.domain.task import require_execution_transition
 
             require_execution_transition(str(row["status"]), "running")
+            recovery_episode = self._episode_for_resume(conn, user_id, row)
             other = conn.execute("SELECT * FROM execution_sessions WHERE user_id=? AND status='running' AND id<>?", (user_id, row["id"])).fetchall()
             if len(other) >= 2:
                 raise ValueError("At most two confirmed parallel sessions may run together")
@@ -5008,9 +5078,22 @@ class Store:
             )
             conn.execute("UPDATE tasks SET status='running',updated_at=? WHERE id=? AND user_id=?", (timestamp, row["task_id"], user_id))
             self._insert_state_transition(conn, user_id=user_id, task_id=row["task_id"], before_status=str(row["status"]), action_type="resume" if row["status"] == "paused" else "start", after_status="running", execution_session_id=row["id"], created_at=timestamp)
+            if recovery_episode:
+                try:
+                    pause_time = datetime.fromisoformat(str(recovery_episode["paused_at"]).replace("Z", "+00:00"))
+                    resume_time = datetime.fromisoformat(actual_start.replace("Z", "+00:00"))
+                    latency = max(int((resume_time - pause_time).total_seconds() // 60), 0)
+                except (TypeError, ValueError):
+                    latency = None
+                conn.execute("UPDATE interruption_episodes SET status='resumed',resumed_execution_session_id=?,resumed_at=?,resume_latency_minutes=?,active_minutes_before_resume=?,updated_at=? WHERE id=? AND user_id=?", (row["id"], actual_start, latency, int(row["accumulated_active_minutes"] or 0), timestamp, recovery_episode["id"], user_id))
+                updated_episode_row = conn.execute("SELECT * FROM interruption_episodes WHERE id=?", (recovery_episode["id"],)).fetchone()
+                updated_episode = self.interruption_episode_row(updated_episode_row)
+                self._enqueue_personalization(conn, user_id=user_id, kind="interruption_recovery_attempt", source_id=str(recovery_episode["id"]), payload={"episode": updated_episode}, timestamp=timestamp)
             self._record_execution_request(conn, user_id, request_id, row["id"], "start", timestamp)
             updated = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (row["id"],)).fetchone()
-        return self.execution_session_row(updated)
+        result = self.execution_session_row(updated)
+        result["recovery_episode"] = updated_episode if recovery_episode else None
+        return result
 
     def ensure_execution_session(self, user_id: str, payload: dict) -> dict:
         task_id = str(payload.get("task_id") or "").strip()
@@ -5078,6 +5161,8 @@ class Store:
                         replay_task.get("duration") or replay["planned_work_minutes"] or 0,
                     )
                 )
+                episode = conn.execute("SELECT * FROM interruption_episodes WHERE user_id=? AND request_id=?", (user_id, request_id)).fetchone() if request_id else None
+                result["interruption_episode"] = self.interruption_episode_row(episode)
                 return result
             row = conn.execute("SELECT * FROM execution_sessions WHERE id=? AND user_id=?", (session_id, user_id)).fetchone()
             if not row:
@@ -5114,6 +5199,24 @@ class Store:
                 next_step=str(payload.get("next_step") or ""),
             )
             conn.execute("UPDATE execution_sessions SET status='paused',paused_at=?,resumed_at=NULL,accumulated_active_minutes=?,pause_reason=?,interruption_action=?,interruption_snapshot_json=?,resume_preference=?,preferred_resume_at=?,remaining_at_pause=?,updated_at=? WHERE id=? AND user_id=?", (paused_at, active, pause_reason, interruption_snapshot["action"], as_json(interruption_snapshot), resume_preference, preferred_resume_at, remaining_minutes, timestamp, session_id, user_id))
+            prior_recovery = conn.execute("SELECT * FROM interruption_episodes WHERE user_id=? AND resumed_execution_session_id=? AND status='resumed' ORDER BY updated_at DESC LIMIT 1", (user_id, session_id)).fetchone()
+            if prior_recovery:
+                prior_outcome = {"reinterrupted": True, "completion": None, "actual_minutes_after_resume": max(active - int(prior_recovery["active_minutes_before_resume"] or 0), 0)}
+                conn.execute("UPDATE interruption_episodes SET status='settled',outcome_json=?,settled_at=?,updated_at=? WHERE id=?", (as_json(prior_outcome), paused_at, timestamp, prior_recovery["id"]))
+                settled_prior = self.interruption_episode_row(conn.execute("SELECT * FROM interruption_episodes WHERE id=?", (prior_recovery["id"],)).fetchone())
+                self._enqueue_personalization(conn, user_id=user_id, kind="interruption_recovery_outcome", source_id=f"{prior_recovery['id']}:reinterrupted", payload={"episode": settled_prior}, timestamp=timestamp)
+            episode_id = new_id("interruption")
+            demand_snapshot = {
+                "expected_difficulty": task.get("expected_difficulty"), "cognitive_load": task.get("cognitive_load"),
+                "ambiguity": task.get("ambiguity"), "switch_cost": task.get("switch_cost"),
+                "reentry_cost": task.get("reentry_cost"), "resource_modality": task.get("resource_modality") or [],
+                "attention_mode": task.get("attention_mode"),
+            }
+            runtime_snapshot = self.latest_runtime_state(user_id)
+            conn.execute(
+                "INSERT INTO interruption_episodes (id,user_id,task_id,source_execution_session_id,interruption_action,pause_reason,paused_at,remaining_minutes,task_demand_snapshot_json,runtime_state_snapshot_json,profile_trait_refs_json,status,request_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (episode_id, user_id, str(row["task_id"]), session_id, interruption_snapshot["action"], pause_reason, paused_at, remaining_minutes, as_json(demand_snapshot), as_json(runtime_snapshot), row["profile_trait_refs_json"], "pending", request_id, timestamp, timestamp),
+            )
             execution = dict(task.get("execution") or {})
             execution["accumulated_actual_minutes"] = int(execution.get("accumulated_actual_minutes") or 0) + max(settlement.effective_active_minutes - settlement.previous_active_minutes, 0)
             execution["remaining_duration_minutes"] = settlement.task_remaining_minutes
@@ -5129,6 +5232,9 @@ class Store:
             updated = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (session_id,)).fetchone()
         result = self.execution_session_row(updated)
         result["task_remaining_minutes"] = settlement.task_remaining_minutes
+        with self.connect() as conn:
+            episode = conn.execute("SELECT * FROM interruption_episodes WHERE user_id=? AND source_execution_session_id=? ORDER BY created_at DESC LIMIT 1", (user_id, session_id)).fetchone()
+        result["interruption_episode"] = self.interruption_episode_row(episode)
         return result
 
     def interrupt_execution_session(self, user_id: str, payload: dict) -> dict:
@@ -5173,6 +5279,11 @@ class Store:
                     },
                     "skip_memory_index": True,
                 })
+                episode = execution_session.get("interruption_episode") or {}
+                if episode.get("id"):
+                    with self.connect() as conn:
+                        conn.execute("UPDATE interruption_episodes SET context_dump_id=?,updated_at=? WHERE id=? AND user_id=?", (context_dump["id"], now_ms(), episode["id"], user_id))
+                    execution_session["interruption_episode"] = {**episode, "context_dump_id": context_dump["id"]}
 
         if context_dump:
             self.index_context_dump_memory(user_id, context_dump)
@@ -5332,7 +5443,7 @@ class Store:
                     (user_id, request_id),
                 ).fetchone()
             if existing:
-                return {
+                replay_result = {
                     "id": existing["id"],
                     "user_id": existing["user_id"],
                     "task_id": existing["task_id"],
@@ -5347,6 +5458,10 @@ class Store:
                     "execution_context": from_json(existing["execution_context_json"], {}),
                     "created_at": existing["created_at"],
                 }
+                with self.connect() as episode_conn:
+                    episode = episode_conn.execute("SELECT * FROM interruption_episodes WHERE user_id=? AND resumed_execution_session_id=? AND status='settled' ORDER BY updated_at DESC LIMIT 1", (user_id, existing["execution_session_id"])).fetchone()
+                replay_result["recovery_episode"] = self.interruption_episode_row(episode)
+                return replay_result
         feedback = {
             "id": new_id("feedback"),
             "user_id": user_id,
@@ -5375,6 +5490,7 @@ class Store:
             feedback_id=feedback["id"],
             feedback_created_at=feedback["created_at"],
         )
+        recovery_episode_result = None
         with self.connect() as conn:
             conn.execute(
                 """
@@ -5426,6 +5542,18 @@ class Store:
                     outcome={"persisted": True, "completion": outcome, "actual_minutes": confirmed_actual},
                     created_at=feedback["created_at"],
                 )
+                recovery_episode = conn.execute("SELECT * FROM interruption_episodes WHERE user_id=? AND resumed_execution_session_id=? AND status='resumed' ORDER BY updated_at DESC LIMIT 1", (user_id, feedback["execution_session_id"])).fetchone()
+                if recovery_episode:
+                    recovery_outcome = {
+                        "completion": outcome,
+                        "actual_minutes_after_resume": max(confirmed_actual - int(recovery_episode["active_minutes_before_resume"] or 0), 0),
+                        "reinterrupted": False,
+                        "state_evaluation": feedback["state_evaluation"],
+                    }
+                    settled_at = self.user_clock_now(user_id, feedback_profile.get("timezone") or "Asia/Shanghai").isoformat()
+                    conn.execute("UPDATE interruption_episodes SET status='settled',outcome_json=?,settled_at=?,updated_at=? WHERE id=?", (as_json(recovery_outcome), settled_at, feedback["created_at"], recovery_episode["id"]))
+                    recovery_episode_result = self.interruption_episode_row(conn.execute("SELECT * FROM interruption_episodes WHERE id=?", (recovery_episode["id"],)).fetchone())
+                    self._enqueue_personalization(conn, user_id=user_id, kind="interruption_recovery_outcome", source_id=f"{recovery_episode['id']}:feedback", payload={"episode": recovery_episode_result}, timestamp=feedback["created_at"])
             conn.execute(
                 "UPDATE tasks SET execution_json=?,demand_json=?,status=?,updated_at=? WHERE id=? AND user_id=?",
                 (as_json(feedback_decision.execution), as_json(feedback_decision.task_demand), feedback_decision.task_status, feedback["created_at"], task_id, user_id),
@@ -5465,6 +5593,7 @@ class Store:
             },
         )
         feedback["task"] = self.get_task(task_id, user_id)
+        feedback["recovery_episode"] = recovery_episode_result
         feedback["requires_plan_adjustment"] = requires_plan_adjustment
         feedback["schedule_action"] = schedule_action
         self.log_event(user_id, "execution_feedback_saved", feedback)
@@ -7673,6 +7802,7 @@ class Store:
         query = f"Resume task {task['title']} with energy {state.get('energy')} stress {state.get('stress')}"
         memories = self.search_memories(user_id, query, top_k=4)
         latest_dump = None
+        episode = None
         with self.connect() as conn:
             row = conn.execute(
                 """
@@ -7682,6 +7812,11 @@ class Store:
                 """,
                 (user_id, task_id),
             ).fetchone()
+            episode_row = conn.execute("SELECT * FROM interruption_episodes WHERE user_id=? AND task_id=? AND status IN ('pending','resumed') ORDER BY created_at DESC LIMIT 1", (user_id, task_id)).fetchone()
+            if episode_row:
+                generated_at = self.user_clock_now(user_id, self.ensure_profile(user_id).get("timezone") or "Asia/Shanghai").isoformat()
+                conn.execute("UPDATE interruption_episodes SET reentry_guidance_generated_at=?,updated_at=? WHERE id=?", (generated_at, now_ms(), episode_row["id"]))
+                episode = self.interruption_episode_row(conn.execute("SELECT * FROM interruption_episodes WHERE id=?", (episode_row["id"],)).fetchone())
         if row:
             latest_dump = {
                 "progress": row["progress"],
@@ -7713,6 +7848,7 @@ class Store:
                 else (task.get("execution") or {}).get("remaining_duration_minutes")
             ),
             "memory_evidence": memories,
+            "interruption_episode_id": episode.get("id") if episode else None,
         }
         # Temporary response alias for older clients. New clients must use the
         # task-scoped name so it cannot be confused with Session remaining.
@@ -8146,6 +8282,7 @@ class Handler(BaseHTTPRequestHandler):
                 pause_review = None if command["interruption_action"] == "short_break" else store.analyze_execution_impact(user_id, {**command, "action": command["interruption_action"]})
                 response = interruption_response(execution_session=execution_session, command=command, impact=pause_review, reschedule_check=(pause_review or {}).get("reschedule_check"))
                 response["context_dump"] = atomic_result.get("context_dump")
+                response["interruption_episode"] = execution_session.get("interruption_episode")
                 if command["interruption_action"] == "switch_task":
                     from app.application.ready_queue import build_ready_queue
 
@@ -8169,6 +8306,7 @@ class Handler(BaseHTTPRequestHandler):
                 execution_session = store.pause_execution_session(user_id, command)
                 pause_review = None if command["interruption_action"] == "short_break" else store.analyze_execution_impact(user_id, {**command, "action": command["interruption_action"]})
                 response = interruption_response(execution_session=execution_session, command=command, impact=pause_review, reschedule_check=(pause_review or {}).get("reschedule_check"))
+                response["interruption_episode"] = execution_session.get("interruption_episode")
                 if command["interruption_action"] == "switch_task":
                     from app.application.ready_queue import build_ready_queue
 
@@ -8184,6 +8322,12 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 user_id = payload.get("user_id", "demo")
                 self.send_json({"impact": store.analyze_execution_impact(user_id, payload)})
+                return
+
+            if path == "/api/interruption-episodes" and method == "GET":
+                user_id = query.get("user_id", ["demo"])[0]
+                store.ensure_profile(user_id)
+                self.send_json({"data": store.interruption_recovery_summary(user_id), "resources": {"execution_sessions": "/api/execution-sessions", "profile": "/api/profile"}, "meta": {"resource": "interruption_episodes", "aggregate_root": "task", "read_only": True, "causal_claim_allowed": False, "profile_write_allowed": False, "plan_write_allowed": False}})
                 return
 
             if path == "/api/plans/replan" and method == "POST":
@@ -8312,7 +8456,7 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 user_id = payload.get("user_id", "demo")
                 store.ensure_profile(user_id)
-                self.send_json({"data": {"reentry": store.reentry_prompt(user_id, payload)}, "resources": {"task": "/api/tasks", "execution_sessions": "/api/execution-sessions", "context_dump": "/api/context-dumps"}, "meta": {"resource": "reentry_guidance", "aggregate_root": "task", "read_only": True, "plan_write_allowed": False}})
+                self.send_json({"data": {"reentry": store.reentry_prompt(user_id, payload)}, "resources": {"task": "/api/tasks", "execution_sessions": "/api/execution-sessions", "context_dump": "/api/context-dumps"}, "meta": {"resource": "reentry_guidance", "aggregate_root": "task", "read_only": False, "plan_write_allowed": False, "records_guidance_generation": True}})
                 return
 
             if path == "/api/memories/search" and method == "GET":

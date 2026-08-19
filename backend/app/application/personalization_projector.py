@@ -14,6 +14,7 @@ from app.application.plan_edit_evidence import project_plan_edit, project_plan_r
 from app.application.pattern_decision_evidence import project_pattern_denial
 from app.application.recommendation_feedback_evidence import project_recommendation_feedback
 from app.application.state_checkin_evidence import project_state_checkin
+from app.application.interruption_recovery import project_recovery_evidence
 from app.repositories.personalization import PersonalizationEvidenceRepository
 
 
@@ -67,6 +68,10 @@ def _project(repository: PersonalizationEvidenceRepository, kind: str, payload: 
         repository.save_evidence(evidence=evidence, timestamp=timestamp)
     elif kind == "pattern_denial":
         evidence = project_pattern_denial(evidence_id=_id("evidence"), **payload)
+        repository.save_evidence(evidence=evidence, timestamp=timestamp)
+    elif kind in {"interruption_recovery_attempt", "interruption_recovery_outcome"}:
+        stage = "attempt" if kind.endswith("attempt") else "outcome"
+        evidence = project_recovery_evidence(evidence_id=_id("evidence"), episode=payload["episode"], stage=stage)
         repository.save_evidence(evidence=evidence, timestamp=timestamp)
     elif kind == "invalidate_source":
         repository.invalidate_source(**payload)

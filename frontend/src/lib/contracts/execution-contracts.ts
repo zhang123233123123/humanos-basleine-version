@@ -37,6 +37,38 @@ export interface ExecutionSession {
   [key: string]: unknown
 }
 
+export interface InterruptionEpisode {
+  id: string
+  task_id: string
+  source_execution_session_id: string
+  context_dump_id?: string | null
+  interruption_action: InterruptionAction
+  pause_reason: string
+  paused_at: string
+  remaining_minutes: number
+  task_demand_snapshot: Record<string, unknown>
+  runtime_state_snapshot: Record<string, unknown>
+  profile_trait_refs: string[]
+  status: 'pending' | 'resumed' | 'settled'
+  reentry_guidance_generated_at?: string | null
+  resumed_execution_session_id?: string | null
+  resumed_at?: string | null
+  resume_latency_minutes?: number | null
+  outcome: { completion?: string | null; actual_minutes_after_resume?: number | null; reinterrupted?: boolean }
+}
+
+export interface InterruptionRecoverySummary {
+  episode_count: number
+  pending_count: number
+  resumed_count: number
+  settled_count: number
+  completion: { completed: number; partial: number; not_started: number; other: number }
+  reinterrupted_count: number
+  median_resume_latency_minutes?: number | null
+  causal_claim_allowed: false
+  profile_write_allowed: false
+}
+
 export interface CurrentExecution {
   mode: ExecutionMode
   session?: ExecutionSession | null

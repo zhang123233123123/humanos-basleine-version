@@ -94,7 +94,7 @@ class ResearchEditExecutionTests(unittest.TestCase):
         paused = self.store.pause_execution_session("u", {"execution_session_id": started["execution_session_id"], "actual_minutes": 15, "request_id": "evidence-pause"})
         resumed = self.store.start_execution_session("u", {"execution_session_id": paused["execution_session_id"], "request_id": "evidence-resume"})
         self.store.end_execution_session("u", {"execution_session_id": resumed["execution_session_id"], "actual_minutes": 30, "request_id": "evidence-end"})
-        evidence = [item for item in self.store.list_personalization_evidence("u") if item["source_type"] == "system_observation"]
+        evidence = [item for item in self.store.list_personalization_evidence("u") if item["claim_key"].startswith("execution_behavior.")]
         self.assertEqual(
             ["execution_behavior.start", "execution_behavior.pause", "execution_behavior.resume", "execution_behavior.end"],
             [item["claim_key"] for item in evidence],
