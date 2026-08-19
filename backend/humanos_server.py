@@ -5752,6 +5752,30 @@ class Store:
             result.append(trait)
         return result
 
+    def profile_trait_evidence(self, user_id: str, trait_id: str) -> dict | None:
+        """Return the evidence trace for one user-owned trait without mutating it."""
+        from app.application.profile_trait_evidence import build_profile_trait_evidence_trace
+
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM profile_traits WHERE id=? AND user_id=?", (trait_id, user_id),
+            ).fetchone()
+            if not row:
+                return None
+            decision = conn.execute(
+                "SELECT candidate_json,pattern_label FROM pattern_decisions "
+                "WHERE user_id=? AND candidate_id=? AND action='confirm' ORDER BY created_at DESC LIMIT 1",
+                (user_id, row["candidate_id"]),
+            ).fetchone()
+        trait = dict(from_json(row["trait_json"], {}))
+        trait["status"] = str(row["status"])
+        candidate = from_json(decision["candidate_json"], {}) if decision else {}
+        label = str(decision["pattern_label"] or "") if decision else ""
+        return build_profile_trait_evidence_trace(
+            trait, candidate, self.list_personalization_evidence(user_id),
+            display_label=str(trait.get("display_label") or label), confirmed_at=int(row["confirmed_at"]),
+        )
+
     def manage_profile_trait(self, user_id: str, trait_id: str, payload: dict) -> dict:
         """Apply an explicit id-based trait change without mutating the active plan."""
         action = str(payload.get("action") or "").strip()
@@ -8365,6 +8389,17 @@ class Handler(BaseHTTPRequestHandler):
                 user_id = query.get("user_id", ["demo"])[0]
                 store.ensure_profile(user_id)
                 self.send_json({"data": {"profile_traits": store.list_profile_traits(user_id)}, "resources": {"profile": "/api/profile", "effects": "/api/profile-traits/effects"}, "meta": {"resource": "profile_traits", "aggregate_root": "profile", "read_only": True, "plan_write_allowed": False}})
+                return
+
+            if path.startswith("/api/profile-traits/") and path.endswith("/evidence") and method == "GET":
+                user_id = query.get("user_id", ["demo"])[0]
+                trait_id = path.split("/")[-2]
+                store.ensure_profile(user_id)
+                trace = store.profile_trait_evidence(user_id, trait_id)
+                if trace is None:
+                    self.send_json({"error": "profile_trait_not_found", "message": "Profile trait not found."}, status=404)
+                    return
+                self.send_json({"data": trace, "resources": {"collection": "/api/profile-traits", "effects": "/api/profile-traits/effects"}, "meta": {"resource": "profile_trait_evidence", "aggregate_root": "profile", "read_only": True, "causal_claim_allowed": False, "profile_write_allowed": False, "plan_write_allowed": False, "unrelated_evidence_excluded": True}})
                 return
 
             if path.startswith("/api/profile-traits/") and method == "PATCH":

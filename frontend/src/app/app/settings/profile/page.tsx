@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, BrainCircuit, Loader2, Pause, Pencil, Play, RotateCcw, Trash2 } from 'lucide-react'
+import { ArrowLeft, BrainCircuit, Eye, Loader2, Pause, Pencil, Play, RotateCcw, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { apiRequest, ApiResponseError } from '@/lib/client/api'
@@ -11,6 +11,7 @@ import type { LearningResourceEnvelope, ProfileTraitRecord } from '@/lib/contrac
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 import { ProfileTraitAttributionSummary } from '@/components/profile-trait-attribution-summary'
+import { ProfileTraitEvidencePanel } from '@/components/profile-trait-evidence-panel'
 
 type Filter = 'active' | 'paused' | 'forgotten'
 
@@ -24,6 +25,7 @@ export default function ProfileTraitsPage() {
   const [acting, setActing] = useState('')
   const [editing, setEditing] = useState('')
   const [draftLabel, setDraftLabel] = useState('')
+  const [viewingEvidence, setViewingEvidence] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -81,10 +83,12 @@ export default function ProfileTraitsPage() {
               <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2"><div className="rounded-2xl bg-stone-100 p-3 dark:bg-white/5"><span className="text-xs text-stone-500">{c('画像值', 'Trait value')}</span><pre className="mt-1 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(trait.value, null, 2)}</pre></div><div className="rounded-2xl bg-stone-100 p-3 dark:bg-white/5"><span className="text-xs text-stone-500">{c('独立执行反馈', 'Independent execution feedback')}</span><p className="mt-1">{trait.effect ? `${trait.effect.usage_with_feedback_count} ${c('次使用', 'uses')} · ${trait.effect.assessment}` : c('尚无可用效果数据', 'No effect data yet')}</p></div></div>{trait.effect && <ProfileTraitAttributionSummary effect={trait.effect} locale={locale} />}
             </div><div className="flex shrink-0 flex-wrap gap-2">
               {trait.status !== 'forgotten' && <Button size="sm" variant="outline" onClick={() => { setEditing(trait.trait_id); setDraftLabel(trait.display_label || '') }}><Pencil className="mr-1.5 h-3.5 w-3.5" />{c('编辑', 'Edit')}</Button>}
+              <Button size="sm" variant="outline" onClick={() => setViewingEvidence((current) => current === trait.trait_id ? '' : trait.trait_id)}><Eye className="mr-1.5 h-3.5 w-3.5" />{viewingEvidence === trait.trait_id ? c('收起证据', 'Hide evidence') : c('查看证据', 'View evidence')}</Button>
               {trait.status === 'confirmed' && <Button size="sm" variant="outline" disabled={acting !== ''} onClick={() => void manage(trait, 'pause')}><Pause className="mr-1.5 h-3.5 w-3.5" />{c('暂停', 'Pause')}</Button>}
               {trait.status === 'paused' && <Button size="sm" variant="outline" disabled={acting !== ''} onClick={() => void manage(trait, 'resume')}><Play className="mr-1.5 h-3.5 w-3.5" />{c('恢复', 'Resume')}</Button>}
               {trait.status !== 'forgotten' && <Button size="sm" variant="ghost" className="text-destructive" disabled={acting !== ''} onClick={() => void manage(trait, 'forget')}><Trash2 className="mr-1.5 h-3.5 w-3.5" />{c('遗忘', 'Forget')}</Button>}
             </div></div>
+            {viewingEvidence === trait.trait_id && <ProfileTraitEvidencePanel traitId={trait.trait_id} locale={locale} />}
           </article>)}
         </div>}
       </>}

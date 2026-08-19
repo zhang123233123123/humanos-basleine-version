@@ -69,6 +69,42 @@ export interface ProfileTraitRecord {
   effect?: ProfileTraitEffect | null
 }
 
+export type ProfileTraitEvidenceRole = 'supporting' | 'counter' | 'execution_outcome_independent' | 'execution_outcome_parallel' | 'execution_outcome_unknown'
+
+export interface ProfileTraitEvidenceItem {
+  evidence_id: string
+  source_type: string
+  source_id: string
+  origin: string
+  observed_at: string | number
+  claim_key: string
+  structured_value: unknown
+  scope: Record<string, unknown>
+  text?: string | null
+  user_explicit: boolean
+  confidence_level: 'low' | 'medium' | 'high'
+  eligible_for_pattern: boolean
+  effective: boolean
+  requires_user_confirmation: true
+  role: ProfileTraitEvidenceRole
+}
+
+export interface ProfileTraitEvidenceTrace {
+  trait: Pick<ProfileTraitRecord, 'trait_id' | 'trait_key' | 'value' | 'scope' | 'status' | 'confidence_level' | 'confirmed_at'> & {
+    display_label: string
+    source_candidate_id?: string | null
+  }
+  evidence: ProfileTraitEvidenceItem[]
+  summary: {
+    supporting_count: number
+    counter_count: number
+    independent_outcome_count: number
+    parallel_outcome_count: number
+    unknown_outcome_count: number
+    missing_evidence_ids: string[]
+  }
+}
+
 export interface MemoryResult {
   memory_id: string
   source_type: string
@@ -86,7 +122,7 @@ export interface LearningResourceEnvelope<T> {
   data: T
   resources: Record<string, string>
   meta: {
-    resource: 'pattern_candidates' | 'learned_pattern' | 'memory_evidence' | 'profile_trait_effects' | 'profile_trait_review' | 'profile_traits' | 'profile_trait'
+    resource: 'pattern_candidates' | 'learned_pattern' | 'memory_evidence' | 'profile_trait_effects' | 'profile_trait_review' | 'profile_traits' | 'profile_trait' | 'profile_trait_evidence'
     aggregate_root: 'profile'
     read_only: boolean
     plan_write_allowed: false
@@ -94,5 +130,6 @@ export interface LearningResourceEnvelope<T> {
     active_plan_unchanged?: boolean
     causal_claim_allowed?: boolean
     profile_write_allowed?: boolean
+    unrelated_evidence_excluded?: boolean
   }
 }
