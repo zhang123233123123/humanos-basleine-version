@@ -38,13 +38,27 @@ def summarize_trait_effects(
             continue
         trait_id = str(trait["trait_id"])
         outcomes = by_trait.get(trait_id, [])
+        independent_outcomes = []
+        parallel_outcomes = []
+        unknown_outcomes = []
+        for evidence in outcomes:
+            context = dict((evidence.get("structured_value") or {}).get("execution_context") or {})
+            attribution = str(context.get("attribution") or "unknown")
+            if attribution == "parallel" or context.get("actual_parallel") is True:
+                parallel_outcomes.append(evidence)
+            elif attribution == "independent" or context.get("actual_parallel") is False:
+                independent_outcomes.append(evidence)
+            else:
+                unknown_outcomes.append(evidence)
         completion = {"completed": 0, "partial": 0, "not_started": 0, "other": 0}
         timing = {"helpful": 0, "unhelpful": 0, "unrated": 0}
+        parallel_completion = {"completed": 0, "partial": 0, "not_started": 0, "other": 0}
+        parallel_timing = {"helpful": 0, "unhelpful": 0, "unrated": 0}
         favorable_outcomes = 0
         unfavorable_outcomes = 0
         sessions: set[str] = set()
         evidence_ids = []
-        for evidence in outcomes:
+        for evidence in independent_outcomes:
             structured = dict(evidence.get("structured_value") or {})
             task_eval = dict(structured.get("task_evaluation") or {})
             result = str(task_eval.get("completion") or "other").strip().lower()
@@ -60,8 +74,17 @@ def summarize_trait_effects(
             if structured.get("execution_session_id"):
                 sessions.add(str(structured["execution_session_id"]))
             evidence_ids.append(str(evidence["evidence_id"]))
+        parallel_evidence_ids = []
+        for evidence in parallel_outcomes:
+            structured = dict(evidence.get("structured_value") or {})
+            task_eval = dict(structured.get("task_evaluation") or {})
+            result = str(task_eval.get("completion") or "other").strip().lower()
+            parallel_completion[result if result in parallel_completion else "other"] += 1
+            rating = _timing_rating(dict(structured.get("recommendation_evaluation") or {}))
+            parallel_timing[rating] += 1
+            parallel_evidence_ids.append(str(evidence["evidence_id"]))
         directional = favorable_outcomes + unfavorable_outcomes
-        if len(outcomes) < 3:
+        if len(independent_outcomes) < 3:
             assessment = "insufficient_data"
         elif directional and unfavorable_outcomes >= 2 and unfavorable_outcomes / directional >= 0.6:
             assessment = "possible_mismatch"
@@ -71,8 +94,20 @@ def summarize_trait_effects(
             assessment = "mixed"
         summaries.append({
             "trait_id": trait_id, "trait_key": trait.get("trait_key"), "value": trait.get("value"),
-            "pattern_label": labels.get(trait_id), "usage_with_feedback_count": len(outcomes),
+            "pattern_label": labels.get(trait_id), "usage_with_feedback_count": len(independent_outcomes),
+            "total_linked_feedback_count": len(outcomes),
             "execution_session_count": len(sessions), "completion": completion, "timing_feedback": timing,
+            "attribution": {
+                "independent_count": len(independent_outcomes),
+                "parallel_count": len(parallel_outcomes),
+                "unknown_count": len(unknown_outcomes),
+                "parallel_excluded_from_assessment": True,
+                "unknown_excluded_from_assessment": True,
+            },
+            "parallel_outcomes": {
+                "completion": parallel_completion, "timing_feedback": parallel_timing,
+                "evidence_ids": parallel_evidence_ids,
+            },
             "assessment": assessment, "evidence_ids": evidence_ids,
             "causal_claim_allowed": False, "profile_write_allowed": False,
         })

@@ -30,9 +30,22 @@ export interface ProfileTraitEffect {
   value: Record<string, unknown>
   pattern_label?: string
   usage_with_feedback_count: number
+  total_linked_feedback_count: number
   execution_session_count: number
   completion: { completed: number; partial: number; not_started: number; other: number }
   timing_feedback: { helpful: number; unhelpful: number; unrated: number }
+  attribution: {
+    independent_count: number
+    parallel_count: number
+    unknown_count: number
+    parallel_excluded_from_assessment: true
+    unknown_excluded_from_assessment: true
+  }
+  parallel_outcomes: {
+    completion: { completed: number; partial: number; not_started: number; other: number }
+    timing_feedback: { helpful: number; unhelpful: number; unrated: number }
+    evidence_ids: string[]
+  }
   assessment: 'insufficient_data' | 'initially_consistent' | 'mixed' | 'possible_mismatch'
   evidence_ids: string[]
   causal_claim_allowed: false

@@ -13,17 +13,19 @@ class ExecutionRevisionContinuityTests(unittest.TestCase):
           planned_start_at TEXT,planned_end_at TEXT,planned_work_minutes INTEGER,resumed_from_session_id TEXT,
           accumulated_active_minutes INTEGER DEFAULT 0,remaining_at_pause INTEGER,interruption_snapshot_json TEXT NOT NULL DEFAULT '{}',
           profile_trait_refs_json TEXT NOT NULL DEFAULT '[]',
+          parallel_context_json TEXT NOT NULL DEFAULT '{}',
           status TEXT,completion_outcome TEXT,created_at INTEGER,updated_at INTEGER,
           UNIQUE(user_id,block_id,plan_revision))""")
         self.repository = ExecutionSessionRepository(self.connection)
 
     def test_new_revision_inherits_paused_execution_context(self) -> None:
-        self.connection.execute("INSERT INTO execution_sessions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", ("old", "u", "task", "old-block", "2026-08-10", 1, "a", "b", 60, None, 20, 40, '{"next_step":"continue"}', '["trait-1"]', "paused", None, 1, 2))
+        self.connection.execute("INSERT INTO execution_sessions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", ("old", "u", "task", "old-block", "2026-08-10", 1, "a", "b", 60, None, 20, 40, '{"next_step":"continue"}', '["trait-1"]', '{"planned_parallel":true}', "paused", None, 1, 2))
         source = self.repository.latest_paused_for_task(user_id="u", task_id="task")
-        self.repository.upsert_ready(execution_id="new", user_id="u", task_id="task", block_id="new-block", week_id="2026-08-10", revision=2, planned_start_at="c", planned_end_at="d", planned_work_minutes=40, resumed_from_session_id=source["id"], accumulated_active_minutes=source["accumulated_active_minutes"], remaining_at_pause=source["remaining_at_pause"], interruption_snapshot_json=source["interruption_snapshot_json"], profile_trait_refs_json=source["profile_trait_refs_json"], timestamp=3)
+        self.repository.upsert_ready(execution_id="new", user_id="u", task_id="task", block_id="new-block", week_id="2026-08-10", revision=2, planned_start_at="c", planned_end_at="d", planned_work_minutes=40, resumed_from_session_id=source["id"], accumulated_active_minutes=source["accumulated_active_minutes"], remaining_at_pause=source["remaining_at_pause"], interruption_snapshot_json=source["interruption_snapshot_json"], profile_trait_refs_json=source["profile_trait_refs_json"], parallel_context_json=source["parallel_context_json"], timestamp=3)
         row = self.connection.execute("SELECT * FROM execution_sessions WHERE id='new'").fetchone()
         self.assertEqual(("old", 20, 40, '{"next_step":"continue"}', "ready"), (row["resumed_from_session_id"], row["accumulated_active_minutes"], row["remaining_at_pause"], row["interruption_snapshot_json"], row["status"]))
         self.assertEqual('["trait-1"]', row["profile_trait_refs_json"])
+        self.assertEqual('{"planned_parallel":true}', row["parallel_context_json"])
 
     def test_first_revision_uses_empty_snapshot(self) -> None:
         self.repository.upsert_ready(execution_id="first", user_id="u", task_id="task", block_id="block", week_id="2026-08-10", revision=1, planned_start_at="a", planned_end_at="b", planned_work_minutes=30, resumed_from_session_id=None, timestamp=1)

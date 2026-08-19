@@ -7,10 +7,10 @@ def trait(status="confirmed"):
     return {"trait_id": "t1", "trait_key": "perceived_state.energy", "value": {"daypart": "afternoon"}, "status": status, "user_confirmed": True}
 
 
-def outcome(index, completion, timing):
+def outcome(index, completion, timing, attribution="independent"):
     return {
         "evidence_id": f"e{index}", "claim_key": "profile_trait.execution_outcome",
-        "structured_value": {"profile_trait_id": "t1", "execution_session_id": f"s{index}", "task_evaluation": {"completion": completion}, "recommendation_evaluation": {"timing_fit": timing}},
+        "structured_value": {"profile_trait_id": "t1", "execution_session_id": f"s{index}", "task_evaluation": {"completion": completion}, "recommendation_evaluation": {"timing_fit": timing}, "execution_context": {"attribution": attribution}},
     }
 
 
@@ -34,6 +34,25 @@ class TraitEffectSummaryTests(unittest.TestCase):
         result = summarize_trait_effects([trait()], [unrelated])[0]
         self.assertEqual(0, result["usage_with_feedback_count"])
         self.assertEqual("insufficient_data", result["assessment"])
+
+    def test_parallel_and_legacy_unknown_outcomes_do_not_drive_trait_assessment(self):
+        evidence = [
+            outcome(1, "completed", "helpful"),
+            outcome(2, "completed", "helpful"),
+            outcome(3, "completed", "helpful"),
+            outcome(4, "not_started", "unhelpful", "parallel"),
+            outcome(5, "not_started", "unhelpful", "parallel"),
+            outcome(6, "not_started", "unhelpful", "unknown"),
+        ]
+        result = summarize_trait_effects([trait()], evidence)[0]
+        self.assertEqual("initially_consistent", result["assessment"])
+        self.assertEqual(3, result["usage_with_feedback_count"])
+        self.assertEqual(6, result["total_linked_feedback_count"])
+        self.assertEqual({
+            "independent_count": 3, "parallel_count": 2, "unknown_count": 1,
+            "parallel_excluded_from_assessment": True, "unknown_excluded_from_assessment": True,
+        }, result["attribution"])
+        self.assertEqual(2, result["parallel_outcomes"]["completion"]["not_started"])
 
 
 if __name__ == "__main__":

@@ -929,6 +929,7 @@ class Store:
                   request_id TEXT,
                   research_context_revision INTEGER NOT NULL DEFAULT 0,
                   profile_trait_refs_json TEXT NOT NULL DEFAULT '[]',
+                  execution_context_json TEXT NOT NULL DEFAULT '{}',
                   created_at INTEGER NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS state_transitions (
@@ -1052,6 +1053,7 @@ class Store:
                   interruption_action TEXT,
                   interruption_snapshot_json TEXT NOT NULL DEFAULT '{}',
                   profile_trait_refs_json TEXT NOT NULL DEFAULT '[]',
+                  parallel_context_json TEXT NOT NULL DEFAULT '{}',
                   resume_preference TEXT,
                   preferred_resume_at TEXT,
                   remaining_at_pause INTEGER,
@@ -1152,6 +1154,8 @@ class Store:
                 "execution_session_id": "TEXT",
                 "request_id": "TEXT",
                 "research_context_revision": "INTEGER NOT NULL DEFAULT 0",
+                "profile_trait_refs_json": "TEXT NOT NULL DEFAULT '[]'",
+                "execution_context_json": "TEXT NOT NULL DEFAULT '{}'",
             }
             for name, definition in feedback_migrations.items():
                 if name not in feedback_columns:
@@ -1171,6 +1175,7 @@ class Store:
                 "remaining_at_pause": "INTEGER",
                 "resumed_from_session_id": "TEXT",
                 "profile_trait_refs_json": "TEXT NOT NULL DEFAULT '[]'",
+                "parallel_context_json": "TEXT NOT NULL DEFAULT '{}'",
             }
             for name, definition in execution_migrations.items():
                 if name not in execution_columns:
@@ -3977,6 +3982,11 @@ class Store:
                 ).fetchall()
             }
             blocks_by_task: dict[str, list[dict]] = {}
+            parallel_blocks_by_group: dict[str, list[dict]] = {}
+            for candidate_block in decorated:
+                group_id = str(candidate_block.get("parallel_group_id") or "")
+                if group_id and candidate_block.get("parallel_user_confirmed"):
+                    parallel_blocks_by_group.setdefault(group_id, []).append(candidate_block)
             for block in decorated:
                 block["plan_status"] = "confirmed"
                 block["applied_profile_trait_ids"] = sorted({
@@ -3994,6 +4004,16 @@ class Store:
                 inherited_remaining = int(paused_source["remaining_at_pause"] or planned_minutes) if paused_source else None
                 if inherited_remaining is not None:
                     planned_minutes = min(planned_minutes, inherited_remaining)
+                parallel_group_id = str(block.get("parallel_group_id") or "")
+                group_blocks = parallel_blocks_by_group.get(parallel_group_id, [])
+                parallel_context = {
+                    "planned_parallel": bool(parallel_group_id and len(group_blocks) == 2),
+                    "parallel_group_id": parallel_group_id or None,
+                    "parallel_role": str(block.get("parallel_role") or "member") if parallel_group_id else None,
+                    "partner_task_ids": sorted({str(item.get("task_id")) for item in group_blocks if str(item.get("task_id")) != block_task_id}),
+                    "partner_block_ids": sorted({str(item.get("block_id")) for item in group_blocks if str(item.get("block_id")) != str(block.get("block_id"))}),
+                    "source": "confirmed_plan",
+                }
                 execution_sessions.upsert_ready(
                     execution_id=execution_id,
                     user_id=user_id,
@@ -4009,6 +4029,7 @@ class Store:
                     remaining_at_pause=inherited_remaining,
                     interruption_snapshot_json=paused_source["interruption_snapshot_json"] if paused_source else "{}",
                     profile_trait_refs_json=as_json(block.get("applied_profile_trait_ids") or []),
+                    parallel_context_json=as_json(parallel_context),
                     timestamp=timestamp,
                 )
                 if paused_source:
@@ -4798,6 +4819,7 @@ class Store:
     def execution_session_row(self, row: sqlite3.Row) -> dict:
         data = dict(row)
         data["profile_trait_refs"] = from_json(data.pop("profile_trait_refs_json", "[]"), [])
+        data["parallel_context"] = from_json(data.pop("parallel_context_json", "{}"), {})
         planned = int(data.get("planned_work_minutes") or 0)
         active = int(data.get("accumulated_active_minutes") or 0)
         if data.get("status") == "running":
@@ -4856,8 +4878,8 @@ class Store:
                         block_id = str(block.get("block_id") or f"{block.get('task_id')}-r{plan.get('plan_revision')}-{index + 1}")
                         planned_minutes = int(block.get("planned_work_minutes") or block.get("session_minutes") or round((float(block.get("end", 0)) - float(block.get("start", 0))) * 60))
                         conn.execute(
-                            "INSERT INTO execution_sessions (id,user_id,task_id,block_id,week_id,plan_revision,planned_start_at,planned_end_at,planned_work_minutes,profile_trait_refs_json,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,block_id,plan_revision) DO NOTHING",
-                            (execution_id, user_id, str(block.get("task_id")), block_id, str(plan.get("week_id") or ""), int(plan.get("plan_revision") or 0), str(block.get("start_at") or ""), str(block.get("end_at") or ""), planned_minutes, as_json(sorted({str(item) for item in block.get("applied_profile_trait_ids") or [] if str(item) in confirmed_trait_ids})), "ready", timestamp, timestamp),
+                            "INSERT INTO execution_sessions (id,user_id,task_id,block_id,week_id,plan_revision,planned_start_at,planned_end_at,planned_work_minutes,profile_trait_refs_json,parallel_context_json,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,block_id,plan_revision) DO NOTHING",
+                            (execution_id, user_id, str(block.get("task_id")), block_id, str(plan.get("week_id") or ""), int(plan.get("plan_revision") or 0), str(block.get("start_at") or ""), str(block.get("end_at") or ""), planned_minutes, as_json(sorted({str(item) for item in block.get("applied_profile_trait_ids") or [] if str(item) in confirmed_trait_ids})), as_json({"planned_parallel": bool(block.get("parallel_group_id") and block.get("parallel_user_confirmed")), "parallel_group_id": block.get("parallel_group_id"), "parallel_role": block.get("parallel_role"), "partner_task_ids": [str(item) for item in block.get("parallel_task_ids") or [] if str(item) != str(block.get("task_id"))], "source": "confirmed_plan"}), "ready", timestamp, timestamp),
                         )
                 sessions = self.list_execution_sessions(user_id, ["running", "paused", "ended", "ready"])
         running = [item for item in sessions if item["status"] == "running"]
@@ -5229,6 +5251,58 @@ class Store:
             updated = conn.execute("SELECT * FROM execution_sessions WHERE id=?", (session_id,)).fetchone()
         return self.execution_session_row(updated)
 
+    def execution_parallel_context(self, user_id: str, session: sqlite3.Row) -> dict:
+        """Derive actual co-execution from persisted Session timestamps."""
+        planned = dict(from_json(session["parallel_context_json"], {}))
+        base = {
+            **planned,
+            "planned_parallel": bool(planned.get("planned_parallel")),
+            "actual_parallel": False,
+            "observed_overlap_minutes": 0,
+            "partner_session_ids": [],
+            "attribution": "independent",
+            "derived_by": "backend_session_overlap",
+        }
+        group_id = str(planned.get("parallel_group_id") or "")
+        if not group_id or not planned.get("planned_parallel") or not session["actual_start_at"]:
+            return base
+        with self.connect() as conn:
+            candidates = conn.execute(
+                "SELECT * FROM execution_sessions WHERE user_id=? AND plan_revision=? AND id<>?",
+                (user_id, session["plan_revision"], session["id"]),
+            ).fetchall()
+        current = self.user_clock_now(user_id, self.ensure_profile(user_id).get("timezone") or "Asia/Shanghai")
+
+        def parsed(value: str | None, fallback: datetime) -> datetime:
+            if not value:
+                return fallback
+            result = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            return result.replace(tzinfo=fallback.tzinfo) if result.tzinfo is None else result
+
+        source_start = parsed(session["actual_start_at"], current)
+        source_end = parsed(session["actual_end_at"], current)
+        overlap_seconds = 0.0
+        partners = []
+        for candidate in candidates:
+            context = dict(from_json(candidate["parallel_context_json"], {}))
+            if str(context.get("parallel_group_id") or "") != group_id or not candidate["actual_start_at"]:
+                continue
+            partner_start = parsed(candidate["actual_start_at"], current)
+            partner_end = parsed(candidate["actual_end_at"], current)
+            seconds = max((min(source_end, partner_end) - max(source_start, partner_start)).total_seconds(), 0)
+            if seconds > 0:
+                overlap_seconds += seconds
+                partners.append(str(candidate["id"]))
+        overlap_minutes = int(overlap_seconds // 60)
+        if overlap_seconds > 0:
+            base.update({
+                "actual_parallel": True,
+                "observed_overlap_minutes": max(overlap_minutes, 1),
+                "partner_session_ids": sorted(partners),
+                "attribution": "parallel",
+            })
+        return base
+
     def save_execution_feedback(self, user_id: str, payload: dict) -> dict:
         """Store three feedback targets separately and preserve the same task identity."""
         task_id = payload["task_id"]
@@ -5237,10 +5311,11 @@ class Store:
             raise KeyError(task_id)
         feedback_profile = self.ensure_profile(user_id)
         session_trait_refs: list[str] = []
+        execution_context = {"attribution": "unknown", "derived_by": "no_execution_session"}
         if payload.get("execution_session_id"):
             with self.connect() as conn:
                 source_session = conn.execute(
-                    "SELECT task_id,profile_trait_refs_json FROM execution_sessions WHERE id=? AND user_id=?",
+                    "SELECT * FROM execution_sessions WHERE id=? AND user_id=?",
                     (payload.get("execution_session_id"), user_id),
                 ).fetchone()
             if not source_session:
@@ -5248,6 +5323,7 @@ class Store:
             if str(source_session["task_id"]) != str(task_id):
                 raise ValueError("execution session does not belong to the feedback task")
             session_trait_refs = [str(item) for item in from_json(source_session["profile_trait_refs_json"], []) if str(item)]
+            execution_context = self.execution_parallel_context(user_id, source_session)
         request_id = str(payload.get("request_id") or "").strip() or None
         if request_id:
             with self.connect() as conn:
@@ -5268,6 +5344,7 @@ class Store:
                     "request_id": existing["request_id"],
                     "research_context_revision": existing["research_context_revision"],
                     "profile_trait_refs": from_json(existing["profile_trait_refs_json"], []),
+                    "execution_context": from_json(existing["execution_context_json"], {}),
                     "created_at": existing["created_at"],
                 }
         feedback = {
@@ -5286,6 +5363,7 @@ class Store:
             "request_id": request_id,
             "research_context_revision": int(feedback_profile.get("research_context_revision") or 0),
             "profile_trait_refs": session_trait_refs,
+            "execution_context": execution_context,
             "created_at": now_ms(),
         }
         task_eval = feedback["task_evaluation"]
@@ -5303,8 +5381,9 @@ class Store:
                 INSERT INTO execution_feedback (
                   id, user_id, task_id, trigger, task_evaluation_json,
                   state_evaluation_json, recommendation_evaluation_json,
-                  execution_session_id, request_id, research_context_revision, profile_trait_refs_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  execution_session_id, request_id, research_context_revision, profile_trait_refs_json,
+                  execution_context_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     feedback["id"], user_id, task_id, feedback["trigger"],
@@ -5315,6 +5394,7 @@ class Store:
                     feedback["request_id"],
                     feedback["research_context_revision"],
                     as_json(feedback["profile_trait_refs"]),
+                    as_json(feedback["execution_context"]),
                     feedback["created_at"],
                 ),
             )
