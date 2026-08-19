@@ -15,8 +15,17 @@ export async function GET(req: Request) {
     ]) as [any, any, any]
     const tasks = (taskEnvelope?.data?.tasks || []) as HumanOSTask[]
     const sessions = Array.isArray(executionData?.execution_sessions) ? executionData.execution_sessions : []
+    const proposedPlan = proposedEnvelope?.data?.plan || proposedEnvelope?.plan || null
+    const proposedTaskIds = new Set(
+      (proposedPlan?.plan_patch || [])
+        .map((block: Record<string, unknown>) => String(block.task_id || ''))
+        .filter(Boolean),
+    )
+    const persistedEvents = projectCalendarEvents(tasks, sessions, searchParams.get('start'), searchParams.get('end'))
+      .filter((event) => !proposedTaskIds.has(String(event.extendedProps.taskId || '')))
+    const draftEvents = projectDraftPlanEvents(proposedPlan, tasks, searchParams.get('start'), searchParams.get('end'))
     return Response.json({
-      data: { events: [...projectCalendarEvents(tasks, sessions, searchParams.get('start'), searchParams.get('end')), ...projectDraftPlanEvents(proposedEnvelope?.data?.plan || proposedEnvelope?.plan || null, tasks, searchParams.get('start'), searchParams.get('end'))] },
+      data: { events: [...persistedEvents, ...draftEvents] },
       resources: { tasks: '/api/tasks?view=resource', execution_sessions: '/api/execution-sessions', active_plan: '/api/plans/active', proposed_plan: '/api/plans/proposed' },
       meta: { resource: 'calendar_events', read_only: true },
     })
