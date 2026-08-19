@@ -256,6 +256,23 @@
     linear-gradient(180deg, #090d13 0%, #0d131b 100%);
 }
 
+.humanos-focus-container {
+  isolation: isolate;
+}
+
+.humanos-focus-container::before {
+  position: fixed;
+  inset: 3.5rem 0 0;
+  z-index: -1;
+  background: rgba(247, 245, 239, 0.72);
+  content: '';
+  pointer-events: none;
+}
+
+.dark .humanos-focus-container::before {
+  background: rgba(9, 13, 19, 0.78);
+}
+
 .humanos-operating-container > header {
   position: relative;
   padding: 1.5rem 0 1.75rem;
