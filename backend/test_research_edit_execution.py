@@ -2,6 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from backend.humanos_server import Store
 
@@ -9,6 +11,8 @@ from backend.humanos_server import Store
 class ResearchEditExecutionTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.clock_patch = patch.object(Store, "user_clock_now", return_value=datetime(2026, 8, 3, 8, 0, tzinfo=ZoneInfo("Asia/Shanghai")))
+        self.clock_patch.start()
         self.store = Store(Path(self.tmp.name) / "humanos.db")
         self.profile = self.store.upsert_profile({
             "user_id": "u", "timezone": "Asia/Shanghai", "role": "student",
@@ -25,6 +29,7 @@ class ResearchEditExecutionTests(unittest.TestCase):
         self.plan = self.store.save_proposed_plan("u", {"plan_patch": [self.initial]}, {"week_id": "2026-08-03", "request_id": "proposal-1"})
 
     def tearDown(self):
+        self.clock_patch.stop()
         self.tmp.cleanup()
 
     def moved(self):

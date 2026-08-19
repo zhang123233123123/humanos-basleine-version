@@ -75,6 +75,8 @@ export interface CurrentExecution {
   session?: ExecutionSession | null
   task?: ExecutionSession['task'] | null
   deferred_sessions?: ExecutionSession[]
+  overdue_sessions?: ExecutionSession[]
+  missed_sessions?: ExecutionSession[]
   [key: string]: unknown
 }
 

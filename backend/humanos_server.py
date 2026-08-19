@@ -4978,21 +4978,33 @@ class Store:
         for item in deferred:
             task = self.get_task(str(item.get("task_id") or ""), user_id) or {}
             deferred_sessions.append({**item, "task_title": task.get("title"), "task": task})
-        selected = (running or actionable_paused or ended or ready[:1])
+        def planned_end(item: dict) -> datetime | None:
+            value = item.get("planned_end_at")
+            if not value:
+                return None
+            try:
+                parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                return parsed.replace(tzinfo=current.tzinfo) if parsed.tzinfo is None else parsed
+            except ValueError:
+                return None
+
+        overdue_running = [item for item in running if planned_end(item) is not None and current >= planned_end(item)]
+        active_running = [item for item in running if item not in overdue_running]
+        missed_ready = [item for item in ready if planned_end(item) is not None and current >= planned_end(item)]
+        upcoming_ready = [item for item in ready if item not in missed_ready]
+
+        def with_task(item: dict) -> dict:
+            item_task = self.get_task(str(item.get("task_id") or ""), user_id) or {}
+            return {**item, "task_title": item_task.get("title"), "task": item_task}
+
+        overdue_sessions = [with_task(item) for item in overdue_running]
+        missed_sessions = [with_task(item) for item in missed_ready]
+        selected = (active_running or actionable_paused or ended or upcoming_ready[:1])
         if not selected:
-            return {"mode": "empty", "session": None, "task": None, "deferred_sessions": deferred_sessions}
+            return {"mode": "empty", "session": None, "task": None, "deferred_sessions": deferred_sessions, "overdue_sessions": overdue_sessions, "missed_sessions": missed_sessions, "requires_resolution": bool(overdue_sessions)}
         session = selected[0]
         task = self.get_task(session["task_id"], user_id)
         mode = "running" if session["status"] == "running" else "paused" if session["status"] == "paused" else "session_ended" if session["status"] == "ended" else "up_next"
-        if mode == "running" and session.get("planned_end_at"):
-            try:
-                planned_end = datetime.fromisoformat(str(session["planned_end_at"]).replace("Z", "+00:00"))
-                if planned_end.tzinfo is None:
-                    planned_end = planned_end.replace(tzinfo=current.tzinfo)
-                if current >= planned_end:
-                    mode = "overdue_running"
-            except ValueError:
-                pass
         if mode == "up_next" and session.get("planned_start_at"):
             try:
                 planned_start = datetime.fromisoformat(str(session["planned_start_at"]).replace("Z", "+00:00"))
@@ -5005,7 +5017,7 @@ class Store:
                     mode = "ready_to_start"
             except ValueError:
                 pass
-        return {"mode": mode, "session": session, "task": task, "deferred_sessions": deferred_sessions, "requires_resolution": mode == "overdue_running"}
+        return {"mode": mode, "session": session, "task": task, "deferred_sessions": deferred_sessions, "overdue_sessions": overdue_sessions, "missed_sessions": missed_sessions, "requires_resolution": bool(overdue_sessions)}
 
     def _parallel_start_allowed(self, user_id: str, first_block_id: str, second_block_id: str) -> bool:
         plan = self.active_plan(user_id) or {}

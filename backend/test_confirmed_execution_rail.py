@@ -104,15 +104,33 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
         restored = Store(self.db).current_execution("u")
         self.assertEqual(("running", session["execution_session_id"]), (restored["mode"], restored["session"]["execution_session_id"]))
 
-    def test_overdue_running_session_requires_user_resolution(self):
+    def test_overdue_running_session_does_not_replace_time_relevant_focus(self):
         session = self.start()
         past = (datetime.now(ZoneInfo("Asia/Shanghai")) - timedelta(minutes=1)).isoformat()
         with self.store.connect() as conn:
             conn.execute("UPDATE execution_sessions SET planned_end_at=? WHERE id=?", (past, session["execution_session_id"]))
         current = self.current()
-        self.assertEqual("overdue_running", current["mode"])
         self.assertTrue(current["requires_resolution"])
-        self.assertEqual("running", current["session"]["status"])
+        self.assertIsNone(current["session"])
+        self.assertEqual("empty", current["mode"])
+        self.assertEqual(session["execution_session_id"], current["overdue_sessions"][0]["execution_session_id"])
+        self.assertEqual("running", current["overdue_sessions"][0]["status"])
+
+    def test_missed_ready_session_does_not_replace_future_session(self):
+        first = self.current()["session"]
+        now = datetime.now(ZoneInfo("Asia/Shanghai"))
+        with self.store.connect() as conn:
+            conn.execute(
+                "UPDATE execution_sessions SET planned_start_at=?,planned_end_at=? WHERE id=?",
+                ((now - timedelta(minutes=60)).isoformat(), (now - timedelta(minutes=1)).isoformat(), first["execution_session_id"]),
+            )
+            conn.execute(
+                "INSERT INTO execution_sessions (id,user_id,task_id,block_id,week_id,plan_revision,planned_start_at,planned_end_at,planned_work_minutes,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("future-session", "u", self.task_id, "future-block", "2026-08-03", 1, (now + timedelta(minutes=30)).isoformat(), (now + timedelta(minutes=75)).isoformat(), 45, "ready", 1, 1),
+            )
+        current = self.current()
+        self.assertEqual("future-session", current["session"]["execution_session_id"])
+        self.assertEqual(first["execution_session_id"], current["missed_sessions"][0]["execution_session_id"])
 
     def test_09_pause_accumulates_minutes_and_context_dump_is_preserved(self):
         session = self.start()

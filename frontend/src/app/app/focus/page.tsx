@@ -118,6 +118,7 @@ export default function FocusPage() {
   }, [breakSession, current?.mode])
 
   const session = current?.session || null
+  const overdueSessions = current?.overdue_sessions || []
   const task = current?.task || session?.task || null
   const title = session?.task_title || session?.title || task?.title || t('execution.untitledTask')
   const activeSegmentStartedAt = timestamp(session?.resumed_at ?? session?.actual_start_at ?? session?.started_at)
@@ -355,6 +356,8 @@ export default function FocusPage() {
         </header>
 
         {breakSession && <Card className="overflow-hidden border-sky-300 bg-gradient-to-br from-sky-50 via-background to-emerald-50"><CardHeader><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-700">{locale === 'zh' ? '短暂休息' : 'Timed break'}</p><CardTitle className="mt-2">{breakFinished ? (locale === 'zh' ? '休息结束' : 'Break complete') : (locale === 'zh' ? '先离开屏幕一会儿' : 'Step away for a moment')}</CardTitle><CardDescription className="mt-1">{locale === 'zh' ? '任务上下文和计时状态已由后端保存，刷新页面不会丢失。' : 'Task context and timing are persisted by the backend and survive refreshes.'}</CardDescription></div><Clock3 className="h-6 w-6 text-sky-700" /></div></CardHeader><CardContent><div className="rounded-2xl border bg-background/80 p-6 text-center"><p className="font-mono text-5xl font-semibold tracking-tight">{durationLabel(breakRemainingSeconds)}</p><p className="mt-2 text-sm text-muted-foreground">{breakFinished ? (locale === 'zh' ? '可以回到原任务，或说明你还没准备好。' : 'Resume the same task or say you are not ready.') : (locale === 'zh' ? '休息剩余时间' : 'Break remaining')}</p></div>{breakFinished && <div className="mt-4 flex flex-wrap justify-center gap-2"><Button onClick={() => void resumeDeferred(breakSession)} disabled={submitting}><Play className="mr-2 h-4 w-4" />{locale === 'zh' ? '恢复原任务' : 'Resume task'}</Button><Button variant="outline" onClick={() => router.push(`/app/check-in?mode=daily&source=break-not-ready&task_id=${encodeURIComponent(breakSession.task_id)}`)}>{locale === 'zh' ? '我还没准备好' : "I'm not ready"}</Button></div>}</CardContent></Card>}
+
+        {overdueSessions.length > 0 && current?.mode !== 'overdue_running' && <Card className="border-amber-300 bg-amber-50/60"><CardHeader><CardTitle>{locale === 'zh' ? '有超时执行记录待处理' : 'An overdue execution record needs review'}</CardTitle><CardDescription>{locale === 'zh' ? '它不再占据当前专注位置，但需由你确认实际结果。' : 'It no longer occupies the current focus slot, but its actual outcome still needs your confirmation.'}</CardDescription></CardHeader><CardContent className="space-y-2">{overdueSessions.map((item) => <div key={item.execution_session_id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-background p-3"><div><p className="font-medium">{item.task_title || item.title || item.task_id}</p><p className="text-xs text-muted-foreground">{item.planned_end_at ? new Date(item.planned_end_at).toLocaleString() : ''}</p></div><Button size="sm" variant="outline" onClick={() => setCurrent({ mode: 'overdue_running', session: item, task: item.task, requires_resolution: true })}>{locale === 'zh' ? '处理记录' : 'Resolve record'}</Button></div>)}</CardContent></Card>}
 
         {endedSession ? (
           <Card className="border-primary/30">
