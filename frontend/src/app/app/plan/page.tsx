@@ -88,7 +88,7 @@ export default function WeeklyPlanPage() {
     } finally {
       setLoading(false)
     }
-  }, [adjustmentTrigger, t])
+  }, [t])
 
   useEffect(() => {
     void loadPlanningState()
@@ -125,7 +125,7 @@ export default function WeeklyPlanPage() {
     }
   }
 
-  const saveSetup = async () => {
+  const saveSetup = useCallback(async () => {
     if (!profile || !weekId) return
     const weeklyContext = {
       ...(profile.weekly_context || {}),
@@ -153,9 +153,9 @@ export default function WeeklyPlanPage() {
         })),
       }),
     })
-  }
+  }, [availableWindows, keepBuffer, profile, tasks, temporaryConstraints, weekId, weeklyGoal])
 
-  const generatePlan = async () => {
+  const generatePlan = useCallback(async () => {
     setSubmitting(true)
     try {
       await saveSetup()
@@ -183,7 +183,7 @@ export default function WeeklyPlanPage() {
     } finally {
       setSubmitting(false)
     }
-  }
+  }, [adjustmentTrigger, saveSetup, t, weekId])
 
   useEffect(() => {
     if (loading || stage !== 'setup' || weekStatus?.new_week) return
@@ -201,7 +201,7 @@ export default function WeeklyPlanPage() {
       void generatePlan()
     }, 900)
     return () => window.clearTimeout(timer)
-  }, [availableWindows, keepBuffer, loading, stage, tasks, temporaryConstraints, weeklyGoal, weekStatus?.new_week])
+  }, [availableWindows, generatePlan, keepBuffer, loading, stage, tasks, temporaryConstraints, weeklyGoal, weekStatus?.new_week])
 
   const updateBlockDateTime = (index: number, field: 'start' | 'end', value: string) => {
     const selected = new Date(value)

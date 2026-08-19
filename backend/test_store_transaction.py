@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from backend.humanos_server import Store
@@ -15,7 +16,7 @@ class StoreTransactionTests(unittest.TestCase):
                     with store.connect() as conn:
                         conn.execute("INSERT INTO events (id,user_id,type,payload_json,created_at) VALUES (?,?,?,?,?)", ("event-rollback", "u", "test", "{}", 1))
                     raise RuntimeError("rollback")
-            with sqlite3.connect(store.path) as conn:
+            with closing(sqlite3.connect(store.path)) as conn:
                 count = conn.execute("SELECT COUNT(*) FROM events WHERE id='event-rollback'").fetchone()[0]
             self.assertEqual(0, count)
 
@@ -25,7 +26,7 @@ class StoreTransactionTests(unittest.TestCase):
             with store.atomic():
                 with store.connect() as conn:
                     conn.execute("INSERT INTO events (id,user_id,type,payload_json,created_at) VALUES (?,?,?,?,?)", ("event-commit", "u", "test", "{}", 1))
-            with sqlite3.connect(store.path) as conn:
+            with closing(sqlite3.connect(store.path)) as conn:
                 count = conn.execute("SELECT COUNT(*) FROM events WHERE id='event-commit'").fetchone()[0]
             self.assertEqual(1, count)
 

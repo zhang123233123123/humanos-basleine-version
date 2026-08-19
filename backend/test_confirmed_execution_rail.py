@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -221,7 +222,7 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
     def test_context_dump_migration_upgrades_legacy_database(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             database = Path(directory) / "legacy.db"
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute("""CREATE TABLE context_dumps (
                     id TEXT PRIMARY KEY,user_id TEXT NOT NULL,task_id TEXT NOT NULL,
                     progress TEXT NOT NULL,open_questions TEXT NOT NULL,next_action TEXT NOT NULL,

@@ -18,6 +18,9 @@ class ExecutionRevisionContinuityTests(unittest.TestCase):
           UNIQUE(user_id,block_id,plan_revision))""")
         self.repository = ExecutionSessionRepository(self.connection)
 
+    def tearDown(self) -> None:
+        self.connection.close()
+
     def test_new_revision_inherits_paused_execution_context(self) -> None:
         self.connection.execute("INSERT INTO execution_sessions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", ("old", "u", "task", "old-block", "2026-08-10", 1, "a", "b", 60, None, 20, 40, '{"next_step":"continue"}', '["trait-1"]', '{"planned_parallel":true}', "paused", None, 1, 2))
         source = self.repository.latest_paused_for_task(user_id="u", task_id="task")
