@@ -139,7 +139,6 @@ export default function FocusPage() {
   const startSession = async (skipImpactCheck = false) => {
     if (!session) return
     setSubmitting(true)
-    setReplanning(true)
     try {
       if (current?.mode === 'paused' && !skipImpactCheck) {
         const analysis = await apiRequest<ExecutionResourceEnvelope<{ impact: ExecutionImpact }>>('/api/execution-sessions/impact', {
@@ -302,6 +301,7 @@ export default function FocusPage() {
   const requestExecutionReplan = async () => {
     if (!session) return
     setSubmitting(true)
+    setReplanning(true)
     try {
       const accepted = await apiRequest<any>('/api/plans/replan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'today', trigger: 'execution_delay', affected_task_ids: [session.task_id] }) })
       const job = accepted?.data?.replan?.job || accepted?.replan?.job || accepted?.job
