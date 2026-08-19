@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { ArrowLeft, BatteryMedium, Brain, CheckCircle2, CornerDownRight, Gauge, Loader2, PauseCircle, RotateCcw } from 'lucide-react'
@@ -42,10 +42,26 @@ export default function CheckInPage() {
   const [decisionReason, setDecisionReason] = useState(decisionSource === 'break-not-ready' ? 'still_not_ready_after_break' : 'tired')
   const [decisionResumeAt, setDecisionResumeAt] = useState('')
   const [resumeTimeCheck, setResumeTimeCheck] = useState<{ valid: boolean; conflicts: Array<{ type: string; [key: string]: unknown }>; alternatives: string[] } | null>(null)
+  const [runningSessionId, setRunningSessionId] = useState('')
+  const [planDraftReady, setPlanDraftReady] = useState(false)
+  const [planReviewRequired, setPlanReviewRequired] = useState(false)
   const checkInRequestId = useRef<string | null>(null)
   const contextDumpRequestId = useRef<string | null>(null)
 
   const runtimeState: RuntimeState = useMemo(() => ({ focus, energy, stress, mood, readiness }), [focus, energy, stress, mood, readiness])
+
+  useEffect(() => {
+    if (mode !== 'interruption' || !taskId) return
+    let cancelled = false
+    void apiRequest<{ data: { execution_sessions: Array<{ execution_session_id: string; task_id: string; status: string }> } }>('/api/execution-sessions')
+      .then((result) => {
+        if (cancelled) return
+        const running = (result.data.execution_sessions || []).find((item) => item.task_id === taskId && item.status === 'running')
+        setRunningSessionId(running?.execution_session_id || '')
+      })
+      .catch((error) => toast.error(error instanceof Error ? error.message : t('execution.loadFailed')))
+    return () => { cancelled = true }
+  }, [mode, taskId, t])
 
   const saveDailyCheckIn = async () => {
     setSubmitting(true)
@@ -134,26 +150,53 @@ export default function CheckInPage() {
       toast(t('checkin.nextActionRequired'))
       return
     }
+    if (runningSessionId && decisionResumeAt && !resumeTimeCheck?.valid) {
+      toast(locale === 'zh' ? '请先检查并选择一个可用的恢复时间' : 'Check and choose an available resume time first')
+      return
+    }
     setSubmitting(true)
     try {
       contextDumpRequestId.current ??= crypto.randomUUID()
-      const result = await apiRequest<TaskLifecycleResourceEnvelope<{ context_dump: ContextDump }>>('/api/context-dumps', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          request_id: contextDumpRequestId.current,
-          task_id: taskId,
-          progress,
-          progress_percent: progressPercent,
-          task_remaining_minutes: remainingMinutes,
-          next_action: nextAction,
-          open_questions: openQuestions,
-          stop_reason: stopReason,
-          materials: [],
-        }),
-      })
+      const checkpoint = {
+        request_id: contextDumpRequestId.current,
+        task_id: taskId,
+        progress,
+        progress_percent: progressPercent,
+        task_remaining_minutes: remainingMinutes,
+        next_action: nextAction,
+        open_questions: openQuestions,
+        stop_reason: stopReason,
+        materials: [],
+      }
+      let dump: ContextDump
+      if (runningSessionId) {
+        const result = await apiRequest<any>('/api/execution-sessions/interrupt', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...checkpoint,
+            execution_session_id: runningSessionId,
+            interruption_action: 'continue_later',
+            pause_reason: stopReason,
+            next_step: nextAction,
+            resume_preference: decisionResumeAt ? 'later_today' : 'unknown',
+            preferred_resume_at: decisionResumeAt ? new Date(decisionResumeAt).toISOString() : undefined,
+          }),
+        })
+        dump = result.data.context_dump
+        setRunningSessionId('')
+        window.dispatchEvent(new CustomEvent('humanos:execution-updated', { detail: { action: 'pause', executionSession: result.data.execution_session } }))
+        setPlanDraftReady(Boolean(result.data.proposed_plan))
+        setPlanReviewRequired(Boolean(result.data.pause_review?.requires_plan_adjustment && !result.data.proposed_plan))
+        if (result.data.proposed_plan) window.dispatchEvent(new CustomEvent('humanos:plan-revision'))
+      } else {
+        const result = await apiRequest<TaskLifecycleResourceEnvelope<{ context_dump: ContextDump }>>('/api/context-dumps', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(checkpoint),
+        })
+        dump = result.data.context_dump
+      }
       setSaved(true)
       toast(t('checkin.contextSaved'))
-      return result.data.context_dump
+      return dump
     } catch (error) {
       toast(error instanceof Error ? error.message : t('checkin.contextFailed'))
       return null
@@ -242,6 +285,9 @@ export default function CheckInPage() {
                 <label className="grid gap-1.5 text-sm"><span>{t('checkin.nextAction')}</span><Input value={nextAction} onChange={(event) => setNextAction(event.target.value)} placeholder={t('checkin.nextActionPlaceholder')} /></label>
                 <label className="grid gap-1.5 text-sm"><span>{t('checkin.openQuestions')}</span><textarea className="min-h-20 rounded-md border bg-background p-3" value={openQuestions} onChange={(event) => setOpenQuestions(event.target.value)} /></label>
                 <label className="grid gap-1.5 text-sm"><span>{t('checkin.stopReason')}</span><select className="h-10 rounded-md border bg-background px-3" value={stopReason} onChange={(event) => setStopReason(event.target.value)}><option value="interrupted">{t('checkin.interrupted')}</option><option value="fatigue">{t('checkin.fatigue')}</option><option value="blocked">{t('checkin.blocked')}</option><option value="context_switch">{t('checkin.contextSwitch')}</option><option value="external_event">{t('checkin.externalEvent')}</option></select></label>
+                {runningSessionId && <label className="grid gap-2 text-sm"><span>{locale === 'zh' ? '希望什么时候恢复（可选）' : 'Preferred resume time (optional)'}</span><span className="text-xs text-muted-foreground">{locale === 'zh' ? '填写并检查后，系统会生成一份保留剩余工作的调整草案。' : 'After validation, HumanOS creates an adjustment draft that preserves the remaining work.'}</span><div className="flex gap-2"><input type="datetime-local" value={decisionResumeAt} onChange={(event) => { setDecisionResumeAt(event.target.value); setResumeTimeCheck(null) }} className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3" /><Button type="button" variant="outline" onClick={() => void checkResumeTime()} disabled={!decisionResumeAt || submitting}>{locale === 'zh' ? '检查时间' : 'Check time'}</Button></div>{resumeTimeCheck?.valid && <p className="rounded-xl bg-emerald-500/10 p-3 text-sm text-emerald-800">{locale === 'zh' ? '时间可用，保存中断时将生成调整草案。' : 'This time is available; saving will create an adjustment draft.'}</p>}</label>}
+                {planDraftReady && <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950"><p className="font-medium">{locale === 'zh' ? '中断后的今日调整草案已生成' : 'A revised draft for today is ready'}</p><p className="mt-1">{locale === 'zh' ? '只有在你复核并确认后才会替换当前计划。' : 'It replaces the current plan only after you review and confirm it.'}</p><Button className="mt-3" size="sm" asChild><Link href="/app/plan?adjust=continue-later">{locale === 'zh' ? '复核调整草案' : 'Review adjustment draft'}</Link></Button></div>}
+                {planReviewRequired && <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950"><p className="font-medium">{locale === 'zh' ? '中断会影响后续安排' : 'This interruption affects later sessions'}</p><p className="mt-1">{locale === 'zh' ? '你尚未选择恢复时间，任务已安全暂停，可以稍后在周计划中安排恢复。' : 'No return time was selected. The task is safely paused and can be rescheduled from Weekly Plan.'}</p><Button className="mt-3" size="sm" variant="outline" asChild><Link href="/app/plan?adjust=deferred-session">{locale === 'zh' ? '安排恢复时间' : 'Schedule return'}</Link></Button></div>}
                 <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" onClick={saveInterruption} disabled={submitting || saved}><PauseCircle className="mr-2 h-4 w-4" />{saved ? t('checkin.contextSaved') : t('checkin.saveContext')}</Button><Button onClick={generateReentry} disabled={submitting || !taskId}><RotateCcw className="mr-2 h-4 w-4" />{t('checkin.generateReentry')}</Button></div>
               </CardContent>
             </Card>

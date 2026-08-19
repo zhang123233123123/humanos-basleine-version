@@ -4556,7 +4556,7 @@ class Store:
         )
 
     def apply_help_decide_recommendation(self, user_id: str, payload: dict) -> dict:
-        from app.application.execution_interruption import build_interruption_command, interruption_response
+        from app.application.execution_interruption import interruption_response
         from app.application.help_decide import validate_recommendation
         from app.application.ready_queue import build_ready_queue
 
@@ -4621,58 +4621,55 @@ class Store:
                 "stop_reason": payload.get("reason") or "help_decide_recommendation",
                 "materials": [],
             }
-        context_dump = None
         execution_result: dict = {"action": action, "execution_session": session}
-        with self.atomic():
-            if context_payload:
-                context_dump = self.save_context_dump(user_id, {**context_payload, "skip_memory_index": True})
-                execution_result["context_dump"] = context_dump
-            if action == "continue_current":
-                if session.get("status") == "paused":
-                    resumed = self.start_execution_session(user_id, {
-                        "execution_session_id": session.get("execution_session_id"),
-                        "request_id": f"{payload.get('recommendation_id')}:resume",
-                        "confirm_schedule_impact": True,
-                    })
-                    execution_result["execution_session"] = resumed
-            else:
-                command_payload = {
+        if action == "continue_current":
+            if session.get("status") == "paused":
+                resumed = self.start_execution_session(user_id, {
+                    "execution_session_id": session.get("execution_session_id"),
+                    "request_id": f"{payload.get('recommendation_id')}:resume",
+                    "confirm_schedule_impact": True,
+                })
+                execution_result["execution_session"] = resumed
+        else:
+            command_payload = {
+                **(context_payload or {}),
                 "execution_session_id": session.get("execution_session_id"),
                 "interruption_action": action,
-                "reason": payload.get("reason") or "help_decide_recommendation",
+                "pause_reason": payload.get("reason") or "help_decide_recommendation",
                 "request_id": f"{payload.get('recommendation_id')}:pause",
                 "break_minutes": recommendation.get("break_minutes"),
                 "preferred_resume_at": payload.get("preferred_resume_at"),
-                "remaining_duration_minutes": session.get("session_remaining_minutes"),
-                }
-                command = build_interruption_command(command_payload)
-                paused = self.pause_execution_session(user_id, command)
-                impact = None if action == "short_break" else self.analyze_execution_impact(user_id, {**command, "action": action})
-                execution_result.update(interruption_response(
-                    execution_session=paused,
-                    command=command,
-                    impact=impact,
-                    reschedule_check=(impact or {}).get("reschedule_check"),
+                "remaining_minutes": session.get("session_remaining_minutes"),
+                "next_step": (context_payload or {}).get("next_action"),
+            }
+            atomic_result = self.interrupt_execution_session(user_id, command_payload)
+            command = atomic_result["command"]
+            paused = atomic_result["execution_session"]
+            impact = None if action == "short_break" else self.analyze_execution_impact(user_id, {**command, "action": action})
+            execution_result.update(interruption_response(
+                execution_session=paused,
+                command=command,
+                impact=impact,
+                reschedule_check=(impact or {}).get("reschedule_check"),
+            ))
+            execution_result["context_dump"] = atomic_result.get("context_dump")
+            execution_result["interruption_episode"] = paused.get("interruption_episode")
+            if action == "switch_task":
+                target_id = recommendation.get("target_execution_session_id")
+                started = self.start_execution_session(user_id, {
+                    "execution_session_id": target_id,
+                    "request_id": f"{payload.get('recommendation_id')}:switch",
+                    "confirm_schedule_impact": True,
+                })
+                execution_result["switched_to"] = started
+            elif action == "continue_later":
+                execution_result.update(self.propose_continue_later_diff(
+                    user_id,
+                    paused,
+                    impact or {},
+                    request_id=f"{payload.get('recommendation_id')}:local-diff",
                 ))
-                if action == "switch_task":
-                    target_id = recommendation.get("target_execution_session_id")
-                    started = self.start_execution_session(user_id, {
-                        "execution_session_id": target_id,
-                        "request_id": f"{payload.get('recommendation_id')}:switch",
-                        "confirm_schedule_impact": True,
-                    })
-                    execution_result["switched_to"] = started
-                elif action == "continue_later":
-                    execution_result.update(self.propose_continue_later_diff(
-                        user_id,
-                        paused,
-                        impact or {},
-                        request_id=f"{payload.get('recommendation_id')}:local-diff",
-                    ))
-                    execution_result["requires_user_confirmation"] = True
-
-        if context_dump:
-            self.index_context_dump_memory(user_id, context_dump)
+                execution_result["requires_user_confirmation"] = True
 
         feedback = self.save_help_decide_feedback(user_id, {
             **payload,

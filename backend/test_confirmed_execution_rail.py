@@ -237,6 +237,19 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
         })
         self.assertIsNone(result["context_dump"])
 
+    def test_help_decide_uses_the_same_interruption_episode(self):
+        session = self.start()
+        result = self.store.apply_help_decide_recommendation("u", {
+            "recommendation_id": "help-break",
+            "task_id": self.task_id,
+            "reason": "tired",
+            "recommendation": {"action": "short_break", "break_minutes": 10, "reason": "Rest briefly"},
+        })
+        execution = result["execution"]
+        self.assertEqual("paused", execution["execution_session"]["status"])
+        self.assertEqual(session["execution_session_id"], execution["interruption_episode"]["source_execution_session_id"])
+        self.assertEqual("short_break", execution["interruption_episode"]["interruption_action"])
+
     def test_atomic_interrupt_requires_idempotency_key(self):
         session = self.start()
         with self.assertRaisesRegex(ValueError, "request_id is required"):
