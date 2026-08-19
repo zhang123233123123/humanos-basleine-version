@@ -4267,10 +4267,15 @@ class Store:
                 "weekly_available_windows": weekly.get("weekly_available_windows", ""),
                 "context_items": [
                     item for item in (weekly.get("context_items") or [])
-                    if use_last
-                    and isinstance(item, dict)
-                    and item.get("type") in {"routine_window", "recurring_routine"}
-                    and item.get("occurrence_mode") == "repeat_every_day"
+                    if isinstance(item, dict)
+                    and (
+                        item.get("occurrence_mode") in {"repeat_weekly", "repeat_every_day"}
+                        or (
+                            use_last
+                            and item.get("type") in {"routine_window", "recurring_routine"}
+                            and not item.get("occurrence_mode")
+                        )
+                    )
                 ],
                 "weekly_goal": "",
                 "temporary_constraints": [],

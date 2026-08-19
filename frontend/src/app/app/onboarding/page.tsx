@@ -14,7 +14,8 @@ import { useEvents } from '@/hooks/use-events'
 import { WeeklyAvailabilityPicker } from '@/components/weekly-availability-picker'
 
 type ContextKind = 'fixed_event' | 'recurring_routine' | 'flexible_activity'
-type ContextItem = { id: string; type: ContextKind; title: string; day: string; start: string; end: string }
+type OccurrenceMode = 'repeat_weekly' | 'one_off'
+type ContextItem = { id: string; type: ContextKind; title: string; day: string; start: string; end: string; occurrence_mode: OccurrenceMode }
 type TaskDraft = { id: string; title: string; due: string; duration: number; priority: string; expected_difficulty: number; dependency: string }
 
 const STORAGE_KEY = 'humanos:onboarding-draft:v2'
@@ -26,7 +27,7 @@ function stableId(prefix: string) {
 }
 
 function initialContext(type: ContextKind): ContextItem {
-  return { id: stableId('ctx'), type, title: '', day: 'Monday', start: '', end: '' }
+  return { id: stableId('ctx'), type, title: '', day: 'Monday', start: '', end: '', occurrence_mode: type === 'flexible_activity' ? 'one_off' : 'repeat_weekly' }
 }
 
 function initialTask(): TaskDraft {
@@ -66,7 +67,10 @@ export default function OnboardingPage() {
         setDeepWorkWindow(saved.deepWorkWindow || deepWorkWindow); setLowEnergyWindow(saved.lowEnergyWindow || lowEnergyWindow)
         setSessionMinutes(Number(saved.sessionMinutes) || 45); setBreakMinutes(Number(saved.breakMinutes) || 10)
         setDayEnergy(saved.dayEnergy || dayEnergy); setAvailableWindows(saved.availableWindows || availableWindows)
-        setContextItems(saved.contextItems || []); setKeepBuffer(saved.keepBuffer !== false); setWeeklyGoal(saved.weeklyGoal || '')
+        setContextItems((saved.contextItems || []).map((item: ContextItem) => ({
+          ...item,
+          occurrence_mode: item.occurrence_mode || (item.type === 'flexible_activity' ? 'one_off' : 'repeat_weekly'),
+        }))); setKeepBuffer(saved.keepBuffer !== false); setWeeklyGoal(saved.weeklyGoal || '')
         setTasks(saved.tasks?.length ? saved.tasks : [initialTask()]); setMomentary(saved.momentary || momentary)
       }
     } catch { localStorage.removeItem(STORAGE_KEY) }
@@ -195,9 +199,9 @@ export default function OnboardingPage() {
 
         {step === 2 && <div className="mt-7 grid gap-6">
           <Field label={t('onboarding.windowsLabel')}><WeeklyAvailabilityPicker value={availableWindows} onChange={setAvailableWindows} /></Field>
-          <div className="space-y-3">{contextItems.map((item) => <div key={item.id} className="grid gap-2 rounded-xl border bg-[#fafaf6] p-3 md:grid-cols-[150px_1fr_110px_110px_110px_40px]">
-            <select className="rounded-md border bg-white px-2 text-sm" value={item.type} onChange={(e) => patchContext(item.id, { type: e.target.value as ContextKind })}><option value="fixed_event">{t('onboarding.fixedTime')}</option><option value="recurring_routine">{t('onboarding.routineTime')}</option><option value="flexible_activity">{t('onboarding.flexibleTime')}</option></select>
-            <Input value={item.title} onChange={(e) => patchContext(item.id, { title: e.target.value })} placeholder={t('onboarding.activityName')} /><select className="h-10 rounded-md border bg-white px-2 text-sm" value={item.day} onChange={(e) => patchContext(item.id, { day: e.target.value })}>{['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map((day, index) => <option key={day} value={day}>{locale === 'zh' ? ['周一','周二','周三','周四','周五','周六','周日'][index] : day}</option>)}</select><Input type="time" value={item.start} onChange={(e) => patchContext(item.id, { start: e.target.value })} /><Input type="time" value={item.end} onChange={(e) => patchContext(item.id, { end: e.target.value })} /><Button size="icon" variant="ghost" onClick={() => setContextItems((items) => items.filter((entry) => entry.id !== item.id))}><Trash2 className="h-4 w-4" /></Button>
+          <div className="space-y-3">{contextItems.map((item) => <div key={item.id} className="grid gap-2 rounded-xl border bg-[#fafaf6] p-3 md:grid-cols-[140px_1fr_118px_105px_105px_118px_40px]">
+            <select className="rounded-md border bg-white px-2 text-sm" value={item.type} onChange={(e) => { const type = e.target.value as ContextKind; patchContext(item.id, { type, occurrence_mode: type === 'flexible_activity' ? 'one_off' : item.occurrence_mode }) }}><option value="fixed_event">{t('onboarding.fixedTime')}</option><option value="recurring_routine">{t('onboarding.routineTime')}</option><option value="flexible_activity">{t('onboarding.flexibleTime')}</option></select>
+            <Input value={item.title} onChange={(e) => patchContext(item.id, { title: e.target.value })} placeholder={t('onboarding.activityName')} /><select className="h-10 rounded-md border bg-white px-2 text-sm" value={item.day} onChange={(e) => patchContext(item.id, { day: e.target.value })}>{['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map((day, index) => <option key={day} value={day}>{locale === 'zh' ? ['周一','周二','周三','周四','周五','周六','周日'][index] : day}</option>)}</select><Input type="time" value={item.start} onChange={(e) => patchContext(item.id, { start: e.target.value })} /><Input type="time" value={item.end} onChange={(e) => patchContext(item.id, { end: e.target.value })} /><select className="h-10 rounded-md border bg-white px-2 text-sm" value={item.occurrence_mode} disabled={item.type === 'flexible_activity'} onChange={(e) => patchContext(item.id, { occurrence_mode: e.target.value as OccurrenceMode })}><option value="repeat_weekly">{t('onboarding.repeatWeekly')}</option><option value="one_off">{t('onboarding.onlyThisWeek')}</option></select><Button size="icon" variant="ghost" onClick={() => setContextItems((items) => items.filter((entry) => entry.id !== item.id))}><Trash2 className="h-4 w-4" /></Button>
           </div>)}<Button variant="outline" onClick={() => setContextItems([...contextItems, initialContext('fixed_event')])}><Plus className="mr-2 h-4 w-4" />{t('onboarding.addActivity')}</Button></div>
           <label className="flex items-center gap-3 rounded-xl border p-4 text-sm"><Checkbox checked={keepBuffer} onCheckedChange={(checked) => setKeepBuffer(checked === true)} /><span><strong>{t('onboarding.bufferLabel')}</strong><span className="block text-muted-foreground">{t('onboarding.bufferHint')}</span></span></label>
         </div>}

@@ -159,6 +159,26 @@ class WeeklyLifecycleTests(unittest.TestCase):
         self.assertTrue(other["removed_from_week"])
         self.assertEqual([routine], rollover_profile["weekly_context"]["context_items"])
 
+    def test_rollover_always_keeps_long_term_context_and_drops_one_off_events(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            store = self.make_store(Path(temp_dir) / "persistent-context.db")
+            weekly_class = {
+                "id": "class", "type": "fixed_event", "title": "Seminar",
+                "occurrence_mode": "repeat_weekly", "day": "Monday", "start": "10:00", "end": "11:00",
+            }
+            appointment = {
+                "id": "appointment", "type": "fixed_event", "title": "Appointment",
+                "occurrence_mode": "one_off", "day": "Tuesday", "start": "15:00", "end": "16:00",
+            }
+            store.reconcile_weekly_setup("u", {
+                "week_id": "2026-08-03", "profile": self.profile_patch([weekly_class, appointment]), "tasks": [],
+            })
+            store.rollover_week("u", {
+                "week_id": "2026-08-10", "use_last_week": False, "carry_task_ids": [],
+            })
+            context_items = store.ensure_profile("u")["weekly_context"]["context_items"]
+        self.assertEqual([weekly_class], context_items)
+
 
 if __name__ == "__main__":
     unittest.main()
