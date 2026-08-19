@@ -65,6 +65,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
   const [dependency, setDependency] = useState('')
   const [resourceModality, setResourceModality] = useState<TaskResourceTag[]>([])
   const [attentionMode, setAttentionMode] = useState<TaskAttentionMode>('continuous')
+  const [parallelizable, setParallelizable] = useState(false)
 
   const sourceId = task?.id
   const sourceTitle = task?.title || ''
@@ -80,6 +81,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
   const sourceDependency = task?.dependency || ''
   const sourceResourceModality = task?.resourceModality
   const sourceAttentionMode = task?.attentionMode || 'continuous'
+  const sourceParallelizable = Boolean(task?.parallelizable)
 
   // Sync local state when task changes
   useEffect(() => {
@@ -97,7 +99,8 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
     setDependency(sourceDependency)
     setResourceModality(sourceResourceModality || [])
     setAttentionMode(sourceAttentionMode)
-  }, [sourceId, sourceTitle, sourcePriority, sourceStatus, sourceContext, sourceProgress, sourceNextStep, sourceOpenQuestions, sourceDuration, sourceDue, sourceExpectedDifficulty, sourceDependency, sourceResourceModality, sourceAttentionMode])
+    setParallelizable(sourceParallelizable)
+  }, [sourceId, sourceTitle, sourcePriority, sourceStatus, sourceContext, sourceProgress, sourceNextStep, sourceOpenQuestions, sourceDuration, sourceDue, sourceExpectedDifficulty, sourceDependency, sourceResourceModality, sourceAttentionMode, sourceParallelizable])
 
   // Build current editable task object
   const buildTask = useCallback((): TaskDetail => {
@@ -117,9 +120,9 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
       dependency,
       resourceModality,
       attentionMode,
-      parallelizable: attentionMode !== 'continuous',
+      parallelizable,
     }
-  }, [task, title, priority, status, context, progress, nextStep, openQuestions, duration, due, expectedDifficulty, dependency, resourceModality, attentionMode])
+  }, [task, title, priority, status, context, progress, nextStep, openQuestions, duration, due, expectedDifficulty, dependency, resourceModality, attentionMode, parallelizable])
 
   if (!task) {
     return (
@@ -209,6 +212,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
           {task.isPreview && task.missingFields && task.missingFields.length > 0 && <div className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900">{t('workspace.missingTaskFacts')}: {task.missingFields.join(', ')}</div>}
 
           {(isExistingTask || task.isPreview) && <TaskResourceFields locale={locale} resourceTags={resourceModality} attentionMode={attentionMode} onResourceTagsChange={setResourceModality} onAttentionModeChange={setAttentionMode} />}
+          {(isExistingTask || task.isPreview) && <label className="flex items-start gap-2 rounded-lg border p-2 text-xs"><input type="checkbox" className="mt-0.5" checked={parallelizable} onChange={(event) => setParallelizable(event.target.checked)} /><span><span className="font-medium">{locale === 'zh' ? '允许系统提出并行建议' : 'Allow parallel suggestions'}</span><span className="mt-0.5 block text-[10px] text-muted-foreground">{locale === 'zh' ? '资源标签本身不会授权并行。' : 'Resource labels do not grant permission.'}</span></span></label>}
 
           {/* Priority selector */}
           <div>

@@ -127,6 +127,7 @@ export default function OnboardingPage() {
           profile: { ...profilePayload(3), weekly_context: { weekly_goal: weeklyGoal, weekly_available_windows: availableWindows, context_items: contextItems.filter((item) => item.title.trim()), keep_buffer: keepBuffer } },
           tasks: readyTasks.map((task) => ({
             title: task.title.trim(),
+            task_type: 'flexible_task',
             due: task.due.trim() || null,
             duration: Number(task.duration),
             priority: task.priority,

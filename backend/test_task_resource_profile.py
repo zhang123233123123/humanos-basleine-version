@@ -48,12 +48,12 @@ class TaskResourceProfileTests(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertIn("continuously", reason)
 
-    def test_legacy_parallelizable_flag_does_not_override_resource_contract(self) -> None:
+    def test_resource_compatibility_does_not_override_parallel_permission(self) -> None:
         allowed, _ = parallel_compatibility(
             {"resource_modality": ["visual", "verbal"], "attention_mode": "continuous", "parallelizable": False},
             {"resource_modality": ["motor"], "attention_mode": "passive", "parallelizable": False},
         )
-        self.assertTrue(allowed)
+        self.assertFalse(allowed)
 
     def test_task_resource_profile_round_trips_through_sqlite(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:

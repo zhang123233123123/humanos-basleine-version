@@ -176,10 +176,27 @@ class PromptAndTemporalContractTests(unittest.TestCase):
         self.assertEqual(1, len(analysis["parallel_candidate_pairs"]))
         self.assertTrue(analysis["parallel_candidate_pairs"][0]["python_rule_passed"])
 
+    def test_model_cannot_suggest_pair_without_both_user_permissions(self) -> None:
+        tasks = [
+            {"id": "laundry", "title": "洗衣", "parallelizable": True},
+            {"id": "podcast", "title": "播客", "parallelizable": False},
+        ]
+        first_result = {"task_demands": [], "dependencies": [], "task_resource_profiles": [
+            {"task_id": "laundry", "resource_modality": ["motor"], "attention_mode": "passive", "parallelizable": True},
+            {"task_id": "podcast", "resource_modality": ["auditory"], "attention_mode": "passive", "parallelizable": True},
+        ]}
+        pair_result = {"candidate_pairs": [{
+            "primary_task_id": "laundry", "secondary_task_id": "podcast", "compatible": True,
+            "suggested_overlap_minutes": 30,
+        }]}
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir, patch("backend.humanos_server.chat_completion", side_effect=[first_result, pair_result]):
+            analysis = Store(Path(temp_dir) / "permission.db").analyze_schedule_inputs({"tasks": tasks, "profile": {}})
+        self.assertEqual([], analysis["parallel_candidate_pairs"])
+
     def test_flexible_activity_parallel_pair_is_semantic_model_output(self) -> None:
         profile = {"weekly_context": {"context_items": [
-            {"id": "laundry", "type": "flexible_activity", "title": "Do the laundry", "duration_minutes": 40, "days": [3, 4]},
-            {"id": "english", "type": "flexible_activity", "title": "Listen to English audio", "duration_minutes": 30, "days": [3, 4]},
+            {"id": "laundry", "type": "flexible_activity", "title": "Do the laundry", "duration_minutes": 40, "days": [3, 4], "parallelizable": True},
+            {"id": "english", "type": "flexible_activity", "title": "Listen to English audio", "duration_minutes": 30, "days": [3, 4], "parallelizable": True},
         ]}}
         first_result = {"task_demands": [], "dependencies": [], "task_resource_profiles": []}
         pair_result = {"candidate_pairs": [{

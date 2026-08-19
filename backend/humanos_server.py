@@ -476,7 +476,7 @@ def local_resource_profile(task: dict) -> dict:
     attention_mode = str(task.get("attention_mode") or "").strip().lower()
     if attention_mode not in {"continuous", "intermittent", "passive"}:
         attention_mode = "passive" if re.search(r"上传|下载|编译|机器运行|upload|download|compile", title) else "intermittent" if re.search(r"洗衣|整理|打扫|做饭|laundry|clean|cook", title) else "continuous"
-    parallelizable = bool(task.get("parallelizable")) or attention_mode != "continuous" or "auditory" in modalities
+    parallelizable = bool(task.get("parallelizable"))
     return {
         "task_id": task.get("id"),
         "resource_modality": modalities,
@@ -1811,27 +1811,11 @@ class Store:
     def infer_schedule_task_type(self, payload: dict) -> str:
         """Classify when a task may move, independently from its content domain."""
         explicit = payload.get("task_type") or payload.get("taskType")
-        due = str(payload.get("due") or payload.get("deadline") or "")
-        context = str(payload.get("context") or "")
-        title = str(payload.get("title") or "")
-        text = f"{title} {due} {context}"
-        has_clock = re.search(
-            r"(?:\d{1,2}|十二|十一|十|[一二两三四五六七八九])\s*(?:点|时)(?!间)|"
-            r"\d{1,2}[:：]\d{2}|\d{1,2}(?::\d{2})?\s*(?:am|pm)",
-            text,
-            re.I,
-        )
-        fixed_words = re.search(
-            r"(会议|开会|开.*会|组会|上课|面试|考试|预约|appointment|meeting|class|exam|examination)",
-            text,
-            re.I,
-        )
-        deadline_words = re.search(r"(截止|ddl|deadline|之前|以前|前完成|due|\bby\b|before)", text, re.I)
         if explicit in {"flexible_task", "fixed_event", "recovery_task"}:
-            if explicit == "fixed_event" and deadline_words and not fixed_words:
-                return "flexible_task"
             return explicit
-        if has_clock and (fixed_words or not deadline_words):
+        # At the structured API boundary, due/deadline is never an event start.
+        # Natural-language parsing must emit task_type and start_at explicitly.
+        if payload.get("start_at") or (payload.get("contextWindow") or payload.get("context_window") or {}).get("startAt"):
             return "fixed_event"
         return "flexible_task"
 
@@ -2406,15 +2390,20 @@ class Store:
                 title_text = re.sub(r"\s+", " ", title_text).strip(" .,!;:，。；") or segment
             else:
                 title_text = re.sub(r"\s+", "", title_text).strip("，,。；;、") or segment
+            fixed_natural_event = bool(
+                due != "未设置"
+                and re.search(time_word, segment, re.I)
+                and re.search(r"会议|开会|组会|上课|面试|考试|预约|\b(?:appointment|meeting|class|exam|interview)\b", segment, re.I)
+                and not re.search(r"截止|ddl|deadline|之前|以前|前完成|\bdue\b|\bby\b|before", segment, re.I)
+            )
             task = {
                     "title": title_text[:42],
-                    "task_type": self.infer_schedule_task_type(
-                        {"title": title_text, "due": due, "context": segment}
-                    ),
+                    "task_type": "fixed_event" if fixed_natural_event else "flexible_task",
                     "deadline": due,
                     "due": due,
                     "timezone": timezone_name,
                     "deadline_at": deadline_at,
+                    "start_at": due if fixed_natural_event else None,
                     "deadline_assumption": "next_occurrence_in_user_timezone" if deadline_at else None,
                     "estimated_duration": duration,
                     "duration": duration,
@@ -6400,7 +6389,9 @@ class Store:
                 "task_id": task.get("id"),
                 "resource_modality": modalities,
                 "attention_mode": attention_mode,
-                "parallelizable": bool(task.get("parallelizable")) or bool(raw.get("parallelizable")),
+                # Resource labels and model inference describe compatibility;
+                # only the persisted user choice grants suggestion eligibility.
+                "parallelizable": bool(task.get("parallelizable")),
                 "evidence": raw.get("evidence") or fallback.get("evidence"),
                 "confidence_level": "high" if saved_modalities else str(raw.get("confidence_level") or "low"),
                 "source": "user_saved" if saved_modalities else "deepseek",
@@ -6415,7 +6406,7 @@ class Store:
             if not context_id or not title:
                 continue
             entity_id = f"context:{context_id}"
-            fallback = local_resource_profile({"id": entity_id, "title": title, "context": item.get("notes") or ""})
+            fallback = local_resource_profile({"id": entity_id, "title": title, "context": item.get("notes") or "", "parallelizable": bool(item.get("parallelizable"))})
             context_entities.append({
                 "entity_id": entity_id,
                 "context_id": context_id,
@@ -6592,7 +6583,7 @@ class Store:
         }
         tasks = {str(task.get("id")): task for task in state.get("tasks", [])}
         profile = state.get("profile", {})
-        now = profile_now(profile)
+        now = clock_now(safe_timezone(str(profile.get("timezone") or "Asia/Shanghai")))
         suggestions: list[dict] = []
         task_blocks = [block for block in plan_patch if block.get("kind") == "task_session" and block.get("task_id")]
         planning_context = build_scheduling_context(profile)
@@ -6778,7 +6769,7 @@ class Store:
         profile_map = {str(item.get("task_id")): item for item in (analysis.get("task_resource_profiles") or []) if isinstance(item, dict)}
         context = build_scheduling_context(profile)
         windows = context.get("movable_routine_windows") or context.get("windows", [])
-        now = profile_now(profile)
+        now = clock_now(safe_timezone(str(profile.get("timezone") or "Asia/Shanghai")))
         violations: list[dict] = []
         blocks: list[dict] = []
         planned_work: dict[str, int] = {}

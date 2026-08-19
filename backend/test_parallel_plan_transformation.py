@@ -68,8 +68,8 @@ class ParallelPlanTransformationTests(unittest.TestCase):
                 "user_id": "u", "timezone": "Asia/Shanghai", "active_week_id": "2026-08-17",
                 "weekly_context": {"week_id": "2026-08-17", "weekly_available_windows": "周一至周五 08:00-21:00", "keep_buffer": False},
             })
-            store.create_task("u", {"id": "task-a", "title": "洗衣", "due": "周五 18:00", "duration": 60, "priority": "低", "resource_modality": ["motor"], "attention_mode": "intermittent"})
-            store.create_task("u", {"id": "task-b", "title": "听播客", "due": "周五 18:00", "duration": 45, "priority": "低", "resource_modality": ["auditory", "verbal"], "attention_mode": "continuous"})
+            store.create_task("u", {"id": "task-a", "title": "洗衣", "due": "周五 18:00", "duration": 60, "priority": "低", "resource_modality": ["motor"], "attention_mode": "intermittent", "parallelizable": True})
+            store.create_task("u", {"id": "task-b", "title": "听播客", "due": "周五 18:00", "duration": 45, "priority": "低", "resource_modality": ["auditory", "verbal"], "attention_mode": "continuous", "parallelizable": True})
             suggestion = {**self.suggestion, "id": "suggestion", "status": "pending", "resource_basis": ["motor", "auditory", "verbal"]}
             draft = store.save_proposed_plan("u", {
                 "plan_patch": self.plan,
@@ -77,8 +77,8 @@ class ParallelPlanTransformationTests(unittest.TestCase):
                 "unscheduled_tasks": [],
                 "parallel_suggestions": [suggestion],
                 "ai_task_analysis": {"task_resource_profiles": [
-                    {"task_id": "task-a", "resource_modality": ["motor"], "attention_mode": "intermittent"},
-                    {"task_id": "task-b", "resource_modality": ["auditory", "verbal"], "attention_mode": "continuous"},
+                    {"task_id": "task-a", "resource_modality": ["motor"], "attention_mode": "intermittent", "parallelizable": True},
+                    {"task_id": "task-b", "resource_modality": ["auditory", "verbal"], "attention_mode": "continuous", "parallelizable": True},
                 ]},
             }, {"week_id": "2026-08-17", "request_id": "partial-overlap"})
             accepted = store.decide_parallel_suggestion("u", {"plan_id": draft["plan_id"], "suggestion_id": "suggestion", "action": "combine"})
@@ -97,8 +97,8 @@ class ParallelPlanTransformationTests(unittest.TestCase):
                 "user_id": "u", "timezone": "Asia/Shanghai", "active_week_id": "2026-08-17",
                 "weekly_context": {"week_id": "2026-08-17", "weekly_available_windows": "周一 08:00-12:00", "keep_buffer": False},
             })
-            store.create_task("u", {"id": "task-a", "title": "洗衣", "week_id": "2026-08-17", "due": "周五 18:00", "duration": 30, "priority": "低", "resource_modality": ["motor"], "attention_mode": "intermittent"})
-            store.create_task("u", {"id": "task-b", "title": "听播客", "week_id": "2026-08-17", "due": "周五 18:00", "duration": 30, "priority": "低", "resource_modality": ["auditory"], "attention_mode": "continuous"})
+            store.create_task("u", {"id": "task-a", "title": "洗衣", "week_id": "2026-08-17", "due": "周五 18:00", "duration": 30, "priority": "低", "resource_modality": ["motor"], "attention_mode": "intermittent", "parallelizable": True})
+            store.create_task("u", {"id": "task-b", "title": "听播客", "week_id": "2026-08-17", "due": "周五 18:00", "duration": 30, "priority": "低", "resource_modality": ["auditory"], "attention_mode": "continuous", "parallelizable": True})
             trait = ProfileTrait(
                 trait_id="trait-1", user_id="u", trait_key="perceived_state.energy",
                 value={"field": "energy", "band": "high", "daypart": "morning"},

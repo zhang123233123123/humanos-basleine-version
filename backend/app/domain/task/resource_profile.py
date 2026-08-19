@@ -62,6 +62,8 @@ def normalize_attention_mode(value: object, default: AttentionMode = "continuous
 
 def parallel_compatibility(primary: dict, secondary: dict) -> tuple[bool, str]:
     """Return whether two task profiles are eligible for a user-confirmed overlap."""
+    if not primary.get("parallelizable") or not secondary.get("parallelizable"):
+        return False, "Both tasks must be explicitly marked as eligible for a parallel suggestion."
     first_tags = set(normalize_resource_tags(primary.get("resource_modality")))
     second_tags = set(normalize_resource_tags(secondary.get("resource_modality")))
     if not first_tags or not second_tags:

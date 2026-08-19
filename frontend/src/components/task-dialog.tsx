@@ -58,6 +58,7 @@ export function TaskDialog({
   const [openQuestions, setOpenQuestions] = useState(initialData?.openQuestions || '')
   const [resourceModality, setResourceModality] = useState<TaskResourceTag[]>(initialData?.resourceModality || [])
   const [attentionMode, setAttentionMode] = useState<TaskAttentionMode>(initialData?.attentionMode || 'continuous')
+  const [parallelizable, setParallelizable] = useState(Boolean(initialData?.parallelizable))
 
   const isEdit = !!initialData?.id
   const initialResourceKey = (initialData?.resourceModality || []).join('|')
@@ -75,7 +76,8 @@ export function TaskDialog({
     setOpenQuestions(initialData?.openQuestions || '')
     setResourceModality(initialResourceKey ? initialResourceKey.split('|') as TaskResourceTag[] : [])
     setAttentionMode(initialData?.attentionMode || 'continuous')
-  }, [open, initialData?.id, initialData?.title, initialData?.due, initialData?.duration, initialData?.priority, initialData?.status, initialData?.context, initialData?.progress, initialData?.nextStep, initialData?.openQuestions, initialResourceKey, initialData?.attentionMode])
+    setParallelizable(Boolean(initialData?.parallelizable))
+  }, [open, initialData?.id, initialData?.title, initialData?.due, initialData?.duration, initialData?.priority, initialData?.status, initialData?.context, initialData?.progress, initialData?.nextStep, initialData?.openQuestions, initialResourceKey, initialData?.attentionMode, initialData?.parallelizable])
 
   const handleSave = async () => {
     if (!title.trim()) {
@@ -97,7 +99,7 @@ export function TaskDialog({
         openQuestions,
         resourceModality,
         attentionMode,
-        parallelizable: attentionMode !== 'continuous',
+        parallelizable,
       })
       onOpenChange(false)
     } catch {
@@ -205,6 +207,10 @@ export function TaskDialog({
 
           {/* Context */}
           <TaskResourceFields locale={locale} resourceTags={resourceModality} attentionMode={attentionMode} onResourceTagsChange={setResourceModality} onAttentionModeChange={setAttentionMode} />
+          <label className="flex items-start gap-3 rounded-xl border p-3 text-sm">
+            <input type="checkbox" className="mt-1" checked={parallelizable} onChange={(event) => setParallelizable(event.target.checked)} />
+            <span><span className="font-medium">{locale === 'zh' ? '允许系统提出并行建议' : 'Allow parallel suggestions'}</span><span className="mt-1 block text-xs text-muted-foreground">{locale === 'zh' ? '资源标签只用于检查兼容性；真正合并执行仍会再次征求确认。' : 'Resource labels only check compatibility; combining still requires confirmation.'}</span></span>
+          </label>
 
           {/* Context */}
           <div>

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from .aggregate import TaskAggregate, TaskExecutionState
@@ -46,24 +45,10 @@ def prepare_task_creation(
         "低": "低",
     }
     normalized_priority = priority_aliases.get(str(priority).strip().lower(), "中")
-    # Older parsers used deadline_at for the single absolute timestamp of a
-    # fixed event. Normalize that transport detail at the aggregate boundary.
-    has_absolute_time = bool(start_at or deadline_at or context_window.get("startAt"))
-    event_title = bool(re.search(
-        r"(?:会议|开会|组会|约会|面试|课程|上课|meeting|appointment|interview|class)",
-        title,
-        re.IGNORECASE,
-    ))
-    normalized_schedule_type = (
-        "flexible_task"
-        if schedule_type == "fixed_event" and not has_absolute_time and not event_title
-        else schedule_type
-    )
+    normalized_schedule_type = schedule_type
     normalized_start_at = (
         start_at
         or context_window.get("startAt")
-        or (deadline_at if normalized_schedule_type == "fixed_event" else None)
-        or (deadline if normalized_schedule_type == "fixed_event" else None)
     )
     normalized_window = {
         **context_window,

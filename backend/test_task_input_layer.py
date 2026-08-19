@@ -326,6 +326,7 @@ class TaskInputLayerTests(unittest.TestCase):
         meeting = self.store.create_task("user-a", {
             "title": "组会",
             "task_type": "fixed_event",
+            "start_at": "明天 10:00",
             "due": "明天 10:00",
             "duration": 60,
             "priority": "中",
