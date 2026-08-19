@@ -195,6 +195,24 @@ class SchedulerConstraintTests(unittest.TestCase):
         self.assertLessEqual(block["end"], 21.0)
         self.assertEqual("ctx-gym", block["context_id"])
 
+    def test_profile_time_inputs_drive_each_context_policy(self) -> None:
+        profile = self.profile()
+        profile["weekly_context"]["context_items"] = [
+            {"id": "class", "type": "fixed_event", "title": "Class", "day": "Monday", "start": "10:00", "end": "11:00", "occurrence_mode": "repeat_weekly"},
+            {"id": "lunch", "type": "recurring_routine", "title": "Lunch", "day": "Monday", "start": "12:00", "end": "13:00", "occurrence_mode": "repeat_weekly"},
+            {"id": "gym", "type": "flexible_activity", "title": "Gym", "day": "Monday", "start": "17:00", "end": "19:00", "duration_minutes": 45, "occurrence_mode": "one_off"},
+        ]
+        context = build_scheduling_context(profile)
+        fixed = next(item for item in context["hard_constraints"] if item.get("context_id") == "class")
+        routine = next(item for item in context["routine_blocks"] if item.get("context_id") == "lunch")
+        flexible = next(item for item in context["flexible_activity_blocks"] if item.get("context_id") == "gym")
+        self.assertEqual((10.0, 11.0), (fixed["start"], fixed["end"]))
+        self.assertEqual((12.0, 13.0), (routine["start"], routine["end"]))
+        self.assertEqual(45, round((flexible["end"] - flexible["start"]) * 60))
+        self.assertGreaterEqual(flexible["start"], 17.0)
+        self.assertLessEqual(flexible["end"], 19.0)
+        self.assertEqual([], context["uncertain_constraints"])
+
     def test_fixed_event_adds_visible_recovery_transition(self) -> None:
         profile = self.profile()
         profile["weekly_context"]["fixed_events"] = ["固定 周三 10:00-11:00 组会"]

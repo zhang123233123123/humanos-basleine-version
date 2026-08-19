@@ -351,8 +351,8 @@ def hard_constraint_intervals(profile: dict[str, Any]) -> tuple[list[dict[str, A
             activity_type = "recurring_routine" if raw_type in {"recurring_routine", "routine", "habit_period"} else "flexible_activity" if raw_type in {"flexible_activity", "ai_arranged"} else "temporary_constraint" if raw_type in {"temporary_constraint", "blocked_time"} else "fixed_event"
             if activity_type not in {"fixed_event", "temporary_constraint"}:
                 continue
-            start, end = item.get("start"), item.get("end")
-            time_range = {"start": float(start), "end": float(end), "explicit_end": True} if isinstance(start, (int, float)) and isinstance(end, (int, float)) and end > start else None
+            start, end = structured_clock_hour(item.get("start")), structured_clock_hour(item.get("end"))
+            time_range = {"start": start, "end": end, "explicit_end": True} if start is not None and end is not None and end > start else None
             days = [int(day) for day in item.get("days", []) if str(day).isdigit()] or day_indices_from_text(str(item.get("day") or ""))
             prefix = "Blocked time" if activity_type == "temporary_constraint" else "Fixed time"
             text = f"{prefix} {item.get('day', '')} {item.get('title', '')}".strip()
@@ -408,6 +408,24 @@ def flexible_activity_duration_minutes(text: str) -> int:
     return 45
 
 
+def structured_clock_hour(value: Any) -> float | None:
+    """Parse Profile time inputs while retaining support for legacy numbers."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        hour = float(value)
+        return hour if 0 <= hour <= 24 else None
+    match = re.fullmatch(r"\s*(\d{1,2}):(\d{2})\s*", str(value or ""))
+    if not match:
+        return None
+    hour, minute = int(match.group(1)), int(match.group(2))
+    if hour == 24 and minute == 0:
+        return 24.0
+    if hour > 23 or minute > 59:
+        return None
+    return hour + minute / 60
+
+
 def inferred_routine_defaults(text: str) -> dict[str, Any] | None:
     if re.search(r"早餐", text):
         return {"start": 7.5, "end": 8.25, "label": "Suggested 07:30-08:15", "confidence": "low"}
@@ -438,10 +456,10 @@ def recurring_routine_intervals(profile: dict[str, Any]) -> tuple[list[dict[str,
     uncertain: list[str] = []
     for item in routine_items:
         text = f"日常 {item.get('day', '')} {item.get('title', '')}".strip()
-        start, end = item.get("start"), item.get("end")
+        start, end = structured_clock_hour(item.get("start")), structured_clock_hour(item.get("end"))
         defaults = inferred_routine_defaults(text)
         inferred = False
-        if not isinstance(start, (int, float)) or not isinstance(end, (int, float)) or end <= start:
+        if start is None or end is None or end <= start:
             if defaults:
                 start, end = defaults["start"], defaults["end"]
                 inferred = True
@@ -490,8 +508,8 @@ def flexible_activity_intervals(profile: dict[str, Any]) -> tuple[list[dict[str,
         for item in structured_items:
             if item.get("type") != "flexible_activity" and item.get("category") != "flexible_activity":
                 continue
-            start, end = item.get("start"), item.get("end")
-            activity_range = {"start": float(start), "end": float(end), "explicit_end": True} if isinstance(start, (int, float)) and isinstance(end, (int, float)) and end > start else None
+            start, end = structured_clock_hour(item.get("start")), structured_clock_hour(item.get("end"))
+            activity_range = {"start": start, "end": end, "explicit_end": True} if start is not None and end is not None and end > start else None
             days = [int(day) for day in item.get("days", []) if str(day).isdigit()] or day_indices_from_text(str(item.get("day") or ""))
             activity_items.append({"id": item.get("id"), "text": f"可灵活安排 {item.get('day', '')} {item.get('title', '')}".strip(), "days": days, "range": activity_range, "duration_minutes": item.get("duration_minutes"), "occurrence_mode": item.get("occurrence_mode") or "repeat_selected_days"})
     else:
@@ -543,7 +561,7 @@ def flexible_activity_intervals(profile: dict[str, Any]) -> tuple[list[dict[str,
                 "confidence": "medium",
                 "evidence": source,
             })
-        if item.get("occurrence_mode") == "once_this_week":
+        if item.get("occurrence_mode") in {"once_this_week", "one_off"}:
             if item_intervals:
                 intervals.append(sorted(item_intervals, key=lambda block: (block["day_index"], block["start"]))[0])
         else:

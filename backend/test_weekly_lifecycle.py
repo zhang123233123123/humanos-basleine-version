@@ -179,6 +179,15 @@ class WeeklyLifecycleTests(unittest.TestCase):
             context_items = store.ensure_profile("u")["weekly_context"]["context_items"]
         self.assertEqual([weekly_class], context_items)
 
+    def test_weekly_setup_rejects_unschedulable_context_items(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            store = self.make_store(Path(temp_dir) / "invalid-context.db")
+            invalid = {"id": "gym", "type": "flexible_activity", "title": "Gym", "day": "Monday", "start": "17:00", "end": "19:00", "occurrence_mode": "one_off"}
+            with self.assertRaisesRegex(ValueError, "duration_minutes"):
+                store.reconcile_weekly_setup("u", {
+                    "week_id": "2026-08-03", "profile": self.profile_patch([invalid]), "tasks": [],
+                })
+
 
 if __name__ == "__main__":
     unittest.main()

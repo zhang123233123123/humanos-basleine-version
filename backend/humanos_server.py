@@ -3304,9 +3304,10 @@ class Store:
                 for row in rows if row["create_request_id"]
             }
             old_weekly = dict(current_profile.get("weekly_context") or {})
-            from app.domain.profile import sanitize_weekly_context
+            from app.domain.profile import sanitize_weekly_context, validate_context_items
 
             new_weekly = sanitize_weekly_context(profile_patch.get("weekly_context") or old_weekly)
+            validate_context_items(new_weekly)
             new_weekly["week_id"] = week_id
             new_weekly["week_of"] = week_id
             weekly_scope = self._weekly_change_scope(old_weekly, new_weekly)
