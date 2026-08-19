@@ -68,11 +68,12 @@ def _overlaps(start: int, end: int, occupied: list[tuple[int, int]]) -> bool:
 def _find_slot(
     available: list[WeeklySegment], occupied: list[WeeklySegment], *, duration_minutes: int,
     not_before: int, deadline: int | None, rest_after_minutes: int, priors: dict[str, Any],
-    task_demand: str, today_index: int,
+    task_demand: str, today_index: int, daily_load_minutes: dict[int, int] | None = None,
 ) -> tuple[WeeklySegment | None, list[str]]:
-    """Choose among feasible slots using traits only as a soft tiebreak."""
+    """Choose a slot on the least-loaded feasible day, then apply weak priors."""
     boundary = 10080 if deadline is None else min(max(deadline, 0), 10080)
     candidates: list[tuple[int, int, WeeklySegment, list[str]]] = []
+    day_loads = daily_load_minutes or {}
     free = WeeklyTimeAxis.subtract(available, occupied)
     for segment in free:
         start = math.ceil(max(segment.start, not_before) / GRID_MINUTES) * GRID_MINUTES
@@ -88,9 +89,18 @@ def _find_slot(
             start += GRID_MINUTES
     if not candidates:
         return None, []
-    # A weak prior may choose a time within the earliest feasible day, but must
-    # never delay work to a later day merely to match a learned rhythm.
-    _, _, selected, used = min(candidates, key=lambda item: (item[1] // 1440, item[0], item[1]))
+    # Deadlines and availability have already filtered the candidates. Balance
+    # work across those feasible days before using a learned rhythm as a weak
+    # within-day tiebreak.
+    _, _, selected, used = min(
+        candidates,
+        key=lambda item: (
+            day_loads.get(item[1] // 1440, 0),
+            item[1] // 1440,
+            item[0],
+            item[1],
+        ),
+    )
     return selected, used
 
 
@@ -209,6 +219,7 @@ def build_deterministic_plan(
         })
     allocated: dict[str, int] = {task_id: 0 for task_id in active_tasks}
     task_end: dict[str, int] = {}
+    daily_load_minutes: dict[int, int] = {}
 
     preserve_existing = not payload.get("rebuild_from_scratch")
     if preserve_existing and existing_plan:
@@ -231,6 +242,8 @@ def build_deterministic_plan(
             blocks.append(block)
             allocated[task_id] += work
             task_end[task_id] = max(task_end.get(task_id, 0), end)
+            day_index = start // 1440
+            daily_load_minutes[day_index] = daily_load_minutes.get(day_index, 0) + work
             occupied.append((start, min(end + rest_minutes, (start // 1440 + 1) * 1440)))
 
     dependency_map: dict[str, set[str]] = {task_id: set() for task_id in active_tasks}
@@ -267,6 +280,7 @@ def build_deterministic_plan(
                 priors=scheduling_priors,
                 task_demand=demand_map.get(task_id, "medium"),
                 today_index=now.weekday(),
+                daily_load_minutes=daily_load_minutes,
             )
             used_buffer = False
             if chosen_segment is None and context.get("keep_buffer"):
@@ -280,6 +294,7 @@ def build_deterministic_plan(
                     priors=scheduling_priors,
                     task_demand=demand_map.get(task_id, "medium"),
                     today_index=now.weekday(),
+                    daily_load_minutes=daily_load_minutes,
                 )
                 used_trait_ids = buffer_trait_ids
                 used_buffer = chosen_segment is not None
@@ -344,6 +359,8 @@ def build_deterministic_plan(
             occupied.append((start, min(end + rest_minutes, (start // 1440 + 1) * 1440)))
             task_end[task_id] = end
             allocated[task_id] += actual_work
+            day_index = start // 1440
+            daily_load_minutes[day_index] = daily_load_minutes.get(day_index, 0) + actual_work
             remaining -= actual_work
             session_index += 1
 
@@ -370,7 +387,7 @@ def build_deterministic_plan(
         "ai_task_analysis": analysis,
         "requires_confirmation": True,
         "control_mode": "python_scheduled_user_confirmed",
-        "explanation": f"Python allocated {len(blocks)} focus sessions on the weekly timeline using {session_minutes}-minute sessions and {rest_minutes}-minute protected breaks. Confirmed traits were used only as soft tiebreaks after hard constraints and current-day state.",
+        "explanation": f"Python allocated {len(blocks)} focus sessions across the least-loaded eligible days using {session_minutes}-minute sessions and {rest_minutes}-minute protected breaks. Confirmed traits were used only as soft tiebreaks after hard constraints and current-day state.",
         "confidence": {"level": "high" if not unscheduled else "medium", "evidence": ["Profile", "Weekly Context", "Task deadlines", "Task dependencies", "Python timeline allocation"]},
         "constraint_summary": {**context, "preferred_session_minutes": session_minutes, "rest_minutes": rest_minutes},
         "scheduler": {"engine": "python_timeline_v2", "axis_start": 0, "axis_end": 10080, "grid_minutes": GRID_MINUTES, "session_minutes": session_minutes, "rest_minutes": rest_minutes, "initial_available_minutes": WeeklyTimeAxis.capacity(initial_free_segments), "ai_role": "task_analysis_and_soft_review"},
