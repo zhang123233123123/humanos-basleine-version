@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, CheckCircle2, Clock3, Loader2, Pause, Play, Square, TimerReset } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -31,6 +31,7 @@ export default function FocusPage() {
   const { t, locale } = useTranslation()
   const router = useRouter()
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [replanning, setReplanning] = useState(false)
   const [current, setCurrent] = useState<CurrentExecution | null>(null)
@@ -59,9 +60,15 @@ export default function FocusPage() {
   const [stressAfter, setStressAfter] = useState(4)
   const [timingFit, setTimingFit] = useState('good')
   const [sessionLengthFit, setSessionLengthFit] = useState('appropriate')
+  const refreshInFlight = useRef(false)
+  const lastRefreshStartedAt = useRef(0)
 
-  const loadExecution = useCallback(async () => {
-    setLoading(true)
+  const loadExecution = useCallback(async (initial = false) => {
+    if (refreshInFlight.current) return
+    refreshInFlight.current = true
+    lastRefreshStartedAt.current = Date.now()
+    if (initial) setLoading(true)
+    else setRefreshing(true)
     try {
       const [currentData, historyData] = await Promise.all([
         apiRequest<ExecutionResourceEnvelope<{ current: CurrentExecution }>>('/api/execution-sessions/current'),
@@ -75,16 +82,23 @@ export default function FocusPage() {
     } catch (error) {
       toast(error instanceof Error ? error.message : t('execution.loadFailed'))
     } finally {
-      setLoading(false)
+      if (initial) setLoading(false)
+      else setRefreshing(false)
+      refreshInFlight.current = false
     }
   }, [t])
 
   useEffect(() => {
-    void loadExecution()
+    void loadExecution(true)
   }, [loadExecution])
 
   useEffect(() => {
-    const refreshExecution = () => void loadExecution()
+    const refreshExecution = () => {
+      // Browsers commonly emit focus and visibilitychange together. Treat them
+      // as one synchronization so returning to the tab does not double-fetch.
+      if (Date.now() - lastRefreshStartedAt.current < 1000) return
+      void loadExecution()
+    }
     const refreshWhenVisible = () => {
       if (document.visibilityState === 'visible') {
         setNow(Date.now())
@@ -356,7 +370,7 @@ export default function FocusPage() {
         <header>
           <Link href="/app" className="mb-3 inline-flex items-center text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="mr-1 h-4 w-4" />{t('execution.workspace')}</Link>
           <p className="text-xs font-semibold uppercase tracking-[0.25em] text-primary">HumanOS / Focus</p>
-          <div className="mt-2 flex flex-col gap-2 md:flex-row md:items-end md:justify-between"><div><h1 className="text-3xl font-semibold tracking-tight md:text-5xl">{t('execution.title')}</h1><p className="mt-2 text-muted-foreground">{t('execution.subtitle')}</p></div><span className="w-fit rounded-full border bg-background/70 px-4 py-1.5 text-sm">{statusLabel}</span></div>
+          <div className="mt-2 flex flex-col gap-2 md:flex-row md:items-end md:justify-between"><div><h1 className="text-3xl font-semibold tracking-tight md:text-5xl">{t('execution.title')}</h1><p className="mt-2 text-muted-foreground">{t('execution.subtitle')}</p></div><span className="inline-flex w-fit items-center gap-2 rounded-full border bg-background/70 px-4 py-1.5 text-sm">{refreshing && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}{refreshing ? (locale === 'zh' ? '正在同步' : 'Syncing') : statusLabel}</span></div>
         </header>
 
         {breakSession && <Card className="overflow-hidden border-sky-300 bg-gradient-to-br from-sky-50 via-background to-emerald-50"><CardHeader><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-700">{locale === 'zh' ? '短暂休息' : 'Timed break'}</p><CardTitle className="mt-2">{breakFinished ? (locale === 'zh' ? '休息结束' : 'Break complete') : (locale === 'zh' ? '先离开屏幕一会儿' : 'Step away for a moment')}</CardTitle><CardDescription className="mt-1">{locale === 'zh' ? '任务上下文和计时状态已由后端保存，刷新页面不会丢失。' : 'Task context and timing are persisted by the backend and survive refreshes.'}</CardDescription></div><Clock3 className="h-6 w-6 text-sky-700" /></div></CardHeader><CardContent><div className="rounded-2xl border bg-background/80 p-6 text-center"><p className="font-mono text-5xl font-semibold tracking-tight">{durationLabel(breakRemainingSeconds)}</p><p className="mt-2 text-sm text-muted-foreground">{breakFinished ? (locale === 'zh' ? '可以回到原任务，或说明你还没准备好。' : 'Resume the same task or say you are not ready.') : (locale === 'zh' ? '休息剩余时间' : 'Break remaining')}</p></div>{breakFinished && <div className="mt-4 flex flex-wrap justify-center gap-2"><Button onClick={() => void resumeDeferred(breakSession)} disabled={submitting}><Play className="mr-2 h-4 w-4" />{locale === 'zh' ? '恢复原任务' : 'Resume task'}</Button><Button variant="outline" onClick={() => router.push(`/app/check-in?mode=daily&source=break-not-ready&task_id=${encodeURIComponent(breakSession.task_id)}`)}>{locale === 'zh' ? '我还没准备好' : "I'm not ready"}</Button></div>}</CardContent></Card>}
