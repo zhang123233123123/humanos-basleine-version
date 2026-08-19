@@ -7358,7 +7358,6 @@ class Store:
             from app.domain.capacity import capacity_penalty, validate_capacity_assessment
 
             capacity_fit_counts = {"ideal": 0, "acceptable": 0, "risky": 0, "unsuitable": 0}
-            daily_load = {day: sum(block["session_minutes"] for block in task_sessions if block["day_index"] == day) for day in range(7)}
             for block in task_sessions:
                 level = (demand_map.get(block["task_id"]) or {}).get("level", "medium")
                 preferred = low_start if level == "low" else deep_start
@@ -7369,9 +7368,20 @@ class Store:
                 block["capacity_tradeoff"] = assessment.tradeoff
                 violations.extend(capacity_violations)
                 capacity_fit_counts[assessment.level] += 1
-            active_loads = [value for value in daily_load.values() if value] or [0]
-            mean_load = sum(active_loads) / len(active_loads)
-            load_variance = sum((value - mean_load) ** 2 for value in active_loads) / len(active_loads)
+            active_flexible_tasks = [
+                task for task in task_map.values()
+                if task.get("status") not in {"completed", "terminated", "blocked", "paused"}
+                and schedule_task_kind(task) != "fixed_event"
+            ]
+            from app.application.workload_balance import eligible_workload_days, workload_balance_metrics
+
+            eligible_days = eligible_workload_days(
+                (window.get("day_index", -1) for window in validation_windows),
+                (day_index_from_due(task.get("due"), now) for task in active_flexible_tasks),
+                today_index,
+            )
+            balance_metrics = workload_balance_metrics(task_sessions, eligible_days)
+            load_variance = float(balance_metrics["daily_load_variance"])
             ordered_sessions = sorted(task_sessions, key=lambda block: (block["day_index"], block["start"]))
             context_switches = sum(
                 1 for previous, current in zip(ordered_sessions, ordered_sessions[1:])
@@ -7386,8 +7396,7 @@ class Store:
                 "cognitive_fit_score": round(cognitive_fit, 3),
                 "capacity_fit_counts": capacity_fit_counts,
                 "capacity_penalty": candidate_capacity_penalty,
-                "daily_load_variance": round(load_variance, 2),
-                "daily_peak_minutes": max(active_loads),
+                **balance_metrics,
                 "context_switch_count": context_switches,
                 "fragmentation_score": 0.0,
                 "hard_violation_count": len(violations),

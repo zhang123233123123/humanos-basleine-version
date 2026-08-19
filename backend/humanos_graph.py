@@ -1169,11 +1169,19 @@ def scheduler_node(_: Any):
             validation = validate_plan(blocks, context["windows"])
             task_sessions = [block for block in blocks if block.get("kind") == "task_session"]
             scheduled_minutes = sum(block.get("planned_work_minutes", block.get("session_minutes", 0)) for block in task_sessions)
-            active_days = sorted({window["day_index"] for window in context["windows"] if window["day_index"] >= today_index})
-            day_loads = [daily_load.get(day, 0) for day in active_days] or [0]
+            try:
+                from app.application.workload_balance import eligible_workload_days, workload_balance_metrics
+            except ModuleNotFoundError:
+                from backend.app.application.workload_balance import eligible_workload_days, workload_balance_metrics
+            eligible_days = eligible_workload_days(
+                (window["day_index"] for window in context["windows"]),
+                (day_index_from_due(task.get("due"), now) for task in flexible_tasks),
+                today_index,
+            )
+            balance_metrics = workload_balance_metrics(task_sessions, eligible_days)
+            day_loads = list(balance_metrics["daily_load_minutes"].values()) or [0]
             load_spread = max(day_loads) - min(day_loads)
-            mean_load = sum(day_loads) / len(day_loads)
-            load_variance = sum((load - mean_load) ** 2 for load in day_loads) / len(day_loads)
+            load_variance = float(balance_metrics["daily_load_variance"])
             task_by_id = {str(task.get("id")): task for task in ready_tasks}
             fit_scores = []
             for block in task_sessions:
@@ -1210,8 +1218,7 @@ def scheduler_node(_: Any):
                     "remaining_minutes": remaining_total,
                     "session_count": len(task_sessions),
                     "load_spread_minutes": load_spread,
-                    "daily_load_variance": round(load_variance, 2),
-                    "daily_peak_minutes": max(day_loads),
+                    **balance_metrics,
                     "deadline_risk_minutes": deadline_risk,
                     "cognitive_fit_score": round(cognitive_fit, 3),
                     "context_switch_count": context_switches,
