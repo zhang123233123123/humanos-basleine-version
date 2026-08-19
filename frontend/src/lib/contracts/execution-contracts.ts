@@ -1,5 +1,5 @@
 export type ExecutionStatus = 'ready' | 'running' | 'paused' | 'ended' | 'completed' | 'superseded' | string
-export type ExecutionMode = 'up_next' | 'running' | 'paused' | 'empty' | 'none' | 'idle' | string
+export type ExecutionMode = 'up_next' | 'ready_to_start' | 'running' | 'overdue_running' | 'paused' | 'session_ended' | 'empty' | 'none' | 'idle' | string
 export type InterruptionAction = 'short_break' | 'continue_later' | 'switch_task' | 'help_decide'
 
 export interface ExecutionSession {
@@ -71,6 +71,7 @@ export interface InterruptionRecoverySummary {
 
 export interface CurrentExecution {
   mode: ExecutionMode
+  requires_resolution?: boolean
   session?: ExecutionSession | null
   task?: ExecutionSession['task'] | null
   deferred_sessions?: ExecutionSession[]

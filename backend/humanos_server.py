@@ -4983,7 +4983,16 @@ class Store:
             return {"mode": "empty", "session": None, "task": None, "deferred_sessions": deferred_sessions}
         session = selected[0]
         task = self.get_task(session["task_id"], user_id)
-        mode = "now" if session["status"] == "running" else "paused" if session["status"] == "paused" else "session_ended" if session["status"] == "ended" else "up_next"
+        mode = "running" if session["status"] == "running" else "paused" if session["status"] == "paused" else "session_ended" if session["status"] == "ended" else "up_next"
+        if mode == "running" and session.get("planned_end_at"):
+            try:
+                planned_end = datetime.fromisoformat(str(session["planned_end_at"]).replace("Z", "+00:00"))
+                if planned_end.tzinfo is None:
+                    planned_end = planned_end.replace(tzinfo=current.tzinfo)
+                if current >= planned_end:
+                    mode = "overdue_running"
+            except ValueError:
+                pass
         if mode == "up_next" and session.get("planned_start_at"):
             try:
                 planned_start = datetime.fromisoformat(str(session["planned_start_at"]).replace("Z", "+00:00"))
@@ -4996,7 +5005,7 @@ class Store:
                     mode = "ready_to_start"
             except ValueError:
                 pass
-        return {"mode": mode, "session": session, "task": task, "deferred_sessions": deferred_sessions}
+        return {"mode": mode, "session": session, "task": task, "deferred_sessions": deferred_sessions, "requires_resolution": mode == "overdue_running"}
 
     def _parallel_start_allowed(self, user_id: str, first_block_id: str, second_block_id: str) -> bool:
         plan = self.active_plan(user_id) or {}

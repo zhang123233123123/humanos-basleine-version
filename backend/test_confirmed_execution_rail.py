@@ -102,7 +102,17 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
     def test_08_refresh_restores_running_session(self):
         session = self.start()
         restored = Store(self.db).current_execution("u")
-        self.assertEqual(("now", session["execution_session_id"]), (restored["mode"], restored["session"]["execution_session_id"]))
+        self.assertEqual(("running", session["execution_session_id"]), (restored["mode"], restored["session"]["execution_session_id"]))
+
+    def test_overdue_running_session_requires_user_resolution(self):
+        session = self.start()
+        past = (datetime.now(ZoneInfo("Asia/Shanghai")) - timedelta(minutes=1)).isoformat()
+        with self.store.connect() as conn:
+            conn.execute("UPDATE execution_sessions SET planned_end_at=? WHERE id=?", (past, session["execution_session_id"]))
+        current = self.current()
+        self.assertEqual("overdue_running", current["mode"])
+        self.assertTrue(current["requires_resolution"])
+        self.assertEqual("running", current["session"]["status"])
 
     def test_09_pause_accumulates_minutes_and_context_dump_is_preserved(self):
         session = self.start()
