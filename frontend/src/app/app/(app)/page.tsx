@@ -12,6 +12,7 @@ import CustomHeader from '@/components/custom-header'
 import { ExpandableEvent } from '@/components/expandable-event'
 import { useModal } from '@/hooks/use-modal'
 import { useEvents } from '@/hooks/use-events'
+import { findCalendarBlock, moveCalendarBlock } from '@/lib/calendar-session-edit'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { WorkspaceSidebar } from '@/components/workspace-sidebar'
@@ -604,6 +605,9 @@ function AppContent({
   const { activeEvent, setActiveEvent, setPreviewTasks } = useModal()
   const [pendingCalendarEdit, setPendingCalendarEdit] = useState<{
     taskId: string
+    blockId: string | null
+    executionSessionId: string | null
+    planRevision: number | null
     before: { start: string | null; end: string | null }
     after: { start: string | null; end: string | null }
     eventType: 'move_session' | 'resize_session'
@@ -640,9 +644,18 @@ function AppContent({
       return
     }
 
+    if (pendingCalendarEdit) {
+      event.revert()
+      toast(locale === 'zh' ? '请先保存或取消当前拖拽修改' : 'Save or cancel the current calendar edit first')
+      return
+    }
+
     const oldEvent = event.oldEvent
     setPendingCalendarEdit({
       taskId: String(event.event.extendedProps.taskId || event.event.id),
+      blockId: event.event.extendedProps.blockId ? String(event.event.extendedProps.blockId) : null,
+      executionSessionId: event.event.extendedProps.executionSessionId ? String(event.event.extendedProps.executionSessionId) : null,
+      planRevision: Number.isFinite(Number(event.event.extendedProps.planRevision)) ? Number(event.event.extendedProps.planRevision) : null,
       before: { start: oldEvent.start?.toISOString() || null, end: oldEvent.end?.toISOString() || null },
       after: { start: event.event.start?.toISOString() || null, end: event.event.end?.toISOString() || null },
       eventType: 'oldEvent' in event && event.event.start?.getTime() === oldEvent.start?.getTime()
@@ -666,9 +679,16 @@ function AppContent({
       const active = await apiRequest<PlanResourceEnvelope<{ plan: PlanDecision | null }>>('/api/plans/active')
       const basePlan = active.data.plan
       const basePatch = basePlan?.plan_patch || []
-      const originalBlock = basePatch.find((block: any) => String(block.task_id) === pendingCalendarEdit.taskId)
+      const activeRevision = Number(basePlan?.plan_revision)
+      if (pendingCalendarEdit.planRevision !== null && activeRevision !== pendingCalendarEdit.planRevision) {
+        throw new Error(locale === 'zh' ? '计划已更新，请刷新后重新拖拽' : 'The plan changed. Refresh and drag the session again.')
+      }
+      const originalBlock = pendingCalendarEdit.blockId
+        ? findCalendarBlock(basePatch, pendingCalendarEdit.blockId)
+        : undefined
 
-      if (basePlan?.plan_id && originalBlock) {
+      if (basePlan?.plan_id && pendingCalendarEdit.blockId) {
+        if (!originalBlock) throw new Error(locale === 'zh' ? '找不到被拖动的时间块，请刷新后重试' : 'The moved session no longer exists. Refresh and try again.')
         const revisedResult = await apiRequest<PlanResourceEnvelope<{ plan: PlanDecision }>>('/api/plans/revise', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ plan_id: basePlan.plan_id, request_id: `drag-${Date.now()}` }),
@@ -676,25 +696,14 @@ function AppContent({
         const revised = revisedResult.data.plan
         const nextStart = new Date(pendingCalendarEdit.after.start || '')
         const nextEnd = new Date(pendingCalendarEdit.after.end || '')
-        const mondayIndex = (nextStart.getDay() + 6) % 7
-        const nextPatch = (revised.plan_patch || []).map((block: any) => {
-          if (String(block.block_id) !== String(originalBlock.block_id)) return block
-          return {
-            ...block,
-            day_index: mondayIndex,
-            start: nextStart.getHours() + nextStart.getMinutes() / 60,
-            end: nextEnd.getHours() + nextEnd.getMinutes() / 60,
-            start_at: nextStart.toISOString(),
-            end_at: nextEnd.toISOString(),
-            session_minutes: Math.max(Math.round((nextEnd.getTime() - nextStart.getTime()) / 60000), 1),
-          }
-        })
+        const nextPatch = moveCalendarBlock(revised.plan_patch || [], pendingCalendarEdit.blockId, nextStart, nextEnd)
         await apiRequest('/api/plan-edits/events', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             edit_episode_id: revised.edit_episode_id,
             task_id: pendingCalendarEdit.taskId,
-            block_id: originalBlock.block_id,
+            block_id: pendingCalendarEdit.blockId,
+            execution_session_id: pendingCalendarEdit.executionSessionId,
             event_type: pendingCalendarEdit.eventType,
             before: pendingCalendarEdit.before,
             after: pendingCalendarEdit.after,
@@ -756,6 +765,9 @@ function AppContent({
       toast(t('event.eventUpdated'))
     } catch (error) {
       pendingCalendarEdit.revert()
+      setPendingCalendarEdit(null)
+      setCalendarEditReason('')
+      await refetchEvents(currentStart, currentEnd).catch(() => undefined)
       toast(error instanceof Error ? error.message : 'Failed to save calendar change')
     } finally {
       setSavingCalendarEdit(false)
