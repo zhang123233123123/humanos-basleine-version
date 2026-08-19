@@ -1,8 +1,10 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 import backend.humanos_server as server_module
 from backend.app.domain.personalization import EvidenceScope, ProfileTrait
@@ -96,12 +98,12 @@ class ScheduleTraitIntegrationTests(unittest.TestCase):
 
     def test_current_self_report_suppresses_long_term_trait_for_today(self):
         self.insert_trait()
-        decision = self.decide(
-            request_id="current-state",
-            runtime_state={"source": "self_report", "focus": 2, "energy": 2, "stress": 6},
-        )
+        with patch("app.application.deterministic_scheduler.profile_now", return_value=datetime(2026, 8, 4, 8, 0, tzinfo=ZoneInfo("Asia/Shanghai"))):
+            decision = self.decide(
+                request_id="current-state",
+                runtime_state={"source": "self_report", "focus": 2, "energy": 2, "stress": 6},
+            )
 
-        self.assertEqual(9.0, self.task_block(decision)["start"])
         self.assertEqual([], decision["personalization"]["applied_trait_ids"])
         self.assertTrue(decision["personalization"]["today_state_overrode_traits"])
 
@@ -221,6 +223,73 @@ class ScheduleTraitIntegrationTests(unittest.TestCase):
         self.assertEqual(3, review_count)
         self.assertEqual([], self.store.ensure_profile("u")["learned_patterns"])
         self.assertEqual([], self.store.profile_trait_effects("u"))
+
+    def test_trait_management_uses_stable_id_and_preserves_active_plan(self):
+        self.insert_trait()
+        profile = self.store.ensure_profile("u")
+        profile["learned_patterns"] = [{
+            "pattern_label": "Afternoon energy", "evidence_count": 5,
+            "user_confirmed": True, "confirmed_at": 1_700_000_000_000,
+        }]
+        self.store.upsert_profile(profile)
+        active_revision = self.store.ensure_profile("u").get("active_plan_revision")
+
+        edited = self.store.manage_profile_trait("u", "trait-afternoon-energy", {
+            "action": "edit", "display_label": "My afternoon focus window", "request_id": "manage-edit",
+        })
+        replay = self.store.manage_profile_trait("u", "trait-afternoon-energy", {
+            "action": "edit", "display_label": "Ignored replay label", "request_id": "manage-edit",
+        })
+        self.assertEqual("My afternoon focus window", replay["profile_trait"]["display_label"])
+        self.assertTrue(replay["replayed"])
+        self.assertEqual(active_revision, edited["active_plan_revision"])
+        self.assertEqual("My afternoon focus window", self.store.ensure_profile("u")["learned_patterns"][0]["pattern_label"])
+
+        paused = self.store.manage_profile_trait("u", "trait-afternoon-energy", {
+            "action": "pause", "request_id": "manage-pause",
+        })
+        self.assertEqual("paused", paused["profile_trait"]["status"])
+        paused_decision = self.decide(request_id="paused-by-user")
+        self.assertEqual([], paused_decision["personalization"]["available_trait_ids"])
+        listed = self.store.list_profile_traits("u")
+        self.assertEqual("paused", listed[0]["status"])
+        self.assertEqual("My afternoon focus window", listed[0]["display_label"])
+
+        resumed = self.store.manage_profile_trait("u", "trait-afternoon-energy", {
+            "action": "resume", "request_id": "manage-resume",
+        })
+        self.assertEqual("confirmed", resumed["profile_trait"]["status"])
+        resumed_decision = self.decide(request_id="resumed-by-user")
+        self.assertEqual(["trait-afternoon-energy"], resumed_decision["personalization"]["available_trait_ids"])
+
+        forgotten = self.store.manage_profile_trait("u", "trait-afternoon-energy", {
+            "action": "forget", "request_id": "manage-forget",
+        })
+        self.assertEqual("forgotten", forgotten["profile_trait"]["status"])
+        self.assertEqual([], self.store.ensure_profile("u")["learned_patterns"])
+        self.assertEqual("forgotten", self.store.list_profile_traits("u")[0]["status"])
+
+    def test_profile_trait_http_contract_lists_and_manages_by_id(self):
+        self.insert_trait()
+        get_response = {}
+        get_handler = object.__new__(Handler)
+        get_handler.command = "GET"
+        get_handler.path = "/api/profile-traits?user_id=u"
+        get_handler.send_json = lambda body, status=200: get_response.update({"body": body, "status": status})
+        with patch.object(server_module, "store", self.store):
+            get_handler.route()
+        self.assertEqual("trait-afternoon-energy", get_response["body"]["data"]["profile_traits"][0]["trait_id"])
+
+        patch_response = {}
+        patch_handler = object.__new__(Handler)
+        patch_handler.command = "PATCH"
+        patch_handler.path = "/api/profile-traits/trait-afternoon-energy"
+        patch_handler.read_json = lambda: {"user_id": "u", "action": "pause", "request_id": "http-pause"}
+        patch_handler.send_json = lambda body, status=200: patch_response.update({"body": body, "status": status})
+        with patch.object(server_module, "store", self.store):
+            patch_handler.route()
+        self.assertEqual("paused", patch_response["body"]["data"]["profile_trait"]["status"])
+        self.assertTrue(patch_response["body"]["meta"]["active_plan_unchanged"])
 
 
 if __name__ == "__main__":

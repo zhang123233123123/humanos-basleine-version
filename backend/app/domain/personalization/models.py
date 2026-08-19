@@ -199,7 +199,8 @@ class ProfileTrait(BaseModel):
     scope: EvidenceScope = Field(default_factory=EvidenceScope)
     evidence_ids: tuple[str, ...] = Field(min_length=1)
     confidence_level: ConfidenceLevel
-    status: Literal["confirmed", "superseded", "forgotten"] = "confirmed"
+    status: Literal["confirmed", "paused", "superseded", "forgotten"] = "confirmed"
+    display_label: str | None = None
     user_confirmed: Literal[True]
     confirmed_at: StrictTimestamp
     updated_at: StrictTimestamp

@@ -41,6 +41,21 @@ export interface ProfileTraitEffect {
   review_prompt_allowed?: boolean
 }
 
+export interface ProfileTraitRecord {
+  trait_id: string
+  trait_key: string
+  value: Record<string, unknown>
+  scope: Record<string, unknown>
+  evidence_ids: string[]
+  confidence_level: 'low' | 'medium' | 'high'
+  status: 'confirmed' | 'paused' | 'superseded' | 'forgotten'
+  display_label: string
+  confirmed_at: string | number
+  updated_at: string | number
+  latest_review?: { action: string; created_at: number } | null
+  effect?: ProfileTraitEffect | null
+}
+
 export interface MemoryResult {
   memory_id: string
   source_type: string
@@ -58,7 +73,7 @@ export interface LearningResourceEnvelope<T> {
   data: T
   resources: Record<string, string>
   meta: {
-    resource: 'pattern_candidates' | 'learned_pattern' | 'memory_evidence' | 'profile_trait_effects' | 'profile_trait_review'
+    resource: 'pattern_candidates' | 'learned_pattern' | 'memory_evidence' | 'profile_trait_effects' | 'profile_trait_review' | 'profile_traits' | 'profile_trait'
     aggregate_root: 'profile'
     read_only: boolean
     plan_write_allowed: false

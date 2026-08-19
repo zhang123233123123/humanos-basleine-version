@@ -5500,6 +5500,126 @@ class Store:
             )
         return effects
 
+    def list_profile_traits(self, user_id: str) -> list[dict]:
+        """Return the canonical trait records, including inactive states."""
+        from app.application.trait_effects import summarize_trait_effects
+
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM profile_traits WHERE user_id=? ORDER BY confirmed_at DESC", (user_id,),
+            ).fetchall()
+            label_rows = conn.execute(
+                "SELECT candidate_id,pattern_label FROM pattern_decisions WHERE user_id=? AND action='confirm' ORDER BY created_at",
+                (user_id,),
+            ).fetchall()
+            review_rows = conn.execute(
+                "SELECT * FROM trait_reviews WHERE user_id=? ORDER BY created_at DESC", (user_id,),
+            ).fetchall()
+        labels = {str(row["candidate_id"]): str(row["pattern_label"]) for row in label_rows}
+        latest_reviews = {}
+        for row in review_rows:
+            latest_reviews.setdefault(str(row["trait_id"]), {
+                "action": row["action"], "defer_until": row["defer_until"], "created_at": row["created_at"],
+            })
+        trait_docs = [dict(from_json(row["trait_json"], {})) for row in rows]
+        trait_labels = {
+            str(trait.get("trait_id")): str(trait.get("display_label") or labels.get(str(trait.get("source_candidate_id") or ""), ""))
+            for trait in trait_docs
+        }
+        # Historical outcome summaries remain visible when a trait is paused or
+        # forgotten. This is descriptive display only; status still controls
+        # whether the scheduler may use the trait.
+        effect_traits = [{**trait, "status": "confirmed"} for trait in trait_docs]
+        effects = {
+            str(item["trait_id"]): item
+            for item in summarize_trait_effects(effect_traits, self.list_personalization_evidence(user_id), trait_labels)
+        }
+        result = []
+        for row, trait in zip(rows, trait_docs):
+            trait["status"] = str(row["status"])
+            trait["display_label"] = str(trait.get("display_label") or labels.get(str(row["candidate_id"]), "") or trait.get("trait_key") or "")
+            trait["latest_review"] = latest_reviews.get(str(row["id"]))
+            trait["effect"] = effects.get(str(row["id"]))
+            result.append(trait)
+        return result
+
+    def manage_profile_trait(self, user_id: str, trait_id: str, payload: dict) -> dict:
+        """Apply an explicit id-based trait change without mutating the active plan."""
+        action = str(payload.get("action") or "").strip()
+        if action not in {"edit", "pause", "resume", "forget"}:
+            raise ValueError("profile trait action must be edit, pause, resume, or forget")
+        request_id = str(payload.get("request_id") or "").strip() or None
+        timestamp = now_ms()
+        profile = self.ensure_profile(user_id)
+        active_revision = profile.get("active_plan_revision")
+        with self.atomic() as conn:
+            if request_id:
+                replay = conn.execute(
+                    "SELECT * FROM trait_reviews WHERE user_id=? AND request_id=?", (user_id, request_id),
+                ).fetchone()
+                if replay:
+                    if str(replay["trait_id"]) != trait_id or str(replay["action"]) != action:
+                        raise ValueError("request_id has already been used for another profile trait action")
+                    current = conn.execute("SELECT trait_json,status FROM profile_traits WHERE id=? AND user_id=?", (trait_id, user_id)).fetchone()
+                    if not current:
+                        raise ValueError("profile trait does not exist")
+                    trait = dict(from_json(current["trait_json"], {}))
+                    trait["status"] = current["status"]
+                    return {"profile_trait": trait, "replayed": True, "active_plan_revision": active_revision}
+            row = conn.execute("SELECT * FROM profile_traits WHERE id=? AND user_id=?", (trait_id, user_id)).fetchone()
+            if not row:
+                raise ValueError("profile trait does not exist")
+            current_status = str(row["status"])
+            allowed = {
+                "edit": {"confirmed", "paused"}, "pause": {"confirmed"},
+                "resume": {"paused"}, "forget": {"confirmed", "paused"},
+            }
+            if current_status not in allowed[action]:
+                raise ValueError(f"cannot {action} a {current_status} profile trait")
+            trait = dict(from_json(row["trait_json"], {}))
+            patterns = list(profile.get("learned_patterns") or [])
+            confirmed_at = int(trait.get("confirmed_at") or row["confirmed_at"] or 0)
+            matching_patterns = [item for item in patterns if int(item.get("confirmed_at") or 0) == confirmed_at]
+            if action == "edit":
+                label = str(payload.get("display_label") or "").strip()
+                if not label:
+                    raise ValueError("display_label is required")
+                if len(label) > 160:
+                    raise ValueError("display_label must be 160 characters or fewer")
+                trait["display_label"] = label
+                for item in matching_patterns:
+                    item["pattern_label"] = label
+                    item["edited_at"] = timestamp
+            elif action == "pause":
+                trait["status"] = "paused"
+                for item in matching_patterns:
+                    item["trait_status"] = "paused"
+            elif action == "resume":
+                trait["status"] = "confirmed"
+                for item in matching_patterns:
+                    item.pop("trait_status", None)
+            else:
+                trait["status"] = "forgotten"
+                patterns = [item for item in patterns if int(item.get("confirmed_at") or 0) != confirmed_at]
+            trait["updated_at"] = timestamp
+            new_status = str(trait.get("status") or current_status)
+            conn.execute(
+                "UPDATE profile_traits SET trait_json=?,status=?,updated_at=? WHERE id=? AND user_id=?",
+                (as_json(trait), new_status, timestamp, trait_id, user_id),
+            )
+            conn.execute(
+                "UPDATE profiles SET learned_patterns_json=?,updated_at=? WHERE user_id=?",
+                (as_json(patterns), timestamp, user_id),
+            )
+            review_id = new_id("trait_review")
+            snapshot = {"previous_status": current_status, "new_status": new_status, "display_label": trait.get("display_label")}
+            conn.execute(
+                "INSERT INTO trait_reviews (id,user_id,trait_id,action,request_id,effect_snapshot_json,defer_until,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                (review_id, user_id, trait_id, action, request_id, as_json(snapshot), None, timestamp),
+            )
+        self.log_event(user_id, f"profile_trait_{action}", {"trait_id": trait_id, "active_plan_unchanged": True})
+        return {"profile_trait": trait, "active_plan_revision": active_revision}
+
     def review_profile_trait(self, user_id: str, payload: dict) -> dict:
         """Record an explicit review; only forget mutates the confirmed trait."""
         trait_id = str(payload.get("trait_id") or "").strip()
@@ -8015,6 +8135,21 @@ class Handler(BaseHTTPRequestHandler):
                 user_id = query.get("user_id", ["demo"])[0]
                 store.ensure_profile(user_id)
                 self.send_json({"data": {"effects": store.profile_trait_effects(user_id)}, "resources": {"profile": "/api/profile", "patterns": "/api/patterns/candidates"}, "meta": {"resource": "profile_trait_effects", "aggregate_root": "profile", "read_only": True, "causal_claim_allowed": False, "profile_write_allowed": False, "plan_write_allowed": False}})
+                return
+
+            if path == "/api/profile-traits" and method == "GET":
+                user_id = query.get("user_id", ["demo"])[0]
+                store.ensure_profile(user_id)
+                self.send_json({"data": {"profile_traits": store.list_profile_traits(user_id)}, "resources": {"profile": "/api/profile", "effects": "/api/profile-traits/effects"}, "meta": {"resource": "profile_traits", "aggregate_root": "profile", "read_only": True, "plan_write_allowed": False}})
+                return
+
+            if path.startswith("/api/profile-traits/") and method == "PATCH":
+                trait_id = path.split("/")[-1]
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                store.ensure_profile(user_id)
+                result = store.manage_profile_trait(user_id, trait_id, payload)
+                self.send_json({"data": result, "resources": {"collection": "/api/profile-traits", "effects": "/api/profile-traits/effects"}, "meta": {"resource": "profile_trait", "aggregate_root": "profile", "read_only": False, "active_plan_unchanged": True, "automatic_profile_update": False, "plan_write_allowed": False}})
                 return
 
             if path == "/api/profile-traits/review" and method == "POST":
