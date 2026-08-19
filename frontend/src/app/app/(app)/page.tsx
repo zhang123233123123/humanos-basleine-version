@@ -104,7 +104,7 @@ function TaskInspectorWrapper() {
       const accepted = await apiRequest<{ job: { job_id: string } }>('/api/schedules/decide', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ client_now: new Date().toISOString(), source }),
+        body: JSON.stringify({ client_now: new Date().toISOString(), source, rebuild_from_scratch: true }),
       })
       const proposal = { decision: await waitForJob<PlanDecision>(accepted.job.job_id) }
       if (proposal.decision?.unavailable || proposal.decision?.error) {

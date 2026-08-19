@@ -162,7 +162,12 @@ export default function WeeklyPlanPage() {
       const accepted = await apiRequest<{ job: { job_id: string } }>('/api/schedules/decide', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ week_id: weekId, client_now: new Date().toISOString(), adjustment_trigger: adjustmentTrigger || undefined }),
+        body: JSON.stringify({
+          week_id: weekId,
+          client_now: new Date().toISOString(),
+          adjustment_trigger: adjustmentTrigger || undefined,
+          rebuild_from_scratch: true,
+        }),
       })
       let job: { status: string; result?: PlanDecision; error?: string } = { status: 'queued' }
       for (let attempt = 0; attempt < 180 && !['completed', 'failed'].includes(job.status); attempt += 1) {
