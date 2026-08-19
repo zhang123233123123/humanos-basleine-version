@@ -105,6 +105,28 @@ export interface ProfileTraitEvidenceTrace {
   }
 }
 
+export interface EvidenceDeletionImpact {
+  evidence: ProfileTraitEvidenceItem
+  affected_traits: Array<{ trait_id: string; display_label: string; status: string; role: ProfileTraitEvidenceRole }>
+  role_counts: Record<string, number>
+  candidate_patterns_recomputed: boolean
+  trait_effects_recomputed: boolean
+  confirmed_traits_unchanged: true
+  active_plan_unchanged: true
+  source_record_deleted: false
+}
+
+export interface ProfileDataExport {
+  schema_version: string
+  generated_at: string
+  profile_traits: ProfileTraitRecord[]
+  trait_evidence_traces: ProfileTraitEvidenceTrace[]
+  evidence: ProfileTraitEvidenceItem[]
+  confirmation_history: Array<Record<string, unknown>>
+  review_history: Array<Record<string, unknown>>
+  metadata: Record<string, boolean>
+}
+
 export interface MemoryResult {
   memory_id: string
   source_type: string
@@ -122,7 +144,7 @@ export interface LearningResourceEnvelope<T> {
   data: T
   resources: Record<string, string>
   meta: {
-    resource: 'pattern_candidates' | 'learned_pattern' | 'memory_evidence' | 'profile_trait_effects' | 'profile_trait_review' | 'profile_traits' | 'profile_trait' | 'profile_trait_evidence'
+    resource: 'pattern_candidates' | 'learned_pattern' | 'memory_evidence' | 'profile_trait_effects' | 'profile_trait_review' | 'profile_traits' | 'profile_trait' | 'profile_trait_evidence' | 'profile_data_export' | 'evidence_deletion_impact' | 'evidence_deletion'
     aggregate_root: 'profile'
     read_only: boolean
     plan_write_allowed: false
@@ -131,5 +153,8 @@ export interface LearningResourceEnvelope<T> {
     causal_claim_allowed?: boolean
     profile_write_allowed?: boolean
     unrelated_evidence_excluded?: boolean
+    destructive_action?: boolean
+    source_record_deleted?: boolean
+    automatic_profile_update?: boolean
   }
 }

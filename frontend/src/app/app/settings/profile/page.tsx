@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, BrainCircuit, Eye, Loader2, Pause, Pencil, Play, RotateCcw, Trash2 } from 'lucide-react'
+import { ArrowLeft, BrainCircuit, Download, Eye, Loader2, Pause, Pencil, Play, RotateCcw, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { apiRequest, ApiResponseError } from '@/lib/client/api'
 import { requestId } from '@/lib/client/request-id'
-import type { LearningResourceEnvelope, ProfileTraitRecord } from '@/lib/contracts/insights-contracts'
+import type { LearningResourceEnvelope, ProfileDataExport, ProfileTraitRecord } from '@/lib/contracts/insights-contracts'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 import { ProfileTraitAttributionSummary } from '@/components/profile-trait-attribution-summary'
@@ -26,6 +26,7 @@ export default function ProfileTraitsPage() {
   const [editing, setEditing] = useState('')
   const [draftLabel, setDraftLabel] = useState('')
   const [viewingEvidence, setViewingEvidence] = useState('')
+  const [exporting, setExporting] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -41,6 +42,25 @@ export default function ProfileTraitsPage() {
   }, [c])
 
   useEffect(() => { void load() }, [load])
+
+  async function exportProfileData() {
+    setExporting(true)
+    try {
+      const result = await apiRequest<LearningResourceEnvelope<ProfileDataExport>>('/api/profile-data/export', { cache: 'no-store' })
+      const blob = new Blob([JSON.stringify(result.data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `humanos-profile-data-${new Date().toISOString().slice(0, 10)}.json`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+      toast.success(c('画像数据已导出', 'Profile data exported'))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : c('画像数据导出失败', 'Unable to export profile data'))
+    } finally { setExporting(false) }
+  }
 
   const visible = useMemo(() => traits.filter((trait) => filter === 'active'
     ? trait.status === 'confirmed'
@@ -72,6 +92,7 @@ export default function ProfileTraitsPage() {
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-700 dark:text-blue-400">HumanOS profile traits</p>
         <h1 className="mt-2 font-serif text-4xl font-semibold md:text-5xl">{c('画像管理', 'Profile traits')}</h1>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-600 dark:text-stone-400">{c('这些画像只有在你确认后才会成为未来调度的弱先验。暂停、恢复和遗忘都不会静默修改当前活动计划。', 'Traits become weak priors for future scheduling only after your confirmation. Pausing, resuming, or forgetting never silently changes the active plan.')}</p>
+        <Button className="mt-4" variant="outline" disabled={exporting} onClick={() => void exportProfileData()}>{exporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}{c('导出画像数据', 'Export profile data')}</Button>
       </header>
 
       {loadError ? <section className="mt-8 rounded-3xl border border-red-300 bg-red-50 p-6 dark:border-red-500/30 dark:bg-red-500/10"><p className="text-sm">{loadError}</p><Button className="mt-4" variant="outline" onClick={() => void load()}><RotateCcw className="mr-2 h-4 w-4" />{c('重试', 'Retry')}</Button></section> : <>
@@ -88,7 +109,7 @@ export default function ProfileTraitsPage() {
               {trait.status === 'paused' && <Button size="sm" variant="outline" disabled={acting !== ''} onClick={() => void manage(trait, 'resume')}><Play className="mr-1.5 h-3.5 w-3.5" />{c('恢复', 'Resume')}</Button>}
               {trait.status !== 'forgotten' && <Button size="sm" variant="ghost" className="text-destructive" disabled={acting !== ''} onClick={() => void manage(trait, 'forget')}><Trash2 className="mr-1.5 h-3.5 w-3.5" />{c('遗忘', 'Forget')}</Button>}
             </div></div>
-            {viewingEvidence === trait.trait_id && <ProfileTraitEvidencePanel traitId={trait.trait_id} locale={locale} />}
+            {viewingEvidence === trait.trait_id && <ProfileTraitEvidencePanel traitId={trait.trait_id} locale={locale} onDeleted={load} />}
           </article>)}
         </div>}
       </>}

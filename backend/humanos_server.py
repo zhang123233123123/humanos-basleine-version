@@ -831,6 +831,16 @@ class Store:
                 CREATE INDEX IF NOT EXISTS idx_evidence_items_user_eligible
                 ON evidence_items(user_id, eligible_for_pattern, created_at);
 
+                CREATE TABLE IF NOT EXISTS evidence_deletions (
+                  id TEXT PRIMARY KEY,
+                  user_id TEXT NOT NULL,
+                  evidence_id TEXT NOT NULL,
+                  request_id TEXT NOT NULL,
+                  deleted_at INTEGER NOT NULL,
+                  UNIQUE(user_id, evidence_id),
+                  UNIQUE(user_id, request_id)
+                );
+
                 CREATE TABLE IF NOT EXISTS personalization_outbox (
                   sequence_number INTEGER PRIMARY KEY AUTOINCREMENT,
                   id TEXT UNIQUE NOT NULL,
@@ -1585,6 +1595,7 @@ class Store:
             "events",
             "behavior_events",
             "evidence_items",
+            "evidence_deletions",
             "personalization_outbox",
             "pattern_decisions",
             "profile_traits",
@@ -5776,6 +5787,100 @@ class Store:
             display_label=str(trait.get("display_label") or label), confirmed_at=int(row["confirmed_at"]),
         )
 
+    def evidence_deletion_impact(self, user_id: str, evidence_id: str) -> dict | None:
+        """Preview the consequences of deleting one user-owned evidence projection."""
+        from app.application.evidence_governance import evidence_deletion_impact
+
+        evidence = next(
+            (item for item in self.list_personalization_evidence(user_id) if item.get("evidence_id") == evidence_id),
+            None,
+        )
+        if not evidence:
+            return None
+        traces = []
+        for trait in self.list_profile_traits(user_id):
+            trace = self.profile_trait_evidence(user_id, str(trait["trait_id"]))
+            if trace:
+                traces.append(trace)
+        public_evidence = {key: value for key, value in evidence.items() if key != "user_id"}
+        return evidence_deletion_impact(public_evidence, traces)
+
+    def delete_personalization_evidence(self, user_id: str, evidence_id: str, payload: dict) -> dict:
+        """Hard-delete derived evidence content while retaining a content-free audit tombstone."""
+        if payload.get("user_confirmed") is not True:
+            raise ValueError("explicit user confirmation is required to delete evidence")
+        request_id = str(payload.get("request_id") or "").strip()
+        if not request_id:
+            raise ValueError("request_id is required")
+        with self.connect() as conn:
+            replay = conn.execute(
+                "SELECT * FROM evidence_deletions WHERE user_id=? AND request_id=?", (user_id, request_id),
+            ).fetchone()
+            if replay:
+                if str(replay["evidence_id"]) != evidence_id:
+                    raise ValueError("request_id was already used for another evidence item")
+                return {"deletion": {"id": replay["id"], "evidence_id": replay["evidence_id"], "request_id": replay["request_id"], "deleted_at": replay["deleted_at"]}, "replayed": True}
+        impact = self.evidence_deletion_impact(user_id, evidence_id)
+        if impact is None:
+            with self.connect() as conn:
+                prior = conn.execute(
+                    "SELECT * FROM evidence_deletions WHERE user_id=? AND evidence_id=?", (user_id, evidence_id),
+                ).fetchone()
+            if prior:
+                return {"deletion": {"id": prior["id"], "evidence_id": prior["evidence_id"], "request_id": prior["request_id"], "deleted_at": prior["deleted_at"]}, "replayed": True}
+            return None
+        timestamp = now_ms()
+        deletion_id = new_id("evidence_deletion")
+        with self.atomic() as conn:
+            found = conn.execute(
+                "SELECT 1 FROM evidence_items WHERE id=? AND user_id=?", (evidence_id, user_id),
+            ).fetchone()
+            if not found:
+                return None
+            conn.execute("DELETE FROM evidence_items WHERE id=? AND user_id=?", (evidence_id, user_id))
+            conn.execute(
+                "INSERT INTO evidence_deletions (id,user_id,evidence_id,request_id,deleted_at) VALUES (?,?,?,?,?)",
+                (deletion_id, user_id, evidence_id, request_id, timestamp),
+            )
+        return {
+            "deletion": {
+                "id": deletion_id, "evidence_id": evidence_id, "request_id": request_id,
+                "impact": {key: impact[key] for key in ("affected_traits", "role_counts", "candidate_patterns_recomputed", "trait_effects_recomputed")},
+                "deleted_at": timestamp,
+            },
+            "replayed": False,
+            "recalculated": {
+                "candidate_patterns": self.pattern_candidates(user_id),
+                "profile_trait_effects": self.profile_trait_effects(user_id),
+            },
+            "active_plan_unchanged": True,
+            "source_record_deleted": False,
+        }
+
+    def export_profile_data(self, user_id: str) -> dict:
+        """Export user-facing profile, evidence traces, and confirmation history."""
+        from app.application.evidence_governance import build_profile_data_export
+
+        traits = self.list_profile_traits(user_id)
+        traces = [
+            trace for trait in traits
+            if (trace := self.profile_trait_evidence(user_id, str(trait["trait_id"]))) is not None
+        ]
+        with self.connect() as conn:
+            confirmation_rows = conn.execute(
+                "SELECT candidate_id,pattern_label,action,created_at FROM pattern_decisions WHERE user_id=? AND action='confirm' ORDER BY created_at",
+                (user_id,),
+            ).fetchall()
+            review_rows = conn.execute(
+                "SELECT trait_id,action,defer_until,created_at FROM trait_reviews WHERE user_id=? ORDER BY created_at",
+                (user_id,),
+            ).fetchall()
+        return build_profile_data_export(
+            generated_at=self.user_clock_now(user_id, self.ensure_profile(user_id).get("timezone") or "Asia/Shanghai").isoformat(),
+            traits=traits, trait_traces=traces,
+            confirmations=[dict(row) for row in confirmation_rows], reviews=[dict(row) for row in review_rows],
+        )
+
     def manage_profile_trait(self, user_id: str, trait_id: str, payload: dict) -> dict:
         """Apply an explicit id-based trait change without mutating the active plan."""
         action = str(payload.get("action") or "").strip()
@@ -8389,6 +8494,35 @@ class Handler(BaseHTTPRequestHandler):
                 user_id = query.get("user_id", ["demo"])[0]
                 store.ensure_profile(user_id)
                 self.send_json({"data": {"profile_traits": store.list_profile_traits(user_id)}, "resources": {"profile": "/api/profile", "effects": "/api/profile-traits/effects"}, "meta": {"resource": "profile_traits", "aggregate_root": "profile", "read_only": True, "plan_write_allowed": False}})
+                return
+
+            if path == "/api/profile-data/export" and method == "GET":
+                user_id = query.get("user_id", ["demo"])[0]
+                store.ensure_profile(user_id)
+                self.send_json({"data": store.export_profile_data(user_id), "resources": {"profile_traits": "/api/profile-traits"}, "meta": {"resource": "profile_data_export", "aggregate_root": "profile", "read_only": True, "causal_claim_allowed": False, "plan_write_allowed": False}})
+                return
+
+            if path.startswith("/api/evidence/") and path.endswith("/impact") and method == "GET":
+                user_id = query.get("user_id", ["demo"])[0]
+                evidence_id = path.split("/")[-2]
+                store.ensure_profile(user_id)
+                impact = store.evidence_deletion_impact(user_id, evidence_id)
+                if impact is None:
+                    self.send_json({"error": "evidence_not_found", "message": "Evidence not found."}, status=404)
+                    return
+                self.send_json({"data": impact, "resources": {"profile_traits": "/api/profile-traits"}, "meta": {"resource": "evidence_deletion_impact", "aggregate_root": "profile", "read_only": True, "destructive_action": False, "active_plan_unchanged": True, "source_record_deleted": False, "plan_write_allowed": False}})
+                return
+
+            if path.startswith("/api/evidence/") and method == "DELETE":
+                evidence_id = path.split("/")[-1]
+                payload = self.read_json()
+                user_id = payload.get("user_id", "demo")
+                store.ensure_profile(user_id)
+                result = store.delete_personalization_evidence(user_id, evidence_id, payload)
+                if result is None:
+                    self.send_json({"error": "evidence_not_found", "message": "Evidence not found."}, status=404)
+                    return
+                self.send_json({"data": result, "resources": {"profile_traits": "/api/profile-traits", "effects": "/api/profile-traits/effects"}, "meta": {"resource": "evidence_deletion", "aggregate_root": "profile", "read_only": False, "active_plan_unchanged": True, "source_record_deleted": False, "automatic_profile_update": False, "plan_write_allowed": False}})
                 return
 
             if path.startswith("/api/profile-traits/") and path.endswith("/evidence") and method == "GET":
