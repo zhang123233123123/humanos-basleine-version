@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.domain.planning import rank_ready_sessions
+
 
 def build_ready_queue(
     sessions: list[dict[str, Any]],
@@ -11,6 +13,7 @@ def build_ready_queue(
     *,
     exclude_task_id: str,
     plan_revision: int | None,
+    runtime_state: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     candidates = []
     for session in sessions:
@@ -32,5 +35,8 @@ def build_ready_queue(
             "remaining_minutes": session.get("session_remaining_minutes"),
             "priority": task.get("priority"),
             "expected_difficulty": task.get("expected_difficulty"),
+            "task_demand": task.get("task_demand") or task.get("cognitive_load") or task.get("expected_difficulty"),
+            "switch_cost": task.get("switch_cost"),
+            "reentry_cost": task.get("reentry_cost"),
         })
-    return sorted(candidates, key=lambda item: (str(item.get("planned_start_at") or ""), str(item.get("task_title") or "")))
+    return rank_ready_sessions(candidates, runtime_state)

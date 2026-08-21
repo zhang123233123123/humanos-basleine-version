@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from humanos_graph import build_scheduling_context, day_index_from_due, parse_due_start_hour, profile_now
 from app.domain.timeline import WeeklySegment, WeeklyTimeAxis
+from app.domain.planning import assess_next_session_fit
 try:
     from app.application.scheduling_traits import weak_prior_score
 except ImportError:  # package import via ``backend.app`` in repository-root tests
@@ -148,6 +149,7 @@ def build_deterministic_plan(
     payload = payload or {}
     analysis = analysis or {}
     scheduling_priors = dict(payload.get("scheduling_priors") or {})
+    runtime_state = dict(payload.get("runtime_state") or {})
     timezone_name = str(profile.get("timezone") or "Asia/Shanghai")
     now = profile_now(profile)
     week_id = str(payload.get("week_id") or profile.get("active_week_id") or (profile.get("weekly_context") or {}).get("week_id") or (now - timedelta(days=now.weekday())).date().isoformat())
@@ -261,6 +263,7 @@ def build_deterministic_plan(
         str(item.get("task_id")): str(item.get("level") or "medium")
         for item in analysis.get("task_demands") or [] if isinstance(item, dict)
     }
+    next_session_policy_applied = False
     for task in _dependency_order(list(active_tasks.values()), analysis, now):
         task_id = str(task["id"])
         remaining = _remaining_minutes(task) - allocated[task_id]
@@ -323,6 +326,20 @@ def build_deterministic_plan(
             start_at = week_start + timedelta(minutes=start)
             end_at = week_start + timedelta(minutes=end)
             actual_work = min(work, remaining)
+            is_today_next_session = start // 1440 == now.weekday() and not next_session_policy_applied
+            policy_decision = (
+                assess_next_session_fit(demand_map.get(task_id), runtime_state).to_dict()
+                if is_today_next_session
+                else {
+                    "fit": "not_assessed",
+                    "confidence": "not_applicable",
+                    "evidence": ["Momentary state is not projected beyond today's next Session."],
+                    "scope": "future_session",
+                    "authority": "soft_advisory",
+                }
+            )
+            if is_today_next_session:
+                next_session_policy_applied = True
             blocks.append({
                 "block_id": f"{task_id}-deterministic-{session_index}",
                 "task_id": task_id,
@@ -355,6 +372,7 @@ def build_deterministic_plan(
                 "week_id": week_id,
                 "plan_status": "proposed",
                 "scheduler": "python_timeline_v2",
+                "scheduling_policy": policy_decision,
             })
             occupied.append((start, min(end + rest_minutes, (start // 1440 + 1) * 1440)))
             task_end[task_id] = end
@@ -390,7 +408,7 @@ def build_deterministic_plan(
         "explanation": f"Python allocated {len(blocks)} focus sessions across the least-loaded eligible days using {session_minutes}-minute sessions and {rest_minutes}-minute protected breaks. Confirmed traits were used only as soft tiebreaks after hard constraints and current-day state.",
         "confidence": {"level": "high" if not unscheduled else "medium", "evidence": ["Profile", "Weekly Context", "Task deadlines", "Task dependencies", "Python timeline allocation"]},
         "constraint_summary": {**context, "preferred_session_minutes": session_minutes, "rest_minutes": rest_minutes},
-        "scheduler": {"engine": "python_timeline_v2", "axis_start": 0, "axis_end": 10080, "grid_minutes": GRID_MINUTES, "session_minutes": session_minutes, "rest_minutes": rest_minutes, "initial_available_minutes": WeeklyTimeAxis.capacity(initial_free_segments), "ai_role": "task_analysis_and_soft_review"},
+        "scheduler": {"engine": "python_timeline_v2", "policy_version": "human_capacity_soft_v1", "axis_start": 0, "axis_end": 10080, "grid_minutes": GRID_MINUTES, "session_minutes": session_minutes, "rest_minutes": rest_minutes, "initial_available_minutes": WeeklyTimeAxis.capacity(initial_free_segments), "ai_role": "task_analysis_and_soft_review"},
         "personalization": {
             "authority": "weak_prior",
             "applied_trait_ids": sorted(applied_trait_ids),

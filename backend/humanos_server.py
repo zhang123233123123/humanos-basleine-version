@@ -4471,7 +4471,7 @@ class Store:
         runtime_state = self.save_runtime_state(user_id, {**payload.get("runtime_state", {}), "daily_checkin": False})
         ready_sessions = [item for item in sessions if item.get("status") == "ready"]
         ready_tasks = {str(item.get("task_id") or ""): self.get_task(str(item.get("task_id") or ""), user_id) or {} for item in ready_sessions}
-        ready_queue = build_ready_queue(ready_sessions, ready_tasks, exclude_task_id=task_id, plan_revision=session.get("plan_revision"))
+        ready_queue = build_ready_queue(ready_sessions, ready_tasks, exclude_task_id=task_id, plan_revision=session.get("plan_revision"), runtime_state=runtime_state)
         impact = self.analyze_execution_impact(user_id, {
             "execution_session_id": session.get("execution_session_id"),
             "action": "help_decide",
@@ -4567,16 +4567,18 @@ class Store:
             raise ValueError("No active execution session is available for this task")
         ready_sessions = [item for item in sessions if item.get("status") == "ready"]
         ready_tasks = {str(item.get("task_id") or ""): self.get_task(str(item.get("task_id") or ""), user_id) or {} for item in ready_sessions}
+        runtime_state = self.latest_runtime_state(user_id)
         ready_queue = build_ready_queue(
             ready_sessions,
             ready_tasks,
             exclude_task_id=task_id,
             plan_revision=session.get("plan_revision"),
+            runtime_state=runtime_state,
         )
         recommendation = validate_recommendation(
             payload.get("recommendation"),
             {
-                "runtime_state": self.latest_runtime_state(user_id),
+                "runtime_state": runtime_state,
                 "remaining_minutes": session.get("session_remaining_minutes"),
                 "ready_queue": ready_queue,
                 "reason": payload.get("reason"),
@@ -6955,7 +6957,7 @@ class Store:
                 tasks=tasks,
                 analysis=analysis,
                 existing_plan=existing_plan,
-                payload={**payload, "scheduling_priors": scheduling_priors},
+                payload={**payload, "scheduling_priors": scheduling_priors, "runtime_state": runtime_state},
             )
             review_payload = {
                 "profile_rules": decision.get("scheduler"),
@@ -8441,7 +8443,7 @@ class Handler(BaseHTTPRequestHandler):
 
                     ready_sessions = store.list_execution_sessions(user_id, ["ready"])
                     ready_tasks = {str(item.get("task_id")): store.get_task(str(item.get("task_id")), user_id) or {} for item in ready_sessions}
-                    response["ready_queue"] = build_ready_queue(ready_sessions, ready_tasks, exclude_task_id=str(execution_session.get("task_id") or ""), plan_revision=execution_session.get("plan_revision"))
+                    response["ready_queue"] = build_ready_queue(ready_sessions, ready_tasks, exclude_task_id=str(execution_session.get("task_id") or ""), plan_revision=execution_session.get("plan_revision"), runtime_state=store.latest_runtime_state(user_id))
                 if command["interruption_action"] == "continue_later" and execution_session.get("preferred_resume_at"):
                     try:
                         response.update(store.propose_continue_later_diff(user_id, execution_session, pause_review or {}, request_id=f"{command.get('request_id')}:local-diff"))
@@ -8465,7 +8467,7 @@ class Handler(BaseHTTPRequestHandler):
 
                     ready_sessions = store.list_execution_sessions(user_id, ["ready"])
                     ready_tasks = {str(item.get("task_id")): store.get_task(str(item.get("task_id")), user_id) or {} for item in ready_sessions}
-                    response["ready_queue"] = build_ready_queue(ready_sessions, ready_tasks, exclude_task_id=str(execution_session.get("task_id") or ""), plan_revision=execution_session.get("plan_revision"))
+                    response["ready_queue"] = build_ready_queue(ready_sessions, ready_tasks, exclude_task_id=str(execution_session.get("task_id") or ""), plan_revision=execution_session.get("plan_revision"), runtime_state=store.latest_runtime_state(user_id))
                 if command["interruption_action"] == "continue_later" and execution_session.get("preferred_resume_at"):
                     response.update(store.propose_continue_later_diff(user_id, execution_session, pause_review or {}, request_id=f"{command.get('request_id') or new_id('pause')}:local-diff"))
                 self.send_json(response)

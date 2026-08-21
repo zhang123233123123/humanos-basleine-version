@@ -85,6 +85,30 @@ class DeterministicWorkloadBalanceTests(unittest.TestCase):
         self.assertTrue(later_days <= {0, 1, 2})
         self.assertEqual([], result["unscheduled_tasks"])
 
+    def test_runtime_state_only_annotates_todays_next_session(self) -> None:
+        result = build_deterministic_plan(
+            profile=self.profile(),
+            tasks=[{
+                "id": "demanding",
+                "title": "Demanding task",
+                "type": "flexible_task",
+                "duration": 90,
+                "priority": "high",
+                "status": "queued",
+                "due": "周三 18:00",
+            }],
+            analysis={"task_demands": [{"task_id": "demanding", "level": "high"}]},
+            payload={
+                "week_id": "2026-08-03",
+                "rebuild_from_scratch": True,
+                "runtime_state": {"focus": 2, "energy": 3, "stress": 6},
+            },
+        )
+        sessions = [item for item in result["plan_patch"] if item.get("kind") == "task_session"]
+        self.assertEqual("risky", sessions[0]["scheduling_policy"]["fit"])
+        self.assertTrue(all(item["scheduling_policy"]["fit"] == "not_assessed" for item in sessions[1:]))
+        self.assertEqual("human_capacity_soft_v1", result["scheduler"]["policy_version"])
+
 
 if __name__ == "__main__":
     unittest.main()
