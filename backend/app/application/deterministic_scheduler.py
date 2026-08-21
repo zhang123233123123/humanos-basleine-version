@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from humanos_graph import build_scheduling_context, day_index_from_due, parse_due_start_hour, profile_now
 from app.domain.timeline import WeeklySegment, WeeklyTimeAxis
-from app.domain.planning import assess_next_session_fit
+from app.domain.planning import assess_next_session_fit, hard_dependency_cycle_ids
 try:
     from app.application.scheduling_traits import weak_prior_score
 except ImportError:  # package import via ``backend.app`` in repository-root tests
@@ -58,7 +58,7 @@ def _remaining_minutes(task: dict[str, Any]) -> int:
 
 
 def _task_kind(task: dict[str, Any]) -> str:
-    return str(task.get("type") or task.get("task_type") or "flexible_task")
+    return str(task.get("task_type") or task.get("type") or "flexible_task")
 
 
 def _overlaps(start: int, end: int, occupied: list[tuple[int, int]]) -> bool:
@@ -109,7 +109,7 @@ def _dependency_order(tasks: list[dict[str, Any]], analysis: dict[str, Any], now
     task_map = {str(task.get("id")): task for task in tasks}
     predecessors: dict[str, set[str]] = {task_id: set() for task_id in task_map}
     for dependency in analysis.get("dependencies") or []:
-        if not isinstance(dependency, dict):
+        if not isinstance(dependency, dict) or dependency.get("hard_enforced") is not True:
             continue
         before = str(dependency.get("before_task_id") or "")
         after = str(dependency.get("after_task_id") or "")
@@ -183,15 +183,17 @@ def build_deterministic_plan(
     ]
     occupied_segments = [WeeklySegment(start, end) for start, end in occupied]
     initial_free_segments = WeeklyTimeAxis.subtract(available_segments, occupied_segments)
-    active_tasks = {
+    schedulable_tasks = {
         str(task.get("id")): task
         for task in tasks
         if task.get("id")
         and not task.get("removed_from_week")
-        and task.get("status") not in {"completed", "terminated", "blocked", "paused"}
+        and task.get("status") not in {"completed", "terminated", "blocked"}
         and _task_kind(task) != "fixed_event"
         and _remaining_minutes(task) > 0
     }
+    cycle_task_ids = hard_dependency_cycle_ids(list(schedulable_tasks.values()), analysis)
+    active_tasks = {task_id: task for task_id, task in schedulable_tasks.items() if task_id not in cycle_task_ids}
     blocks: list[dict[str, Any]] = []
     for index, item in enumerate(fixed_constraints):
         start = _axis(int(item["day_index"]), float(item["start"]))
@@ -219,7 +221,7 @@ def build_deterministic_plan(
             "plan_status": "proposed",
             "scheduler": "python_timeline_v2",
         })
-    allocated: dict[str, int] = {task_id: 0 for task_id in active_tasks}
+    allocated: dict[str, int] = {task_id: 0 for task_id in schedulable_tasks}
     task_end: dict[str, int] = {}
     daily_load_minutes: dict[int, int] = {}
 
@@ -250,14 +252,24 @@ def build_deterministic_plan(
 
     dependency_map: dict[str, set[str]] = {task_id: set() for task_id in active_tasks}
     for dependency in analysis.get("dependencies") or []:
-        if isinstance(dependency, dict):
+        if isinstance(dependency, dict) and dependency.get("hard_enforced") is True:
             before = str(dependency.get("before_task_id") or "")
             after = str(dependency.get("after_task_id") or "")
-            if before in active_tasks and after in active_tasks:
+            if before in schedulable_tasks and after in active_tasks:
                 dependency_map[after].add(before)
 
     current_axis = max(round((now - week_start).total_seconds() / 60 / GRID_MINUTES) * GRID_MINUTES, 0) if week_start <= now < week_start + timedelta(days=7) else 0
-    unscheduled: list[dict[str, Any]] = []
+    unscheduled: list[dict[str, Any]] = [
+        {
+            "task_id": task_id,
+            "remaining_minutes": _remaining_minutes(schedulable_tasks[task_id]),
+            "required_minutes": _remaining_minutes(schedulable_tasks[task_id]),
+            "available_minutes": 0,
+            "shortage_minutes": _remaining_minutes(schedulable_tasks[task_id]),
+            "reason": "hard_dependency_cycle",
+        }
+        for task_id in sorted(cycle_task_ids)
+    ]
     applied_trait_ids: set[str] = set()
     demand_map = {
         str(item.get("task_id")): str(item.get("level") or "medium")
@@ -266,6 +278,23 @@ def build_deterministic_plan(
     next_session_policy_applied = False
     for task in _dependency_order(list(active_tasks.values()), analysis, now):
         task_id = str(task["id"])
+        unsatisfied_dependencies = sorted(
+            dependency_id
+            for dependency_id in dependency_map.get(task_id, set())
+            if allocated.get(dependency_id, 0) < _remaining_minutes(schedulable_tasks[dependency_id])
+        )
+        if unsatisfied_dependencies:
+            remaining = _remaining_minutes(task) - allocated[task_id]
+            unscheduled.append({
+                "task_id": task_id,
+                "remaining_minutes": remaining,
+                "required_minutes": remaining,
+                "available_minutes": 0,
+                "shortage_minutes": remaining,
+                "reason": "hard_dependency_unsatisfied",
+                "blocked_by_task_ids": unsatisfied_dependencies,
+            })
+            continue
         remaining = _remaining_minutes(task) - allocated[task_id]
         deadline = _deadline_axis(task, now)
         dependency_ready = max((task_end.get(item, 0) + rest_minutes for item in dependency_map.get(task_id, set())), default=0)
@@ -416,6 +445,6 @@ def build_deterministic_plan(
             "available_trait_ids": sorted(str(item.get("trait_id")) for item in scheduling_priors.get("hints") or [] if item.get("trait_id")),
             "today_state_overrode_traits": bool(scheduling_priors.get("today_override")),
         },
-        "task_ids": sorted(active_tasks),
+        "task_ids": sorted(schedulable_tasks),
         "week_id": week_id,
     }

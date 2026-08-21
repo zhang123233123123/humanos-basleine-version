@@ -26,7 +26,7 @@ import { useRouter } from 'next/navigation'
 import type { ExecutionResourceEnvelope, ExecutionSession } from '@/lib/contracts/execution-contracts'
 import type { PlanDecision, PlanResourceEnvelope } from '@/lib/contracts/planning-contracts'
 import { requestId } from '@/lib/client/request-id'
-import type { HumanOSTask } from '@/lib/contracts/task-contracts'
+import type { HumanOSTask, TaskFieldProvenanceRecord } from '@/lib/contracts/task-contracts'
 
 export interface CalendarEvent {
   id: string
@@ -167,6 +167,7 @@ function TaskInspectorWrapper() {
         resource_modality: task.resourceModality || [],
         attention_mode: task.attentionMode || 'continuous',
         parallelizable: Boolean(task.parallelizable),
+        field_provenance: activeEvent?.fieldProvenance,
       }),
     })
     if (previewId) {
@@ -208,6 +209,7 @@ function TaskInspectorWrapper() {
     duration?: number
     deadlineAt?: string
     due?: string
+    fieldProvenance?: Record<string, TaskFieldProvenanceRecord>
   }) => {
     const previewId = task.uniqueId
     if (previewId) {
@@ -232,6 +234,7 @@ function TaskInspectorWrapper() {
         resource_modality: task.resourceModality || [],
         attention_mode: task.attentionMode || 'continuous',
         parallelizable: Boolean(task.parallelizable),
+        field_provenance: task.fieldProvenance,
       }),
     })
     toast(t('event.eventUpdated'))
@@ -288,6 +291,7 @@ function TaskInspectorWrapper() {
               resource_modality: task.resourceModality || [],
               attention_mode: task.attentionMode || 'continuous',
               parallelizable: Boolean(task.parallelizable),
+              field_provenance: task.fieldProvenance,
               context_window: task.previewAdjusted
                 ? {
                     last_schedule_change: {
@@ -441,6 +445,7 @@ function TaskInspectorWrapper() {
           attentionMode: activeEvent.attentionMode,
           parallelizable: activeEvent.parallelizable,
           fieldSources: activeEvent.fieldSources,
+          fieldProvenance: activeEvent.fieldProvenance,
           isPreview: activeEvent.isPreview,
           start: activeEvent.start,
           end: activeEvent.end,
@@ -563,6 +568,7 @@ function TaskInspectorWrapper() {
               progress: String((task.contextWindow || task.context_window || {}).progress || ''), nextStep: String((task.contextWindow || task.context_window || {}).nextStep || (task.contextWindow || task.context_window || {}).next_step || ''), openQuestions: String((task.contextWindow || task.context_window || {}).openQuestions || (task.contextWindow || task.context_window || {}).open_questions || ''),
               expectedDifficulty: task.expected_difficulty ?? null, dependency: String(task.dependency || (task.contextWindow || task.context_window || {}).dependency || ''), resourceModality: task.resource_modality || [], attentionMode: task.attention_mode, parallelizable: task.parallelizable,
               fieldSources: { title: task.title ? 'user_or_persisted' : 'default_unconfirmed', priority: task.priority ? 'user_or_persisted' : 'default_unconfirmed', status: task.status ? 'user_or_persisted' : 'default_unconfirmed', context: task.context ? 'user_or_persisted' : 'default_unconfirmed', resourceModality: task.resource_modality?.length ? 'user_or_persisted' : 'default_unconfirmed', attentionMode: task.attention_mode ? 'user_or_persisted' : 'default_unconfirmed', parallelizable: typeof task.parallelizable === 'boolean' ? 'user_or_persisted' : 'default_unconfirmed' },
+              fieldProvenance: task.field_provenance || {},
             })}>
               <div className="truncate text-sm font-medium">{task.title}</div>
               <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -854,6 +860,7 @@ function AppContent({
             parallelizable: Boolean(task.parallelizable),
             dependency: task.dependency || '',
             createRequestId: task.create_request_id || `task-import-${task.id || `${Date.now()}-${index}`}`,
+            fieldProvenance: task.field_provenance || {},
           }
         })
         // Background parsing must not dismiss a task the user is inspecting.
@@ -966,6 +973,7 @@ function AppContent({
                       attentionMode: arg.event.extendedProps.attentionMode,
                       parallelizable: arg.event.extendedProps.parallelizable,
                       fieldSources: arg.event.extendedProps.fieldSources,
+                      fieldProvenance: arg.event.extendedProps.fieldProvenance,
                       executionSessionId: arg.event.extendedProps.executionSessionId,
                       planRevision: arg.event.extendedProps.planRevision,
                     })}

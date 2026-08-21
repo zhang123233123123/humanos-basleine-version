@@ -743,6 +743,7 @@ class Store:
                   removed_from_week INTEGER NOT NULL DEFAULT 0,
                   archived_at INTEGER,
                   create_request_id TEXT,
+                  field_provenance_json TEXT NOT NULL DEFAULT '{}',
                   created_at INTEGER NOT NULL,
                   updated_at INTEGER NOT NULL
                 );
@@ -1145,6 +1146,7 @@ class Store:
                 "removed_from_week": "INTEGER NOT NULL DEFAULT 0",
                 "archived_at": "INTEGER",
                 "create_request_id": "TEXT",
+                "field_provenance_json": "TEXT NOT NULL DEFAULT '{}'",
             }
             for name, definition in task_migrations.items():
                 if name not in columns:
@@ -1933,6 +1935,31 @@ class Store:
         )
         context_window = aggregate.context_window
         timestamp = now_ms()
+        from app.domain.task import TASK_PROVENANCE_FIELDS, normalize_field_provenance, update_field_provenance
+
+        provenance = normalize_field_provenance(payload.get("field_provenance"), updated_at=timestamp)
+        supplied_fields = {
+            field for field in TASK_PROVENANCE_FIELDS
+            if field in payload
+            or (field == "deadline" and bool({"due", "deadline", "deadline_at"} & payload.keys()))
+            or (field == "duration" and bool({"duration", "estimated_duration"} & payload.keys()))
+        }
+        context_aliases = {
+            "progress": ("progress",), "next_step": ("next_step", "nextStep"),
+            "open_questions": ("open_questions", "openQuestions"), "dependency": ("dependency",),
+        }
+        context_fields = {field for field, names in context_aliases.items() if any(name in context_window for name in names)}
+        provenance = update_field_provenance(
+            provenance, fields=(supplied_fields | context_fields) - provenance.keys(),
+            source=str(payload.get("_provenance_source") or "user_input"),
+            source_id=payload.get("_provenance_source_id") or create_request_id,
+            confidence=payload.get("_provenance_confidence"), updated_at=timestamp,
+        )
+        provenance = update_field_provenance(
+            provenance,
+            fields={"title", "task_type", "duration", "priority", "status", "resource_modality", "attention_mode", "parallelizable", "expected_difficulty"} - provenance.keys(),
+            source="system_derived", source_id="task_creation_defaults", updated_at=timestamp,
+        )
         with self.connect() as conn:
             conn.execute(
                 """
@@ -1941,10 +1968,10 @@ class Store:
                   context, context_window_json, cognitive_load, ambiguity, switch_cost, reentry_cost,
                   slot_json, checkpoints_json, demand_json, execution_json,
                   resource_modality_json, attention_mode, parallelizable, expected_difficulty,
-                  week_id, removed_from_week, archived_at, create_request_id,
+                  week_id, removed_from_week, archived_at, create_request_id, field_provenance_json,
                   created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     task_id,
@@ -1973,6 +2000,7 @@ class Store:
                     0,
                     None,
                     create_request_id,
+                    as_json(provenance),
                     timestamp,
                     timestamp,
                 ),
@@ -2019,7 +2047,8 @@ class Store:
         create_tasks: bool,
     ) -> list[dict]:
         if create_tasks:
-            return [self.create_task(user_id, payload) for payload in payloads]
+            source = "local_rules" if parser == "local_fallback" else "ai_extracted"
+            return [self.create_task(user_id, {**payload, "_provenance_source": source, "_provenance_source_id": parser, "_provenance_confidence": payload.get("confidence")}) for payload in payloads]
         preview_batch_id = now_ms()
         return build_task_previews(
             payloads,
@@ -2976,6 +3005,8 @@ class Store:
                 {
                     "due": f"{resolved_day} {format_clock_hour(start)}",
                     "duration": duration,
+                    "_provenance_source": "user_input",
+                    "_provenance_source_id": "chat_time_followup",
                     "contextWindow": {
                         **(task.get("contextWindow") or {}),
                         "last_schedule_change": {
@@ -3071,6 +3102,21 @@ class Store:
             {"title": row["title"], "due": row["due"], "context": row["context"]}
         )
         deadline = context_window.get("deadline") or row["due"]
+        from app.domain.task import TASK_PROVENANCE_FIELDS, normalize_field_provenance, update_field_provenance
+
+        provenance = normalize_field_provenance(from_json(row["field_provenance_json"], {}), updated_at=int(row["updated_at"] or row["created_at"] or 0))
+        legacy_fields = {
+            field for field in TASK_PROVENANCE_FIELDS
+            if field not in provenance and (
+                field in {"title", "task_type", "duration", "priority", "status", "attention_mode", "parallelizable"}
+                or (field == "deadline" and deadline)
+                or (field == "context" and row["context"])
+                or (field == "resource_modality" and from_json(row["resource_modality_json"], []))
+                or (field == "expected_difficulty" and row["expected_difficulty"] is not None)
+                or (field in {"progress", "next_step", "open_questions", "dependency"} and (context_window.get(field) or context_window.get({"next_step": "nextStep", "open_questions": "openQuestions"}.get(field, field))))
+            )
+        }
+        provenance = update_field_provenance(provenance, fields=legacy_fields, source="legacy_persisted", updated_at=int(row["updated_at"] or row["created_at"] or 0))
         return {
             "id": row["id"],
             "user_id": row["user_id"],
@@ -3089,6 +3135,7 @@ class Store:
             "status": row["status"],
             "context": row["context"],
             "contextWindow": context_window,
+            "field_provenance": provenance,
             "cognitive_load": row["cognitive_load"],
             "task_demand": from_json(row["demand_json"], {}),
             "execution": from_json(row["execution_json"], {}),
@@ -3112,7 +3159,10 @@ class Store:
         current = self.get_task(task_id, user_id)
         if not current:
             raise KeyError(task_id)
-        from app.domain.task import require_valid_attention_mode, require_valid_resource_tags
+        provenance_source = str(patch.pop("_provenance_source", "system_derived"))
+        provenance_source_id = patch.pop("_provenance_source_id", None)
+        provenance_confidence = patch.pop("_provenance_confidence", None)
+        from app.domain.task import TASK_PROVENANCE_FIELDS, require_valid_attention_mode, require_valid_resource_tags, update_field_provenance
 
         if "resource_modality" in patch:
             require_valid_resource_tags(patch.get("resource_modality"))
@@ -3190,7 +3240,26 @@ class Store:
             next_status = status_after_schedule_change(current.get("status") or "queued", patch.get("status"))
             if next_status is not None:
                 updates["status"] = next_status
-        updates["updated_at"] = now_ms()
+        updated_at = now_ms()
+        provenance_fields = {field for field in TASK_PROVENANCE_FIELDS if field in patch}
+        if {"due", "deadline_at"} & patch.keys():
+            provenance_fields.add("deadline")
+        if {"contextWindow", "context_window"} & patch.keys():
+            window = patch.get("contextWindow") or patch.get("context_window") or {}
+            if isinstance(window, dict):
+                aliases = {
+                    "progress": ("progress",), "next_step": ("next_step", "nextStep"),
+                    "open_questions": ("open_questions", "openQuestions"), "dependency": ("dependency",),
+                }
+                for field, names in aliases.items():
+                    if any(name in window for name in names):
+                        provenance_fields.add(field)
+        updates["field_provenance_json"] = as_json(update_field_provenance(
+            current.get("field_provenance"), fields=provenance_fields,
+            source=provenance_source, source_id=provenance_source_id,
+            confidence=provenance_confidence, updated_at=updated_at,
+        ))
+        updates["updated_at"] = updated_at
         assignments = ", ".join(f"{key}=?" for key in updates)
         values = list(updates.values()) + [task_id, user_id]
         with self.connect() as conn:
@@ -3794,7 +3863,7 @@ class Store:
             if isinstance(item, dict) and item.get("task_id")
         }
         for task in self.list_tasks(user_id):
-            if task.get("removed_from_week") or task.get("status") in {"completed", "terminated", "blocked", "paused"} or schedule_task_kind(task) == "fixed_event":
+            if task.get("removed_from_week") or task.get("status") in {"completed", "terminated", "blocked"} or schedule_task_kind(task) == "fixed_event":
                 continue
             task_id = str(task.get("id") or "")
             remaining = int((task.get("execution") or {}).get("remaining_duration_minutes", task.get("duration") or 0))
@@ -3891,7 +3960,7 @@ class Store:
                 context_window = dict(task.get("contextWindow") or {})
                 context_window.update({"startAt": start_at, "endAt": end_at})
                 allowed["contextWindow"] = {**context_window, **dict(allowed.get("contextWindow") or {})}
-            return {"task": self.patch_task(task_id, allowed, user_id), "plan": active, "revision_created": False}
+            return {"task": self.patch_task(task_id, {**allowed, "_provenance_source": "user_input", "_provenance_source_id": "task_inspector"}, user_id), "plan": active, "revision_created": False}
         start = datetime.fromisoformat(start_at)
         end = datetime.fromisoformat(end_at)
         if end <= start:
@@ -3932,7 +4001,7 @@ class Store:
             },
         })
         allowed = {key: value for key, value in task_patch.items() if key not in {"slot", "start", "end", "start_at", "end_at", "deadline_at"}}
-        updated_task = self.patch_task(task_id, allowed, user_id) if allowed else self.get_task(task_id, user_id)
+        updated_task = self.patch_task(task_id, {**allowed, "_provenance_source": "user_input", "_provenance_source_id": "task_inspector"}, user_id) if allowed else self.get_task(task_id, user_id)
         return {"task": updated_task, "plan": result.get("plan"), "validation": result.get("validation"), "revision_created": True}
 
     def confirm_plan(self, user_id: str, payload: dict) -> dict:
@@ -4472,7 +4541,12 @@ class Store:
         runtime_state = self.save_runtime_state(user_id, {**payload.get("runtime_state", {}), "daily_checkin": False})
         ready_sessions = [item for item in sessions if item.get("status") == "ready"]
         ready_tasks = {str(item.get("task_id") or ""): self.get_task(str(item.get("task_id") or ""), user_id) or {} for item in ready_sessions}
-        ready_queue = build_ready_queue(ready_sessions, ready_tasks, exclude_task_id=task_id, plan_revision=session.get("plan_revision"), runtime_state=runtime_state)
+        profile = self.ensure_profile(user_id)
+        ready_queue = build_ready_queue(
+            ready_sessions, ready_tasks, exclude_task_id=task_id,
+            plan_revision=session.get("plan_revision"), runtime_state=runtime_state,
+            reference_now=self.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai").isoformat(),
+        )
         impact = self.analyze_execution_impact(user_id, {
             "execution_session_id": session.get("execution_session_id"),
             "action": "help_decide",
@@ -4580,6 +4654,10 @@ class Store:
             exclude_task_id=task_id,
             plan_revision=session.get("plan_revision"),
             runtime_state=runtime_state,
+            reference_now=self.user_clock_now(
+                user_id,
+                self.ensure_profile(user_id).get("timezone") or "Asia/Shanghai",
+            ).isoformat(),
         )
         recommendation = validate_recommendation(
             payload.get("recommendation"),
@@ -4771,6 +4849,12 @@ class Store:
         next_status = "blocked" if dump["stop_reason"] == "blocked" else "paused"
         context_window = dict(task.get("contextWindow") or {})
         context_window.update({"progress": dump["progress"], "nextStep": dump["next_action"], "openQuestions": "; ".join(dump["open_questions"])})
+        from app.domain.task import update_field_provenance
+
+        context_provenance = update_field_provenance(
+            task.get("field_provenance"), fields={"progress", "next_step", "open_questions", "status"},
+            source="user_input", source_id=dump_id, updated_at=dump["created_at"],
+        )
         with self.connect() as conn:
             conn.execute(
                 """
@@ -4800,8 +4884,8 @@ class Store:
                 ),
             )
             conn.execute(
-                "UPDATE tasks SET status=?,checkpoints_json=?,execution_json=?,context_window_json=?,updated_at=? WHERE id=? AND user_id=?",
-                (next_status, as_json(checkpoints), as_json(execution), as_json(context_window), dump["created_at"], task_id, user_id),
+                "UPDATE tasks SET status=?,checkpoints_json=?,execution_json=?,context_window_json=?,field_provenance_json=?,updated_at=? WHERE id=? AND user_id=?",
+                (next_status, as_json(checkpoints), as_json(execution), as_json(context_window), as_json(context_provenance), dump["created_at"], task_id, user_id),
             )
             self._insert_state_transition(conn, user_id=user_id, task_id=task_id, before_status=str(task.get("status") or "unknown"), action_type="capture_context", after_status=next_status, action_detail={"context_dump_id": dump_id, "stop_reason": dump["stop_reason"]}, outcome={"persisted": True, "remaining_minutes": execution["remaining_duration_minutes"]}, created_at=dump["created_at"])
             self._enqueue_personalization(
@@ -5586,9 +5670,18 @@ class Store:
                     conn.execute("UPDATE interruption_episodes SET status='settled',outcome_json=?,settled_at=?,updated_at=? WHERE id=?", (as_json(recovery_outcome), settled_at, feedback["created_at"], recovery_episode["id"]))
                     recovery_episode_result = self.interruption_episode_row(conn.execute("SELECT * FROM interruption_episodes WHERE id=?", (recovery_episode["id"],)).fetchone())
                     self._enqueue_personalization(conn, user_id=user_id, kind="interruption_recovery_outcome", source_id=f"{recovery_episode['id']}:feedback", payload={"episode": recovery_episode_result}, timestamp=feedback["created_at"])
+            from app.domain.task import update_field_provenance
+
+            feedback_fields = {"status"}
+            if (feedback_decision.task_demand or {}).get("expected_difficulty") is not None:
+                feedback_fields.add("expected_difficulty")
+            feedback_provenance = update_field_provenance(
+                task.get("field_provenance"), fields=feedback_fields,
+                source="execution_feedback", source_id=feedback["id"], updated_at=feedback["created_at"],
+            )
             conn.execute(
-                "UPDATE tasks SET execution_json=?,demand_json=?,status=?,updated_at=? WHERE id=? AND user_id=?",
-                (as_json(feedback_decision.execution), as_json(feedback_decision.task_demand), feedback_decision.task_status, feedback["created_at"], task_id, user_id),
+                "UPDATE tasks SET execution_json=?,demand_json=?,status=?,expected_difficulty=COALESCE(?,expected_difficulty),field_provenance_json=?,updated_at=? WHERE id=? AND user_id=?",
+                (as_json(feedback_decision.execution), as_json(feedback_decision.task_demand), feedback_decision.task_status, (feedback_decision.task_demand or {}).get("expected_difficulty"), as_json(feedback_provenance), feedback["created_at"], task_id, user_id),
             )
             schedule_action = str(payload.get("schedule_action") or "keep_time_free")
             requires_plan_adjustment = feedback_decision.execution.get("remaining_duration_minutes", 0) > 0 or schedule_action == "review_today"
@@ -6757,12 +6850,21 @@ class Store:
             else task_map
         )
         analysis = payload.get("ai_task_analysis") or {}
+        violations: list[dict] = []
+        from app.domain.planning import hard_dependency_cycle_ids
+
+        dependency_cycle_ids = hard_dependency_cycle_ids(list(workload_task_map.values()), analysis)
+        if dependency_cycle_ids:
+            violations.append({
+                "type": "hard_dependency_cycle",
+                "task_ids": sorted(dependency_cycle_ids),
+                "detail": "Hard task dependencies contain a cycle and cannot be scheduled.",
+            })
         demand_map = {str(item.get("task_id")): item for item in (analysis.get("task_demands") or []) if isinstance(item, dict)}
         profile_map = {str(item.get("task_id")): item for item in (analysis.get("task_resource_profiles") or []) if isinstance(item, dict)}
         context = build_scheduling_context(profile)
         windows = context.get("movable_routine_windows") or context.get("windows", [])
         now = clock_now(safe_timezone(str(profile.get("timezone") or "Asia/Shanghai")))
-        violations: list[dict] = []
         blocks: list[dict] = []
         planned_work: dict[str, int] = {}
         for raw in payload.get("plan_patch") or []:
@@ -6802,7 +6904,7 @@ class Store:
         active_schedulable = [
             task for task in workload_task_map.values()
             if not task.get("removed_from_week")
-            and task.get("status") not in {"completed", "terminated", "blocked", "paused"}
+            and task.get("status") not in {"completed", "terminated", "blocked"}
             and schedule_task_kind(task) != "fixed_event"
             and int((task.get("execution") or {}).get("remaining_duration_minutes", task.get("duration") or 0)) > 0
         ]
@@ -6851,7 +6953,7 @@ class Store:
                     violations.append({"type": "dependency_order", "before_task_id": before_id, "after_task_id": after_id})
         explicit_unallocated = {str(item.get("task_id")): int(item.get("remaining_minutes") or 0) for item in (payload.get("unscheduled_tasks") or []) if isinstance(item, dict)}
         for task_id, task in workload_task_map.items():
-            if task.get("removed_from_week") or task.get("status") in {"completed", "terminated", "blocked", "paused"} or schedule_task_kind(task) == "fixed_event":
+            if task.get("removed_from_week") or task.get("status") in {"completed", "terminated", "blocked"} or schedule_task_kind(task) == "fixed_event":
                 continue
             remaining = int((task.get("execution") or {}).get("remaining_duration_minutes", task.get("duration") or 0))
             allocated = planned_work.get(task_id, 0)
@@ -7353,7 +7455,7 @@ class Store:
                 capacity_fit_counts[assessment.level] += 1
             active_flexible_tasks = [
                 task for task in task_map.values()
-                if task.get("status") not in {"completed", "terminated", "blocked", "paused"}
+                if task.get("status") not in {"completed", "terminated", "blocked"}
                 and schedule_task_kind(task) != "fixed_event"
             ]
             from app.application.workload_balance import eligible_workload_days, workload_balance_metrics
@@ -7501,11 +7603,11 @@ class Store:
                                 "dependency": (task.get("contextWindow") or {}).get("dependency"),
                             }
                             for task in tasks
-                            if task.get("status") not in {"completed", "terminated", "blocked", "paused"} and schedule_task_kind(task) != "fixed_event"
+                            if task.get("status") not in {"completed", "terminated", "blocked"} and schedule_task_kind(task) != "fixed_event"
                         ],
                         "blocked_tasks": [
                             {"task_id": task.get("id"), "title": task.get("title"), "remaining_minutes": (task.get("execution") or {}).get("remaining_duration_minutes", task.get("duration")), "status": task.get("status")}
-                            for task in tasks if task.get("status") in {"blocked", "paused"}
+                            for task in tasks if task.get("status") == "blocked"
                         ],
                         "dependencies": state.get("ai_task_analysis", {}).get("dependencies", []),
                     }),
@@ -8237,7 +8339,7 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 user_id = payload.get("user_id") or query.get("user_id", ["demo"])[0]
                 before = store.get_task(task_id, user_id) or {}
-                task = store.patch_task(task_id, payload, user_id)
+                task = store.patch_task(task_id, {**payload, "_provenance_source": "user_input", "_provenance_source_id": "task_api"}, user_id)
                 changed = bool(store._task_change_scope(before, task)) or before.get("contextWindow") != task.get("contextWindow") or before.get("status") != task.get("status")
                 self.send_json({
                     "data": {"task": task, "replan": store.request_replan(user_id, scope="local", trigger="task_schedule_changed", affected_task_ids=[task_id], week_id=task.get("week_id")) if changed else {"required": False}},
@@ -8365,7 +8467,8 @@ class Handler(BaseHTTPRequestHandler):
 
                     ready_sessions = store.list_execution_sessions(user_id, ["ready"])
                     ready_tasks = {str(item.get("task_id")): store.get_task(str(item.get("task_id")), user_id) or {} for item in ready_sessions}
-                    response["ready_queue"] = build_ready_queue(ready_sessions, ready_tasks, exclude_task_id=str(execution_session.get("task_id") or ""), plan_revision=execution_session.get("plan_revision"), runtime_state=store.latest_runtime_state(user_id))
+                    profile = store.ensure_profile(user_id)
+                    response["ready_queue"] = build_ready_queue(ready_sessions, ready_tasks, exclude_task_id=str(execution_session.get("task_id") or ""), plan_revision=execution_session.get("plan_revision"), runtime_state=store.latest_runtime_state(user_id), reference_now=store.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai").isoformat())
                 if command["interruption_action"] == "continue_later" and execution_session.get("preferred_resume_at"):
                     try:
                         response.update(store.propose_continue_later_diff(user_id, execution_session, pause_review or {}, request_id=f"{command.get('request_id')}:local-diff"))
@@ -8389,7 +8492,8 @@ class Handler(BaseHTTPRequestHandler):
 
                     ready_sessions = store.list_execution_sessions(user_id, ["ready"])
                     ready_tasks = {str(item.get("task_id")): store.get_task(str(item.get("task_id")), user_id) or {} for item in ready_sessions}
-                    response["ready_queue"] = build_ready_queue(ready_sessions, ready_tasks, exclude_task_id=str(execution_session.get("task_id") or ""), plan_revision=execution_session.get("plan_revision"), runtime_state=store.latest_runtime_state(user_id))
+                    profile = store.ensure_profile(user_id)
+                    response["ready_queue"] = build_ready_queue(ready_sessions, ready_tasks, exclude_task_id=str(execution_session.get("task_id") or ""), plan_revision=execution_session.get("plan_revision"), runtime_state=store.latest_runtime_state(user_id), reference_now=store.user_clock_now(user_id, profile.get("timezone") or "Asia/Shanghai").isoformat())
                 if command["interruption_action"] == "continue_later" and execution_session.get("preferred_resume_at"):
                     response.update(store.propose_continue_later_diff(user_id, execution_session, pause_review or {}, request_id=f"{command.get('request_id') or new_id('pause')}:local-diff"))
                 self.send_json(response)

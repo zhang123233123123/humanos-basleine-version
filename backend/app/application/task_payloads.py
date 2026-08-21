@@ -70,6 +70,15 @@ def build_task_previews(payloads: list[dict], *, parser_name: str, preview_id: C
             missing.append("start_at" if task_type == "fixed_event" else "deadline_at")
         if payload.get("duration") is None and payload.get("estimated_duration") is None:
             missing.append("duration_minutes")
+        provenance_source = "local_rules" if parser_name == "local_fallback" else "ai_extracted"
+        provenance_fields = {
+            "title": payload.get("title"), "task_type": task_type, "deadline": due,
+            "duration": payload.get("duration") or payload.get("estimated_duration"),
+            "priority": payload.get("priority"), "context": payload.get("context"),
+            "resource_modality": payload.get("resource_modality"),
+            "attention_mode": payload.get("attention_mode"),
+            "parallelizable": payload.get("parallelizable"),
+        }
         previews.append({
             **payload,
             "id": preview_id(index),
@@ -78,5 +87,9 @@ def build_task_previews(payloads: list[dict], *, parser_name: str, preview_id: C
             "missing_fields": list(dict.fromkeys(missing)),
             "source_spans": payload.get("source_spans") or [],
             "confidence": float(payload.get("confidence") or 0.0),
+            "field_provenance": {
+                field: {"source": provenance_source, "source_id": parser_name, "confidence": float(payload.get("confidence") or 0.0)}
+                for field, value in provenance_fields.items() if value is not None and value != ""
+            },
         })
     return previews

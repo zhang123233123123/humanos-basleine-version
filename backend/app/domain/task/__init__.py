@@ -18,6 +18,7 @@ from .resource_profile import (
     require_valid_attention_mode,
     require_valid_resource_tags,
 )
+from .provenance import TASK_PROVENANCE_FIELDS, normalize_field_provenance, update_field_provenance
 
 __all__ = [
     "ParsedTask",
@@ -51,4 +52,7 @@ __all__ = [
     "parallel_compatibility",
     "require_valid_attention_mode",
     "require_valid_resource_tags",
+    "TASK_PROVENANCE_FIELDS",
+    "normalize_field_provenance",
+    "update_field_provenance",
 ]

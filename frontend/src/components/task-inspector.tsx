@@ -8,7 +8,7 @@ import { ArrowLeft, Check, Play, Save, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { TaskResourceFields, type TaskAttentionMode, type TaskResourceTag } from '@/components/task-resource-fields'
 import Link from 'next/link'
-import type { TaskValueSource } from '@/lib/contracts/task-contracts'
+import type { TaskFieldProvenanceRecord, TaskValueSource } from '@/lib/contracts/task-contracts'
 
 interface TaskDetail {
   id: string
@@ -35,6 +35,7 @@ interface TaskDetail {
   attentionMode?: TaskAttentionMode
   parallelizable?: boolean
   fieldSources?: Record<string, TaskValueSource>
+  fieldProvenance?: Record<string, TaskFieldProvenanceRecord>
 }
 
 interface TaskInspectorProps {
@@ -184,20 +185,19 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
   const textareaClass = 'w-full text-xs px-2 py-1.5 rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary resize-none'
   const labelClass = 'text-xs font-semibold mb-1 block'
   const hintClass = 'text-[10px] text-muted-foreground mb-1.5 block'
-  const sourceLabel = (field: string) => {
-    const source = task.fieldSources?.[field] || (task.isPreview ? 'system_derived' : 'user_or_persisted')
-    const labels: Record<TaskValueSource, string> = locale === 'zh'
-      ? { user_or_persisted: '已保存任务', execution_session: '执行 Session', system_derived: '系统推导', default_unconfirmed: '默认值·待确认' }
-      : { user_or_persisted: 'Saved task', execution_session: 'Execution session', system_derived: 'System derived', default_unconfirmed: 'Default · unconfirmed' }
-    return <span className="ml-1 font-normal text-[9px] text-muted-foreground">{labels[source]}</span>
-  }
+  const provenanceKeys: Record<string, string> = { nextStep: 'next_step', openQuestions: 'open_questions', resourceModality: 'resource_modality', attentionMode: 'attention_mode' }
+  const sourceLabels: Record<TaskValueSource, string> = locale === 'zh'
+    ? { user_input: '用户填写', ai_extracted: 'AI 解析', local_rules: '本地规则', execution_feedback: '执行反馈', system_derived: '系统推导', legacy_persisted: '历史已保存', user_or_persisted: '已保存任务', execution_session: '执行 Session', default_unconfirmed: '默认值·待确认' }
+    : { user_input: 'User input', ai_extracted: 'AI extracted', local_rules: 'Local rules', execution_feedback: 'Execution feedback', system_derived: 'System derived', legacy_persisted: 'Legacy saved', user_or_persisted: 'Saved task', execution_session: 'Execution session', default_unconfirmed: 'Default · unconfirmed' }
   const sourceText = (field: string) => {
-    const source = task.fieldSources?.[field] || (task.isPreview ? 'system_derived' : 'user_or_persisted')
-    const labels: Record<TaskValueSource, string> = locale === 'zh'
-      ? { user_or_persisted: '已保存任务', execution_session: '执行 Session', system_derived: '系统推导', default_unconfirmed: '默认值·待确认' }
-      : { user_or_persisted: 'Saved task', execution_session: 'Execution session', system_derived: 'System derived', default_unconfirmed: 'Default · unconfirmed' }
-    return labels[source]
+    // Runtime scheduling/session facts override persisted task provenance.
+    const runtimeSource = task.fieldSources?.[field]
+    const source = runtimeSource === 'execution_session'
+      ? runtimeSource
+      : task.fieldProvenance?.[provenanceKeys[field] || field]?.source || runtimeSource || (task.isPreview ? 'system_derived' : 'legacy_persisted')
+    return sourceLabels[source]
   }
+  const sourceLabel = (field: string) => <span className="ml-1 font-normal text-[9px] text-muted-foreground">{sourceText(field)}</span>
 
   return (
     <>

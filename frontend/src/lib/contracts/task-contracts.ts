@@ -19,7 +19,14 @@ export type CalendarStatus =
   | 'terminated'
   | string
 
-export type TaskValueSource = 'user_or_persisted' | 'execution_session' | 'system_derived' | 'default_unconfirmed'
+export type TaskValueSource = 'user_input' | 'ai_extracted' | 'local_rules' | 'execution_feedback' | 'system_derived' | 'legacy_persisted' | 'user_or_persisted' | 'execution_session' | 'default_unconfirmed'
+
+export interface TaskFieldProvenanceRecord {
+  source: TaskValueSource
+  source_id?: string
+  confidence?: number
+  updated_at?: number
+}
 
 export interface HumanOSTaskExecutionSnapshot {
   original_estimate_minutes?: number | null
@@ -70,6 +77,7 @@ export interface HumanOSTask {
   create_request_id?: string | null
   created_at?: number | string | null
   updated_at?: number | string | null
+  field_provenance?: Record<string, TaskFieldProvenanceRecord>
   [key: string]: unknown
 }
 
@@ -104,6 +112,7 @@ export interface HumanOSMapEventInput {
     attentionMode?: 'continuous' | 'intermittent' | 'passive'
     parallelizable?: boolean
     fieldSources?: Record<string, TaskValueSource>
+    fieldProvenance?: Record<string, TaskFieldProvenanceRecord>
   }
 }
 

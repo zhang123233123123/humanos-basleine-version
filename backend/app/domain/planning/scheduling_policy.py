@@ -9,6 +9,7 @@ by the timeline validator.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -76,29 +77,55 @@ def assess_next_session_fit(task_demand: object, runtime_state: dict[str, Any] |
     return SchedulingPolicyDecision(fit=fit, confidence="medium", evidence=evidence)
 
 
-def rank_ready_sessions(candidates: list[dict[str, Any]], runtime_state: dict[str, Any] | None) -> list[dict[str, Any]]:
+def _instant(value: object) -> float:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).timestamp()
+    except (TypeError, ValueError):
+        return float("inf")
+
+
+def rank_ready_sessions(
+    candidates: list[dict[str, Any]],
+    runtime_state: dict[str, Any] | None,
+    *,
+    reference_now: object = None,
+) -> list[dict[str, Any]]:
     """Rank already-ready Sessions with an explicit lexicographic policy.
 
-    Planned order and task priority dominate capacity fit.  Capacity therefore
-    acts only as a tiebreak and cannot make a later or lower-priority Session
-    jump ahead merely because it appears easier now.
+    Future Sessions retain confirmed planned order. Overdue Sessions receive a
+    bounded aging boost before planned time is considered. Capacity remains a
+    tiebreak and cannot reorder work merely because it appears easier now.
     """
+    now_instant = _instant(reference_now) if reference_now else datetime.now(timezone.utc).timestamp()
     ranked: list[dict[str, Any]] = []
     for raw in candidates:
         item = dict(raw)
         decision = assess_next_session_fit(item.get("task_demand"), runtime_state)
         item["scheduling_policy"] = decision.to_dict()
-        planned_start = str(item.get("planned_start_at") or "9999")
+        planned_start = str(item.get("planned_start_at") or "")
+        planned_instant = _instant(planned_start)
         priority = str(item.get("priority") or "medium").strip().lower()
         reentry_cost = str(item.get("reentry_cost") or item.get("switch_cost") or "medium").strip().lower()
+        overdue_minutes = max(int((now_instant - planned_instant) // 60), 0) if planned_instant != float("inf") else 0
+        aging_steps = min(overdue_minutes // (24 * 60), 2)
+        effective_priority = max(PRIORITY_RANK.get(priority, 1) - aging_steps, 0)
+        future_bucket = 1 if planned_instant > now_instant else 0
         item["scheduling_policy"]["rank_evidence"] = [
             f"Planned start: {planned_start}.",
             f"Task priority: {priority}.",
+            f"Overdue aging: {overdue_minutes} minutes ({aging_steps} bounded priority steps).",
             f"Capacity fit: {decision.fit} ({decision.confidence} confidence).",
             f"Re-entry cost: {reentry_cost}.",
         ]
+        item["scheduling_policy"]["aging_minutes"] = overdue_minutes
+        item["scheduling_policy"]["aging_steps"] = aging_steps
         item["_policy_rank"] = (
-            planned_start,
+            future_bucket,
+            effective_priority if not future_bucket else 0,
+            planned_instant,
             PRIORITY_RANK.get(priority, 1),
             FIT_RANK.get(decision.fit, 3),
             COST_RANK.get(reentry_cost, 1),
@@ -109,5 +136,5 @@ def rank_ready_sessions(candidates: list[dict[str, Any]], runtime_state: dict[st
     for position, item in enumerate(ranked, start=1):
         item.pop("_policy_rank", None)
         item["scheduling_policy"]["queue_position"] = position
-        item["scheduling_policy"]["policy_version"] = "ready_queue_lexicographic_v1"
+        item["scheduling_policy"]["policy_version"] = "ready_queue_lexicographic_v2"
     return ranked

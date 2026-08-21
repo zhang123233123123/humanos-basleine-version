@@ -102,6 +102,7 @@ function mapTaskToEvent(task: HumanOSTask, session?: Record<string, any>): Human
         resourceModality: task.resource_modality?.length ? 'user_or_persisted' : 'default_unconfirmed',
         parallelizable: typeof task.parallelizable === 'boolean' ? 'user_or_persisted' : 'default_unconfirmed',
       },
+      fieldProvenance: task.field_provenance || {},
     },
   }
 }
@@ -158,6 +159,7 @@ export function projectDraftPlanEvents(plan: Record<string, any> | null, tasks: 
         description: task?.context || '', status: 'proposed', priority: normalizePriority(task?.priority), attendees: [], context: task?.context || '', progress: contextText(task || {}, 'progress'), nextStep: contextText(task || {}, 'nextStep') || contextText(task || {}, 'next_step'), openQuestions: contextText(task || {}, 'openQuestions') || contextText(task || {}, 'open_questions'), blockId: block.block_id, taskType: String(task?.task_type || ''), taskId: String(task?.id || block.task_id || ''), isPreview: true, planRevision: plan.plan_revision, parallelGroupId: block.parallel_group_id, parallelRole: block.parallel_role,
         duration: asNumber(task?.duration || task?.estimated_duration) || undefined, deadlineAt: toISOString(task?.deadline_at) || undefined, due: String(task?.due || task?.deadline || ''), expectedDifficulty: task?.expected_difficulty ?? null, dependency: contextText(task || {}, 'dependency') || String(task?.dependency || ''), resourceModality: task?.resource_modality || [], attentionMode: task?.attention_mode, parallelizable: task?.parallelizable,
         fieldSources: { start: 'system_derived', end: 'system_derived', title: task?.title ? 'user_or_persisted' : 'default_unconfirmed', priority: task?.priority ? 'user_or_persisted' : 'default_unconfirmed', status: 'system_derived', context: task?.context ? 'user_or_persisted' : 'default_unconfirmed', progress: contextText(task || {}, 'progress') ? 'user_or_persisted' : 'default_unconfirmed', nextStep: contextText(task || {}, 'nextStep') || contextText(task || {}, 'next_step') ? 'user_or_persisted' : 'default_unconfirmed', openQuestions: contextText(task || {}, 'openQuestions') || contextText(task || {}, 'open_questions') ? 'user_or_persisted' : 'default_unconfirmed', duration: task?.duration || task?.estimated_duration ? 'user_or_persisted' : 'default_unconfirmed', deadline: task?.deadline_at || task?.due || task?.deadline ? 'user_or_persisted' : 'default_unconfirmed', dependency: contextText(task || {}, 'dependency') || task?.dependency ? 'user_or_persisted' : 'default_unconfirmed', resourceModality: task?.resource_modality?.length ? 'user_or_persisted' : 'default_unconfirmed', attentionMode: task?.attention_mode ? 'user_or_persisted' : 'default_unconfirmed', parallelizable: typeof task?.parallelizable === 'boolean' ? 'user_or_persisted' : 'default_unconfirmed' },
+        fieldProvenance: task?.field_provenance || {},
       },
     }
   }).filter((event: HumanOSMapEventInput) => inRange(event, rangeStart, rangeEnd))

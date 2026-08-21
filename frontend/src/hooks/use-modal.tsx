@@ -7,7 +7,7 @@ import React, {
   useContext,
   useState,
 } from 'react'
-import type { TaskValueSource } from '@/lib/contracts/task-contracts'
+import type { TaskFieldProvenanceRecord, TaskValueSource } from '@/lib/contracts/task-contracts'
 
 type ActiveEvent = {
   id?: string
@@ -42,6 +42,7 @@ type ActiveEvent = {
   dependency?: string
   createRequestId?: string
   fieldSources?: Record<string, TaskValueSource>
+  fieldProvenance?: Record<string, TaskFieldProvenanceRecord>
 }
 
 type ModalContextType = {

@@ -109,7 +109,6 @@ export async function POST(req: Request) {
     const normalized = normalizePayloadForBackend({
       ...body,
       user_id: userId,
-      status: body?.status || 'queued',
     })
     return Response.json(await humanosRequest('POST', '/api/tasks', normalized))
   } catch (error) {

@@ -14,6 +14,7 @@ def build_ready_queue(
     exclude_task_id: str,
     plan_revision: int | None,
     runtime_state: dict[str, Any] | None = None,
+    reference_now: object = None,
 ) -> list[dict[str, Any]]:
     candidates = []
     for session in sessions:
@@ -39,4 +40,4 @@ def build_ready_queue(
             "switch_cost": task.get("switch_cost"),
             "reentry_cost": task.get("reentry_cost"),
         })
-    return rank_ready_sessions(candidates, runtime_state)
+    return rank_ready_sessions(candidates, runtime_state, reference_now=reference_now)
