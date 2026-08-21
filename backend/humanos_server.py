@@ -40,6 +40,9 @@ try:
     from .app.domain.intent import classify_intent
     from .app.domain.task.change_policy import exact_task_reference_indexes, has_unique_task_identity, is_explicit_change_request, matching_context_item
     from .app.domain.execution import analyze_remaining_work_impact, settle_interruption
+    from .app.domain.planning.ai_outputs import ScheduleComparisonOutput, SchedulePlannerOutput
+    from .app.domain.ai_output_models import BehaviorFeatureOutput, CalendarAdvisorOutput, HelpDecideOutput, ParallelCompatibilityOutput, ScheduleSoftReviewOutput, TaskAnalysisOutput
+    from .app.domain.task.models import ParsedTaskBatch
 except ImportError:
     try:
         from app.application.parse_task import parse_structured_tasks as parse_tasks_with_agent
@@ -55,6 +58,9 @@ except ImportError:
         from app.domain.intent import classify_intent
         from app.domain.task.change_policy import exact_task_reference_indexes, has_unique_task_identity, is_explicit_change_request, matching_context_item
         from app.domain.execution import analyze_remaining_work_impact, settle_interruption
+        from app.domain.planning.ai_outputs import ScheduleComparisonOutput, SchedulePlannerOutput
+        from app.domain.ai_output_models import BehaviorFeatureOutput, CalendarAdvisorOutput, HelpDecideOutput, ParallelCompatibilityOutput, ScheduleSoftReviewOutput, TaskAnalysisOutput
+        from app.domain.task.models import ParsedTaskBatch
     except ImportError as parser_import_error:
         print(f"PydanticAI parser import fallback: {parser_import_error}", flush=True)
         parse_tasks_with_agent = None
@@ -396,7 +402,6 @@ def chat_completion(messages: list[dict], temperature: float = 0.2) -> object | 
     api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
     if not api_key:
         return None
-
     payload = {
         "model": os.environ.get("DEEPSEEK_MODEL", "deepseek-chat"),
         "messages": messages,
@@ -421,6 +426,49 @@ def chat_completion(messages: list[dict], temperature: float = 0.2) -> object | 
     except Exception as exc:
         print(f"DeepSeek unavailable: {type(exc).__name__}: {exc}")
         return None
+
+
+def typed_ai_output(payload: object, output_model: object, label: str) -> dict | None:
+    """Reject malformed model JSON before it reaches application logic."""
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return output_model.model_validate(payload).model_dump(mode="json", exclude_none=True, exclude_unset=True)
+    except Exception as exc:
+        print(f"Typed AI output rejected ({label}): {type(exc).__name__}: {exc}", flush=True)
+        return None
+
+
+def typed_chat_completion(
+    messages: list[dict],
+    output_model: object,
+    label: str,
+    temperature: float = 0.2,
+) -> dict | None:
+    """Generate, validate, and make one schema-only correction attempt."""
+    raw = chat_completion(messages, temperature=temperature)
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return output_model.model_validate(raw).model_dump(mode="json", exclude_none=True, exclude_unset=True)
+    except Exception as first_error:
+        errors = first_error.errors(include_url=False) if hasattr(first_error, "errors") else [{"msg": str(first_error)}]
+        retry = chat_completion(
+            [
+                *messages,
+                {"role": "assistant", "content": as_json(raw)},
+                {
+                    "role": "user",
+                    "content": as_json({
+                        "instruction": "Correct only the output structure and return JSON matching this schema. Do not invent new user facts.",
+                        "validation_errors": errors,
+                        "json_schema": output_model.model_json_schema(),
+                    }),
+                },
+            ],
+            temperature=0.0,
+        )
+        return typed_ai_output(retry, output_model, f"{label}_schema_retry")
 
 
 def safe_duration_minutes(value: object, fallback: int = 60) -> int:
@@ -2064,7 +2112,11 @@ class Store:
             llm_result = {"tasks": typed_tasks}
             parser_name = "pydantic_ai"
         else:
-            llm_result = chat_completion(task_parsing_messages(clean, chat_context))
+            llm_result = typed_chat_completion(
+                task_parsing_messages(clean, chat_context),
+                ParsedTaskBatch,
+                "legacy_task_parser",
+            )
             parser_name = "deepseek_legacy"
         if llm_result:
             if isinstance(llm_result, list):
@@ -2423,7 +2475,11 @@ class Store:
 
     def extract_behavior_features(self, user_id: str, text: str, chat_context: dict | None = None, local_only: bool = False) -> dict:
         clean = text.strip()
-        llm_result = None if local_only else chat_completion(behavior_feature_messages(clean, chat_context))
+        llm_result = None if local_only else typed_chat_completion(
+            behavior_feature_messages(clean, chat_context),
+            BehaviorFeatureOutput,
+            "behavior_features",
+        )
         extraction_provenance = "ai_model"
         if not isinstance(llm_result, dict):
             llm_result = local_behavior_features(clean)
@@ -2535,7 +2591,7 @@ class Store:
         today_sessions = sessions_for_local_date(sessions, tasks, current)
         reply = fallback_calendar_summary(today_sessions, tasks, current, locale)
         active_plan = self.active_plan(user_id)
-        advisor_result = chat_completion([
+        advisor_result = typed_chat_completion([
             {
                 "role": "system",
                 "content": (
@@ -2573,7 +2629,7 @@ class Store:
                     },
                 }),
             },
-        ])
+        ], CalendarAdvisorOutput, "calendar_advisor")
         if isinstance(advisor_result, dict):
             model_intent = str(advisor_result.get("intent") or "calendar_query")
             model_reply = str(advisor_result.get("reply") or "").strip()
@@ -4488,7 +4544,12 @@ class Store:
             "ready_queue": ready_queue,
             "downstream_impact": impact,
         }
-        ai_result = chat_completion(recommendation_prompt(context), temperature=0.1)
+        ai_result = typed_chat_completion(
+            recommendation_prompt(context),
+            HelpDecideOutput,
+            "help_decide",
+            temperature=0.1,
+        )
         recommendation = validate_recommendation(ai_result, context)
         recommendation_id = new_id("rec")
         result = {"id": recommendation_id, "recommendation": recommendation, "context": context, "provider": "deepseek" if isinstance(ai_result, dict) else "deterministic_fallback"}
@@ -6278,7 +6339,7 @@ class Store:
                 "confidence_level": "medium",
             }
 
-        llm_result = chat_completion(
+        llm_result = typed_chat_completion(
             [
                 {
                     "role": "system",
@@ -6355,7 +6416,9 @@ class Store:
                         },
                     }),
                 },
-            ]
+            ],
+            TaskAnalysisOutput,
+            "task_analysis",
         )
         if not isinstance(llm_result, dict):
             return {
@@ -6489,7 +6552,7 @@ class Store:
                 "cycle_rejected": bool(cycle_rejected),
             })
 
-        compatibility_result = chat_completion(
+        compatibility_result = typed_chat_completion(
             [
                 {
                     "role": "system",
@@ -6527,6 +6590,8 @@ class Store:
                     }),
                 },
             ],
+            ParallelCompatibilityOutput,
+            "parallel_compatibility",
             temperature=0.0,
         ) if len(tasks) + len(context_entities) >= 2 else {"candidate_pairs": []}
         profile_map = {str(item.get("task_id")): item for item in [*task_resource_profiles, *[entity["resource_profile"] for entity in context_entities]]}
@@ -6973,10 +7038,10 @@ class Store:
                 "dependencies": analysis.get("dependencies", []),
                 "personalization": decision.get("personalization", {}),
             }
-            ai_soft_review = chat_completion([
+            ai_soft_review = typed_chat_completion([
                 {"role": "system", "content": "Review this Python-generated weekly schedule for soft risks only. Do not change exact times. Return JSON with status, risks, strengths, and user_message. Consider cognitive load, context switching, buffer, deadline pressure, and profile rhythm."},
                 {"role": "user", "content": as_json(review_payload)},
-            ], temperature=0.1)
+            ], ScheduleSoftReviewOutput, "schedule_soft_review", temperature=0.1)
             decision["ai_soft_review"] = ai_soft_review if isinstance(ai_soft_review, dict) else {
                 "status": "unavailable",
                 "risks": [],
@@ -7452,7 +7517,7 @@ class Store:
         from app.application.build_capacity_context import build_capacity_context
 
         capacity_context = build_capacity_context(profile, runtime_state)
-        global_plan_result = chat_completion(
+        global_plan_result = typed_chat_completion(
             [
                 {
                     "role": "system",
@@ -7570,6 +7635,8 @@ class Store:
                     }),
                 },
             ],
+            SchedulePlannerOutput,
+            "weekly_global_planner",
             temperature=0.15,
         )
         validated_ai_candidates = self.validate_llm_schedule_candidates(
@@ -7615,7 +7682,7 @@ class Store:
         while validated_ai_candidates and not complete_ai_candidates and isinstance(global_plan_result, dict) and repair_attempt_count < 3:
             repair_attempted = True
             repair_attempt_count += 1
-            repair_result = chat_completion(
+            repair_result = typed_chat_completion(
                 [
                     {
                         "role": "system",
@@ -7686,6 +7753,8 @@ class Store:
                         }),
                     },
                 ],
+                SchedulePlannerOutput,
+                "schedule_repair",
                 temperature=0.0,
             )
             repaired_candidates = self.validate_llm_schedule_candidates(
@@ -7785,7 +7854,7 @@ class Store:
                     for block in candidate.get("plan_patch", [])[:80]
                 ],
             })
-        llm_result = chat_completion(
+        llm_result = typed_chat_completion(
             [
                 {
                     "role": "system",
@@ -7848,7 +7917,9 @@ class Store:
                         }
                     ),
                 },
-            ]
+            ],
+            ScheduleComparisonOutput,
+            "candidate_comparison",
         )
         if not isinstance(llm_result, dict):
             decision["llm_provider"] = "local_fallback"

@@ -11,3 +11,6 @@ __all__ = [
     "assess_next_session_fit",
     "rank_ready_sessions",
 ]
+from .ai_outputs import ScheduleComparisonOutput, SchedulePlannerOutput
+
+__all__ = ["ScheduleComparisonOutput", "SchedulePlannerOutput"]
