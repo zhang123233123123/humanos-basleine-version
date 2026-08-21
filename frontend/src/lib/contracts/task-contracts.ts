@@ -19,6 +19,8 @@ export type CalendarStatus =
   | 'terminated'
   | string
 
+export type TaskValueSource = 'user_or_persisted' | 'execution_session' | 'system_derived' | 'default_unconfirmed'
+
 export interface HumanOSTaskExecutionSnapshot {
   original_estimate_minutes?: number | null
   accumulated_actual_minutes?: number | null
@@ -93,6 +95,15 @@ export interface HumanOSMapEventInput {
     isPreview?: boolean
     planRevision?: number
     taskId?: string
+    duration?: number
+    deadlineAt?: string
+    due?: string
+    expectedDifficulty?: number | null
+    dependency?: string
+    resourceModality?: Array<'visual' | 'auditory' | 'verbal' | 'motor'>
+    attentionMode?: 'continuous' | 'intermittent' | 'passive'
+    parallelizable?: boolean
+    fieldSources?: Record<string, TaskValueSource>
   }
 }
 

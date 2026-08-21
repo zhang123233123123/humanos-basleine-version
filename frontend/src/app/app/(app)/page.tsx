@@ -229,6 +229,9 @@ function TaskInspectorWrapper() {
         progress: task.progress || '',
         next_step: task.nextStep || '',
         open_questions: task.openQuestions || '',
+        resource_modality: task.resourceModality || [],
+        attention_mode: task.attentionMode || 'continuous',
+        parallelizable: Boolean(task.parallelizable),
       }),
     })
     toast(t('event.eventUpdated'))
@@ -437,6 +440,7 @@ function TaskInspectorWrapper() {
           resourceModality: activeEvent.resourceModality,
           attentionMode: activeEvent.attentionMode,
           parallelizable: activeEvent.parallelizable,
+          fieldSources: activeEvent.fieldSources,
           isPreview: activeEvent.isPreview,
           start: activeEvent.start,
           end: activeEvent.end,
@@ -556,6 +560,9 @@ function TaskInspectorWrapper() {
               allDay: false, timeText: String(task.due || task.deadline_at || ''), description: String(task.context || ''), attendees: [],
               status: String(task.status || 'queued'), priority: String(task.priority || 'medium'), duration: Number(task.duration || 0) || undefined,
               deadlineAt: String(task.deadline_at || ''), due: String(task.due || task.deadline_at || ''), context: String(task.context || ''),
+              progress: String((task.contextWindow || task.context_window || {}).progress || ''), nextStep: String((task.contextWindow || task.context_window || {}).nextStep || (task.contextWindow || task.context_window || {}).next_step || ''), openQuestions: String((task.contextWindow || task.context_window || {}).openQuestions || (task.contextWindow || task.context_window || {}).open_questions || ''),
+              expectedDifficulty: task.expected_difficulty ?? null, dependency: String(task.dependency || (task.contextWindow || task.context_window || {}).dependency || ''), resourceModality: task.resource_modality || [], attentionMode: task.attention_mode, parallelizable: task.parallelizable,
+              fieldSources: { title: task.title ? 'user_or_persisted' : 'default_unconfirmed', priority: task.priority ? 'user_or_persisted' : 'default_unconfirmed', status: task.status ? 'user_or_persisted' : 'default_unconfirmed', context: task.context ? 'user_or_persisted' : 'default_unconfirmed', resourceModality: task.resource_modality?.length ? 'user_or_persisted' : 'default_unconfirmed', attentionMode: task.attention_mode ? 'user_or_persisted' : 'default_unconfirmed', parallelizable: typeof task.parallelizable === 'boolean' ? 'user_or_persisted' : 'default_unconfirmed' },
             })}>
               <div className="truncate text-sm font-medium">{task.title}</div>
               <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -950,6 +957,15 @@ function AppContent({
                       progress: arg.event.extendedProps.progress || '',
                       nextStep: arg.event.extendedProps.nextStep || '',
                       openQuestions: arg.event.extendedProps.openQuestions || '',
+                      duration: arg.event.extendedProps.duration,
+                      deadlineAt: arg.event.extendedProps.deadlineAt,
+                      due: arg.event.extendedProps.due,
+                      expectedDifficulty: arg.event.extendedProps.expectedDifficulty,
+                      dependency: arg.event.extendedProps.dependency,
+                      resourceModality: arg.event.extendedProps.resourceModality,
+                      attentionMode: arg.event.extendedProps.attentionMode,
+                      parallelizable: arg.event.extendedProps.parallelizable,
+                      fieldSources: arg.event.extendedProps.fieldSources,
                       executionSessionId: arg.event.extendedProps.executionSessionId,
                       planRevision: arg.event.extendedProps.planRevision,
                     })}

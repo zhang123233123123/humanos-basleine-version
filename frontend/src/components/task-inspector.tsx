@@ -8,6 +8,7 @@ import { ArrowLeft, Check, Play, Save, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { TaskResourceFields, type TaskAttentionMode, type TaskResourceTag } from '@/components/task-resource-fields'
 import Link from 'next/link'
+import type { TaskValueSource } from '@/lib/contracts/task-contracts'
 
 interface TaskDetail {
   id: string
@@ -33,6 +34,7 @@ interface TaskDetail {
   resourceModality?: TaskResourceTag[]
   attentionMode?: TaskAttentionMode
   parallelizable?: boolean
+  fieldSources?: Record<string, TaskValueSource>
 }
 
 interface TaskInspectorProps {
@@ -182,6 +184,20 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
   const textareaClass = 'w-full text-xs px-2 py-1.5 rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary resize-none'
   const labelClass = 'text-xs font-semibold mb-1 block'
   const hintClass = 'text-[10px] text-muted-foreground mb-1.5 block'
+  const sourceLabel = (field: string) => {
+    const source = task.fieldSources?.[field] || (task.isPreview ? 'system_derived' : 'user_or_persisted')
+    const labels: Record<TaskValueSource, string> = locale === 'zh'
+      ? { user_or_persisted: '已保存任务', execution_session: '执行 Session', system_derived: '系统推导', default_unconfirmed: '默认值·待确认' }
+      : { user_or_persisted: 'Saved task', execution_session: 'Execution session', system_derived: 'System derived', default_unconfirmed: 'Default · unconfirmed' }
+    return <span className="ml-1 font-normal text-[9px] text-muted-foreground">{labels[source]}</span>
+  }
+  const sourceText = (field: string) => {
+    const source = task.fieldSources?.[field] || (task.isPreview ? 'system_derived' : 'user_or_persisted')
+    const labels: Record<TaskValueSource, string> = locale === 'zh'
+      ? { user_or_persisted: '已保存任务', execution_session: '执行 Session', system_derived: '系统推导', default_unconfirmed: '默认值·待确认' }
+      : { user_or_persisted: 'Saved task', execution_session: 'Execution session', system_derived: 'System derived', default_unconfirmed: 'Default · unconfirmed' }
+    return labels[source]
+  }
 
   return (
     <>
@@ -195,11 +211,11 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
         <div className="mt-2 space-y-2">
           {/* Task facts remain editable until the preview is persisted. */}
           {isExistingTask || task.isPreview ? (
-            <input
+            <div className="space-y-1"><span className={hintClass}>{locale === 'zh' ? '标题来源：' : 'Title source: '}{sourceText('title')}</span><input
               className={`${inputClass} font-medium`}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-            />
+            /></div>
           ) : (
             <h3 className="font-medium text-sm">{task.title}</h3>
           )}
@@ -213,12 +229,12 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
 
           {task.isPreview && task.missingFields && task.missingFields.length > 0 && <div className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900">{t('workspace.missingTaskFacts')}: {task.missingFields.join(', ')}</div>}
 
-          {(isExistingTask || task.isPreview) && <TaskResourceFields locale={locale} resourceTags={resourceModality} attentionMode={attentionMode} onResourceTagsChange={setResourceModality} onAttentionModeChange={setAttentionMode} />}
-          {(isExistingTask || task.isPreview) && <label className="flex items-start gap-2 rounded-lg border p-2 text-xs"><input type="checkbox" className="mt-0.5" checked={parallelizable} onChange={(event) => setParallelizable(event.target.checked)} /><span><span className="font-medium">{locale === 'zh' ? '允许系统提出并行建议' : 'Allow parallel suggestions'}</span><span className="mt-0.5 block text-[10px] text-muted-foreground">{locale === 'zh' ? '资源标签本身不会授权并行。' : 'Resource labels do not grant permission.'}</span></span></label>}
+          {(isExistingTask || task.isPreview) && <TaskResourceFields locale={locale} resourceTags={resourceModality} attentionMode={attentionMode} onResourceTagsChange={setResourceModality} onAttentionModeChange={setAttentionMode} sourceText={sourceText('resourceModality')} />}
+          {(isExistingTask || task.isPreview) && <label className="flex items-start gap-2 rounded-lg border p-2 text-xs"><input type="checkbox" className="mt-0.5" checked={parallelizable} onChange={(event) => setParallelizable(event.target.checked)} /><span><span className="font-medium">{locale === 'zh' ? '允许系统提出并行建议' : 'Allow parallel suggestions'}{sourceLabel('parallelizable')}</span><span className="mt-0.5 block text-[10px] text-muted-foreground">{locale === 'zh' ? '资源标签本身不会授权并行。' : 'Resource labels do not grant permission.'}</span></span></label>}
 
           {/* Priority selector */}
           <div>
-            <span className={labelClass}>{t('taskDialog.priorityLabel')}</span>
+            <span className={labelClass}>{t('taskDialog.priorityLabel')}{sourceLabel('priority')}</span>
             <div className="flex gap-1">
               {priorityOptions.map((opt) => (
                 <button
@@ -238,7 +254,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
 
           {/* Status is owned by the execution lifecycle, not edited locally. */}
           <div>
-            <span className={labelClass}>{t('taskDialog.statusLabel')}</span>
+            <span className={labelClass}>{t('taskDialog.statusLabel')}{sourceLabel('status')}</span>
             <span className="inline-flex rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[10px] font-semibold text-primary">{statusLabels[status] || status}</span>
           </div>
         </div>
@@ -290,7 +306,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
 
       {/* Context */}
       <div className="border-b border-border p-3">
-        <h3 className={labelClass}>{t('taskDialog.contextLabel')}</h3>
+        <h3 className={labelClass}>{t('taskDialog.contextLabel')}{sourceLabel('context')}</h3>
         <span className={hintClass}>{t('workspace.contextHint')}</span>
         <textarea
           className={textareaClass}
@@ -303,7 +319,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
 
       {/* Progress */}
       <div className="border-b border-border p-3">
-        <h3 className={labelClass}>{t('taskDialog.progressLabel')}</h3>
+        <h3 className={labelClass}>{t('taskDialog.progressLabel')}{sourceLabel('progress')}</h3>
         <textarea
           className={textareaClass}
           rows={3}
@@ -315,7 +331,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
 
       {/* Next Step */}
       <div className="border-b border-border p-3">
-        <h3 className={labelClass}>{t('taskDialog.nextStepLabel')}</h3>
+        <h3 className={labelClass}>{t('taskDialog.nextStepLabel')}{sourceLabel('nextStep')}</h3>
         <span className={hintClass}>{t('workspace.resumeHint')}</span>
         <textarea
           className={`${textareaClass} bg-primary/5 border-primary/10`}
@@ -328,7 +344,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
 
       {/* Open Questions */}
       <div className="border-b border-border p-3">
-        <h3 className={labelClass}>{t('taskDialog.openQuestionsLabel')}</h3>
+        <h3 className={labelClass}>{t('taskDialog.openQuestionsLabel')}{sourceLabel('openQuestions')}</h3>
         <textarea
           className={textareaClass}
           rows={2}
@@ -338,27 +354,6 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
         />
       </div>
 
-      {/* Interruptions */}
-      <div className="border-b border-border p-3">
-        <h3 className={labelClass}>{t('workspace.interruptions')}</h3>
-        <span className={hintClass}>{t('workspace.interruptionsHint')}</span>
-        <textarea
-          className={textareaClass}
-          rows={2}
-          placeholder={t('workspace.interruptionsHint')}
-        />
-      </div>
-
-      {/* Recovery */}
-      <div className="border-b border-border p-3">
-        <h3 className={labelClass}>{t('workspace.recovery')}</h3>
-        <span className={hintClass}>{t('workspace.recoveryHint')}</span>
-        <textarea
-          className={textareaClass}
-          rows={2}
-          placeholder={t('workspace.recoveryHint')}
-        />
-      </div>
     </>
   )
 }

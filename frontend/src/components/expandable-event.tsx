@@ -12,19 +12,9 @@ import { toast } from 'sonner'
 import { useEvents } from '@/hooks/use-events'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { apiRequest } from '@/lib/client/api'
+import type { HumanOSMapEventInput } from '@/lib/contracts/task-contracts'
 
-type ExtendedProps = {
-  description: string
-  attendees: string[]
-  status: string
-  priority: string
-  context?: string
-  progress?: string
-  nextStep?: string
-  openQuestions?: string
-  isPreview?: boolean
-  taskId?: string
-}
+type ExtendedProps = HumanOSMapEventInput['extendedProps']
 
 export function ExpandableEvent(props: EventContentArg) {
   const { event, isPast, timeText, isDragging } = props

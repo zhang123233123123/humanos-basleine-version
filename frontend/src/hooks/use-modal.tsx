@@ -7,6 +7,7 @@ import React, {
   useContext,
   useState,
 } from 'react'
+import type { TaskValueSource } from '@/lib/contracts/task-contracts'
 
 type ActiveEvent = {
   id?: string
@@ -40,6 +41,7 @@ type ActiveEvent = {
   parallelizable?: boolean
   dependency?: string
   createRequestId?: string
+  fieldSources?: Record<string, TaskValueSource>
 }
 
 type ModalContextType = {
