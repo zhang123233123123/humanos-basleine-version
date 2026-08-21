@@ -12,11 +12,12 @@ import { Separator } from '@/components/ui/separator'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { toast } from 'sonner'
 import { apiRequest } from '@/lib/client/api'
+import Link from 'next/link'
 
 export function ExpandedEventModal() {
   const { activeEvent, setActiveEvent } = useModal()
   const { refetchEvents } = useEvents()
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const ref = useRef<HTMLDivElement>(null)
   const [taskDialogOpen, setTaskDialogOpen] = useState(false)
 
@@ -56,6 +57,8 @@ export function ExpandedEventModal() {
   }
 
   if (!activeEvent) return null
+
+  const taskId = activeEvent.taskId || activeEvent.id
 
   const pureText = (htmlString: string) => {
     return htmlString.replace(/<[^>]*>/g, '')
@@ -97,6 +100,7 @@ export function ExpandedEventModal() {
               </motion.p>
 
               <Separator />
+              {taskId && <div className="px-4"><Button asChild variant="outline" size="sm"><Link href={`/app/tasks/${encodeURIComponent(taskId)}`} onClick={() => setActiveEvent(null)}>{locale === 'zh' ? '查看任务详情' : 'View task details'}</Link></Button></div>}
 
               <div>
                 {activeEvent.start && activeEvent.end && (

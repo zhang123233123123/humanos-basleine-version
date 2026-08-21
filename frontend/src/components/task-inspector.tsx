@@ -7,6 +7,7 @@ import { DateTimePicker } from '@/components/ui/date-time-picker'
 import { ArrowLeft, Check, Play, Save, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { TaskResourceFields, type TaskAttentionMode, type TaskResourceTag } from '@/components/task-resource-fields'
+import Link from 'next/link'
 
 interface TaskDetail {
   id: string
@@ -190,6 +191,7 @@ function InspectorContent({ task, onConfirm, onReject, onSave, onOpenFocus, onDe
         <h2 className="text-sm font-semibold">
           {isExistingTask ? t('workspace.editTitle') : t('workspace.taskDetail')}
         </h2>
+        {isExistingTask && <Button asChild variant="outline" size="sm" className="mt-2 h-8 w-full text-xs"><Link href={`/app/tasks/${encodeURIComponent(task.taskId || task.id)}`}>{locale === 'zh' ? '查看完整任务生命周期' : 'View full task lifecycle'}</Link></Button>}
         <div className="mt-2 space-y-2">
           {/* Task facts remain editable until the preview is persisted. */}
           {isExistingTask || task.isPreview ? (

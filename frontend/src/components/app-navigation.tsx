@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { CalendarDays, Clock3, Focus, Lightbulb, LogOut, Settings2, ShieldCheck, UserRound, type LucideIcon } from 'lucide-react'
+import { CalendarDays, Clock3, Focus, Lightbulb, ListTodo, LogOut, Settings2, ShieldCheck, UserRound, type LucideIcon } from 'lucide-react'
 import { signOut, useSession } from 'next-auth/react'
 import { useTranslation } from '@/i18n/LanguageProvider'
 import { LanguageSwitch } from '@/components/language-switch'
@@ -11,7 +11,7 @@ export function AppNavigation() {
   const pathname = usePathname(); const { locale } = useTranslation(); const { data: session } = useSession(); const [qa, setQa] = useState(false)
   useEffect(() => { fetch('/api/account/capabilities', { cache: 'no-store' }).then((r) => r.ok ? r.json() : null).then((b) => setQa(Boolean(b?.qa_tools))).catch(() => setQa(false)) }, [])
   const items: Array<[string, string, LucideIcon]> = [
-    ['/app', locale === 'zh' ? '工作台' : 'Workspace', CalendarDays], ['/app/plan', locale === 'zh' ? '周计划' : 'Weekly Plan', Clock3],
+    ['/app', locale === 'zh' ? '工作台' : 'Workspace', CalendarDays], ['/app/plan', locale === 'zh' ? '周计划' : 'Weekly Plan', Clock3], ['/app/tasks', locale === 'zh' ? '任务' : 'Tasks', ListTodo],
     ['/app/focus', locale === 'zh' ? '专注' : 'Focus', Focus], ['/app/insights', locale === 'zh' ? '洞察' : 'Insights', Lightbulb], ['/app/settings', locale === 'zh' ? '设置' : 'Settings', Settings2],
   ]
   if (qa) items.push(['/app/qa', 'QA', ShieldCheck])
