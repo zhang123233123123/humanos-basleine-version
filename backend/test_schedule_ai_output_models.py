@@ -99,6 +99,9 @@ class ScheduleAIOutputModelTests(unittest.TestCase):
             )
         self.assertEqual("deadline_guard", result["selected_candidate_id"])
         self.assertEqual(2, completion.call_count)
+        initial_messages = completion.call_args_list[0].args[0]
+        self.assertIn("json_schema", initial_messages[0]["content"])
+        self.assertIn("test_planner-v1", initial_messages[0]["content"])
         retry_messages = completion.call_args_list[1].args[0]
         self.assertIn("validation_errors", retry_messages[-1]["content"])
 

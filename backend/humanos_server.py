@@ -43,6 +43,7 @@ try:
     from .app.domain.planning.ai_outputs import ScheduleComparisonOutput, SchedulePlannerOutput
     from .app.domain.ai_output_models import BehaviorFeatureOutput, CalendarAdvisorOutput, HelpDecideOutput, ParallelCompatibilityOutput, ScheduleSoftReviewOutput, TaskAnalysisOutput
     from .app.domain.task.models import ParsedTaskBatch
+    from .app.infrastructure.typed_chat import generate_typed_json
 except ImportError:
     try:
         from app.application.parse_task import parse_structured_tasks as parse_tasks_with_agent
@@ -61,6 +62,7 @@ except ImportError:
         from app.domain.planning.ai_outputs import ScheduleComparisonOutput, SchedulePlannerOutput
         from app.domain.ai_output_models import BehaviorFeatureOutput, CalendarAdvisorOutput, HelpDecideOutput, ParallelCompatibilityOutput, ScheduleSoftReviewOutput, TaskAnalysisOutput
         from app.domain.task.models import ParsedTaskBatch
+        from app.infrastructure.typed_chat import generate_typed_json
     except ImportError as parser_import_error:
         print(f"PydanticAI parser import fallback: {parser_import_error}", flush=True)
         parse_tasks_with_agent = None
@@ -293,22 +295,6 @@ def task_parsing_messages(text: str, chat_context: dict | None = None) -> list[d
                     "user_data": {"text": text},
                     "today": str(context.get("client_context", {}).get("local_date") or today_label()),
                     "conversation_context": context,
-                    "schema": {
-                        "tasks": [
-                            {
-                                "title": "任务标题，不要包含其他任务",
-                                "schedule_type": "fixed_event/flexible_task/recovery_task",
-                                "start_at": "fixed_event 的原文时间；未提供则 null",
-                                "deadline_at": "flexible_task 的原文期限；未提供则 null",
-                                "duration_minutes": "用户明确说出的分钟数；未提供则 null",
-                                "priority": "用户明确说出的高/中/低；未提供则 null",
-                                "context": "只保留该任务相关背景",
-                                "missing_fields": ["未明确提供的必要字段"],
-                                "source_spans": ["支持提取结果的原文片段"],
-                                "confidence": "0.0-1.0",
-                            }
-                        ]
-                    },
                 }
             ),
         },
@@ -339,24 +325,6 @@ def behavior_feature_messages(text: str, chat_context: dict | None = None) -> li
                     "prompt_version": BEHAVIOR_FEATURE_PROMPT_VERSION,
                     "user_data": {"text": text.strip()},
                     "conversation_context": chat_context or {},
-                    "schema": {
-                        "intent": "add_task/reschedule/progress_update/interruption/report_state/other",
-                        "blockers": ["任务不清楚", "疲劳", "焦虑", "外部打断", "上下文丢失"],
-                        "explicit_state": {
-                            "fatigue": "true/false/null",
-                            "stress": "true/false/null",
-                            "focus_difficulty": "true/false/null",
-                        },
-                        "evidence_span": "支持 explicit_state 的原文；没有则 null",
-                        "hypotheses": [
-                            {
-                                "label": "possible_external_interruption",
-                                "confidence": "low",
-                                "persist_to_profile": False,
-                            }
-                        ],
-                        "needs_follow_up": "true/false",
-                    },
                 }
             ),
         },
@@ -428,47 +396,24 @@ def chat_completion(messages: list[dict], temperature: float = 0.2) -> object | 
         return None
 
 
-def typed_ai_output(payload: object, output_model: object, label: str) -> dict | None:
-    """Reject malformed model JSON before it reaches application logic."""
-    if not isinstance(payload, dict):
-        return None
-    try:
-        return output_model.model_validate(payload).model_dump(mode="json", exclude_none=True, exclude_unset=True)
-    except Exception as exc:
-        print(f"Typed AI output rejected ({label}): {type(exc).__name__}: {exc}", flush=True)
-        return None
-
-
 def typed_chat_completion(
     messages: list[dict],
     output_model: object,
     label: str,
     temperature: float = 0.2,
 ) -> dict | None:
-    """Generate, validate, and make one schema-only correction attempt."""
-    raw = chat_completion(messages, temperature=temperature)
-    if not isinstance(raw, dict):
-        return None
-    try:
-        return output_model.model_validate(raw).model_dump(mode="json", exclude_none=True, exclude_unset=True)
-    except Exception as first_error:
-        errors = first_error.errors(include_url=False) if hasattr(first_error, "errors") else [{"msg": str(first_error)}]
-        retry = chat_completion(
-            [
-                *messages,
-                {"role": "assistant", "content": as_json(raw)},
-                {
-                    "role": "user",
-                    "content": as_json({
-                        "instruction": "Correct only the output structure and return JSON matching this schema. Do not invent new user facts.",
-                        "validation_errors": errors,
-                        "json_schema": output_model.model_json_schema(),
-                    }),
-                },
-            ],
-            temperature=0.0,
-        )
-        return typed_ai_output(retry, output_model, f"{label}_schema_retry")
+    """Compatibility wrapper around the shared typed-output adapter."""
+    def report_rejection(rejection_label: str, error: Exception) -> None:
+        print(f"Typed AI output rejected ({rejection_label}): {type(error).__name__}: {error}", flush=True)
+
+    return generate_typed_json(
+        messages,
+        output_model,
+        label,
+        completion=chat_completion,
+        temperature=temperature,
+        report_rejection=report_rejection,
+    )
 
 
 def safe_duration_minutes(value: object, fallback: int = 60) -> int:
@@ -6387,33 +6332,6 @@ class Store:
                             }
                             for task in tasks
                         ],
-                        "required_schema": {
-                            "task_demands": [{
-                                "task_id": "existing task id",
-                                "level": "low/medium/high",
-                                "evidence": ["specific evidence"],
-                                "confidence_level": "low/medium/high",
-                            }],
-                            "dependencies": [{
-                                "before_task_id": "existing task id",
-                                "after_task_id": "existing task id",
-                                "reason": "why the first task must precede the second",
-                                "dependency_type": "hard/soft/suggested",
-                                "source": "explicit_user/task_structure/llm_inference",
-                                "confidence": "0.0-1.0",
-                                "confidence_level": "low/medium/high",
-                            }],
-                            "task_resource_profiles": [{
-                                "task_id": "existing task id",
-                                "resource_modality": ["visual/auditory/verbal/motor"],
-                                "attention_mode": "continuous/intermittent/passive",
-                                "parallelizable": "boolean; only means suggestions are allowed",
-                                "evidence": ["specific task evidence"],
-                                "confidence_level": "low/medium/high",
-                            }],
-                            "evidence": ["cross-task evidence used"],
-                            "confidence_level": "low/medium/high",
-                        },
                     }),
                 },
             ],
@@ -6575,18 +6493,6 @@ class Store:
                         ],
                         "task_demands": [*task_demands, *[item["task_demand"] for item in context_entities]],
                         "task_resource_profiles": [*task_resource_profiles, *[item["resource_profile"] for item in context_entities]],
-                        "required_schema": {
-                            "candidate_pairs": [{
-                                "primary_task_id": "existing task/entity id",
-                                "secondary_task_id": "different existing task/entity id",
-                                "compatible": "boolean",
-                                "suggested_overlap_minutes": "15/30/45",
-                                "resource_basis": ["motor", "auditory"],
-                                "confidence_level": "low/medium/high",
-                                "evidence": ["why resources do or do not conflict"],
-                                "requires_user_confirmation": True,
-                            }]
-                        },
                     }),
                 },
             ],
@@ -7602,36 +7508,6 @@ class Store:
                             for task in tasks if task.get("status") in {"blocked", "paused"}
                         ],
                         "dependencies": state.get("ai_task_analysis", {}).get("dependencies", []),
-                        "required_schema": {
-                            "candidate_plans": [{
-                                "id": "deadline_guard/cognitive_fit/balanced",
-                                "label": "English candidate label",
-                                "rationale": "English rationale for the global plan",
-                                "override_reason": "null, or a concrete hard constraint that justifies deviating from the momentary-state rule",
-                                "state_decision": {
-                                    "state_used": {"focus": "1-7", "energy": "1-7", "stress": "1-7"},
-                                    "affected_decision": "next_session_selection",
-                                    "result": "what changed because of the current state",
-                                },
-                                "blocks": [{
-                                    "task_id": "existing task id",
-                                    "day_index": "0-6 integer",
-                                    "start": "15-minute-grid decimal hour",
-                                    "end": "15-minute-grid decimal hour",
-                                    "reason": "English time, deadline, and priority evidence for this block",
-                                    "capacity_fit": "ideal/acceptable/risky/unsuitable",
-                                    "capacity_evidence": ["specific Profile baseline, runtime-state, and task-demand evidence"],
-                                    "capacity_tradeoff": "required English explanation when capacity_fit is risky; otherwise null",
-                                    "parallel_group_id": "only the exact id from an accepted pair, otherwise null",
-                                    "parallel_role": "primary/secondary only for an accepted pair",
-                                }],
-                                "unallocated": [{"task_id": "id", "remaining_minutes": "integer", "reason": "why"}],
-                            }],
-                            "selected_candidate_id": "one candidate id",
-                            "evidence": ["selection evidence"],
-                            "confidence_level": "low/medium/high",
-                            "warnings": ["ambiguity or risk"],
-                        },
                     }),
                 },
             ],
@@ -7738,18 +7614,6 @@ class Store:
                                 for task in tasks
                                 if task.get("status") not in {"completed", "terminated"} and schedule_task_kind(task) != "fixed_event"
                             ],
-                            "required_schema": {
-                                "candidate_plans": [{
-                                    "id": "repaired_global_plan",
-                                    "label": "Repaired global plan",
-                                    "rationale": "English explanation of how violations were repaired",
-                                    "override_reason": "null or a concrete hard constraint",
-                                    "blocks": [{"task_id": "existing id", "day_index": "0-6", "start": "decimal hour", "end": "decimal hour", "reason": "time and priority evidence", "capacity_fit": "ideal/acceptable/risky/unsuitable", "capacity_evidence": ["specific Profile, runtime state, and task-demand evidence"], "capacity_tradeoff": "required when risky", "parallel_group_id": "accepted group id or null", "parallel_role": "primary/secondary or null"}],
-                                }],
-                                "selected_candidate_id": "repaired_global_plan",
-                                "warnings": [],
-                                "confidence_level": "low/medium/high",
-                            },
                         }),
                     },
                 ],
@@ -7901,19 +7765,6 @@ class Store:
                             "input_analysis": state.get("ai_task_analysis", {}),
                             "candidate_plans": candidate_summaries,
                             "deterministic_repair_suggestions": decision.get("repair_suggestions", []),
-                            "required_schema": {
-                                "explanation": "one concise English scheduling rationale",
-                                "first_action": "one immediate action the user can start now, in English",
-                                "risk": "one possible blocker, in English",
-                                "selected_candidate_id": "candidate_plans 中的 id",
-                                "constraint_interpretation": ["brief English interpretation of availability and occupied time"],
-                                "task_demand_review": ["English task-demand judgment and evidence, including task_id"],
-                                "task_dependencies": ["English dependency evidence, including before_task_id/after_task_id"],
-                                "repair_suggestions": ["actionable English repair option when work does not fit"],
-                                "evidence": ["English evidence for selecting the candidate"],
-                                "confidence_level": "low/medium/high",
-                                "warnings": ["English conflicts, ambiguity, or confirmation needs"],
-                            },
                         }
                     ),
                 },
