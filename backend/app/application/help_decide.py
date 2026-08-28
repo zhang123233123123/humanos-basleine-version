@@ -8,6 +8,50 @@ from typing import Any
 ALLOWED_ACTIONS = {"short_break", "continue_current", "switch_task", "continue_later"}
 
 
+def build_decision_evidence(context: dict[str, Any]) -> dict[str, Any]:
+    """Return user-facing facts used by the policy without inferring mental state."""
+    state = context.get("runtime_state") or {}
+    task = context.get("task") or {}
+    session = context.get("execution_session") or {}
+    ready_queue = context.get("ready_queue") or []
+    impact = context.get("downstream_impact") or {}
+    facts: list[dict[str, Any]] = []
+
+    for key in ("focus", "energy", "stress", "readiness"):
+        value = state.get(key)
+        if value is not None:
+            facts.append({"kind": "self_report", "field": key, "value": value})
+    if context.get("reason"):
+        facts.append({"kind": "self_report", "field": "interruption_reason", "value": context["reason"]})
+    for key, value in (
+        ("remaining_minutes", context.get("remaining_minutes")),
+        ("elapsed_minutes", context.get("elapsed_minutes")),
+        ("deadline_at", task.get("deadline_at")),
+        ("priority", task.get("priority")),
+        ("session_status", session.get("status")),
+    ):
+        if value is not None and value != "":
+            facts.append({"kind": "persisted_state", "field": key, "value": value})
+    facts.append({"kind": "scheduler_state", "field": "ready_task_count", "value": len(ready_queue)})
+    facts.append({"kind": "scheduler_state", "field": "affected_session_count", "value": len(impact.get("affected_sessions") or [])})
+
+    missing = [key for key in ("focus", "energy", "stress") if state.get(key) is None]
+    limitations = ["user_confirmation_required"]
+    if missing:
+        limitations.extend(f"missing_self_report:{key}" for key in missing)
+    if not task.get("deadline_at"):
+        limitations.append("missing_task_deadline")
+    if not ready_queue:
+        limitations.append("no_ready_alternative")
+    return {
+        "facts": facts,
+        "evidence_strength": "limited" if missing else "moderate",
+        "limitations": limitations,
+        "causal_claim_allowed": False,
+        "user_confirmation_required": True,
+    }
+
+
 def fallback_recommendation(context: dict[str, Any]) -> dict[str, Any]:
     state = context.get("runtime_state") or {}
     reason = str(context.get("reason") or "").lower()

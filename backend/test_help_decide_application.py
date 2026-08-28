@@ -1,6 +1,6 @@
 import unittest
 
-from backend.app.application.help_decide import fallback_recommendation, validate_recommendation
+from backend.app.application.help_decide import build_decision_evidence, fallback_recommendation, validate_recommendation
 
 
 class HelpDecideApplicationTests(unittest.TestCase):
@@ -38,6 +38,29 @@ class HelpDecideApplicationTests(unittest.TestCase):
         result = fallback_recommendation({"locale": "zh", "runtime_state": {"focus": 2, "energy": 2, "stress": 6}})
         self.assertEqual("short_break", result["action"])
         self.assertIn("休息", result["reason"])
+
+    def test_evidence_distinguishes_self_report_from_scheduler_state(self) -> None:
+        evidence = build_decision_evidence({
+            "reason": "tired",
+            "runtime_state": {"focus": 2, "energy": 3, "stress": 6},
+            "task": {"priority": "high", "deadline_at": "2026-08-22T18:00:00+08:00"},
+            "execution_session": {"status": "running"},
+            "remaining_minutes": 30,
+            "elapsed_minutes": 15,
+            "ready_queue": [{"execution_session_id": "exec-2"}],
+            "downstream_impact": {"affected_sessions": [{"execution_session_id": "exec-3"}]},
+        })
+        self.assertEqual("moderate", evidence["evidence_strength"])
+        self.assertFalse(evidence["causal_claim_allowed"])
+        self.assertIn(
+            {"kind": "scheduler_state", "field": "ready_task_count", "value": 1},
+            evidence["facts"],
+        )
+
+    def test_incomplete_self_report_is_labeled_limited(self) -> None:
+        evidence = build_decision_evidence({"runtime_state": {"energy": 3}, "task": {}, "ready_queue": []})
+        self.assertEqual("limited", evidence["evidence_strength"])
+        self.assertIn("missing_self_report:focus", evidence["limitations"])
 
 
 if __name__ == "__main__":

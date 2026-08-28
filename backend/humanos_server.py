@@ -4529,7 +4529,7 @@ class Store:
         }
 
     def help_decide(self, user_id: str, payload: dict) -> dict:
-        from app.application.help_decide import recommendation_prompt, validate_recommendation
+        from app.application.help_decide import build_decision_evidence, recommendation_prompt, validate_recommendation
         from app.application.ready_queue import build_ready_queue
 
         task_id = str(payload.get("task_id") or "")
@@ -4571,7 +4571,13 @@ class Store:
         )
         recommendation = validate_recommendation(ai_result, context)
         recommendation_id = new_id("rec")
-        result = {"id": recommendation_id, "recommendation": recommendation, "context": context, "provider": "deepseek" if isinstance(ai_result, dict) else "deterministic_fallback"}
+        result = {
+            "id": recommendation_id,
+            "recommendation": recommendation,
+            "evidence": build_decision_evidence(context),
+            "context": context,
+            "provider": "deepseek" if isinstance(ai_result, dict) else "deterministic_fallback",
+        }
         self.log_event(user_id, "help_decide_recommendation_created", result)
         return result
 
@@ -4589,6 +4595,7 @@ class Store:
             "accepted": accepted,
             "recommended_action": payload.get("recommended_action"),
             "selected_action": payload.get("selected_action"),
+            "execution_session_id": payload.get("execution_session_id"),
             "created_at": now_ms(),
         }
         pattern_label = recommendation_pattern_label(
@@ -4759,6 +4766,7 @@ class Store:
 
         feedback = self.save_help_decide_feedback(user_id, {
             **payload,
+            "execution_session_id": session.get("execution_session_id"),
             "accepted": True,
             "recommended_action": action,
             "selected_action": action,
@@ -4976,9 +4984,21 @@ class Store:
 
     def interruption_recovery_summary(self, user_id: str) -> dict:
         from app.application.interruption_recovery import summarize_recovery_episodes
+        from app.application.recommendation_outcomes import summarize_recommendation_outcomes
 
         episodes = self.list_interruption_episodes(user_id)
-        return {"episodes": episodes, "summary": summarize_recovery_episodes(episodes)}
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT type,payload_json,created_at FROM events WHERE user_id=? AND type IN ('help_decide_recommendation_feedback','execution_feedback_saved') ORDER BY created_at DESC",
+                (user_id,),
+            ).fetchall()
+        feedback_events = [{"payload": from_json(row["payload_json"], {}), "created_at": row["created_at"]} for row in rows if row["type"] == "help_decide_recommendation_feedback"]
+        execution_feedback_events = [{"payload": from_json(row["payload_json"], {}), "created_at": row["created_at"]} for row in rows if row["type"] == "execution_feedback_saved"]
+        return {
+            "episodes": episodes,
+            "summary": summarize_recovery_episodes(episodes),
+            "recommendation_effects": summarize_recommendation_outcomes(feedback_events, episodes, execution_feedback_events),
+        }
 
     def _episode_for_resume(self, conn: sqlite3.Connection, user_id: str, session: sqlite3.Row) -> sqlite3.Row | None:
         source_ids = [str(session["id"])]
@@ -6864,7 +6884,7 @@ class Store:
         profile_map = {str(item.get("task_id")): item for item in (analysis.get("task_resource_profiles") or []) if isinstance(item, dict)}
         context = build_scheduling_context(profile)
         windows = context.get("movable_routine_windows") or context.get("windows", [])
-        now = clock_now(safe_timezone(str(profile.get("timezone") or "Asia/Shanghai")))
+        now = self.user_clock_now(user_id, str(profile.get("timezone") or "Asia/Shanghai"))
         blocks: list[dict] = []
         planned_work: dict[str, int] = {}
         for raw in payload.get("plan_patch") or []:

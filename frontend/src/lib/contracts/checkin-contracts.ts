@@ -73,6 +73,13 @@ export interface HelpDecideRecommendation {
     validated: boolean
     validation: { valid: boolean; violations: string[]; checked_by: string }
   }
+  evidence: {
+    facts: Array<{ kind: 'self_report' | 'persisted_state' | 'scheduler_state'; field: string; value: string | number | boolean }>
+    evidence_strength: 'limited' | 'moderate'
+    limitations: string[]
+    causal_claim_allowed: false
+    user_confirmation_required: true
+  }
 }
 
 export interface CheckInResourceEnvelope<T> {

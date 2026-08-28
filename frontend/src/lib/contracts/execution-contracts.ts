@@ -69,6 +69,34 @@ export interface InterruptionRecoverySummary {
   profile_write_allowed: false
 }
 
+export interface RecommendationEffectSummary {
+  recommendation_count: number
+  accepted_count: number
+  rejected_count: number
+  linked_episode_count: number
+  settled_outcome_count: number
+  outcome_pending_count: number
+  reinterrupted_count: number
+  median_resume_latency_minutes?: number | null
+  completion: { completed: number; partial: number; not_started: number; other: number }
+  recent: Array<{
+    recommendation_id: string
+    task_id?: string | null
+    accepted: boolean
+    recommended_action?: string | null
+    selected_action?: string | null
+    execution_session_id?: string | null
+    created_at?: string | number | null
+    interruption_episode_id?: string | null
+    recovery_status?: string | null
+    resume_latency_minutes?: number | null
+    reinterrupted?: boolean | null
+    completion?: string | null
+  }>
+  causal_claim_allowed: false
+  profile_write_allowed: false
+}
+
 export interface CurrentExecution {
   mode: ExecutionMode
   requires_resolution?: boolean

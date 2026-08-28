@@ -25,23 +25,36 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.db = Path(self.tmp.name) / "humanos.db"
         self.store = Store(self.db)
+        self.now = datetime(2026, 8, 3, 8, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+        self.clock_patch = patch.object(Store, "user_clock_now", return_value=self.now)
+        self.clock_patch.start()
         self.store.upsert_profile({
             "user_id": "u", "timezone": "Asia/Shanghai", "role": "student",
-            "deep_work_window": "09:00-11:30",
-            "weekly_context": {"week_id": "2026-08-03", "context_items": [], "keep_buffer": True},
+            "deep_work_window": "00:00-24:00",
+            "weekly_context": {"week_id": "2026-08-03", "weekly_available_windows": "周一至周日 00:00-24:00", "context_items": [], "keep_buffer": True},
         })
+        now = self.now
+        future = now + timedelta(minutes=30)
+        block_start = future.replace(minute=((future.minute + 14) // 15) * 15 % 60, second=0, microsecond=0)
+        if future.minute > 45:
+            block_start = block_start + timedelta(hours=1)
+        block_end = block_start + timedelta(minutes=60)
         task = self.store.create_task("u", {"title": "Analyze interviews", "due": "Friday 18:00", "duration": 60, "priority": "high"})
         self.task_id = task["id"]
-        now = datetime.now(ZoneInfo("Asia/Shanghai"))
         self.block = {
             "block_id": "block-1", "task_id": self.task_id,
-            "day_index": now.weekday(), "start": 9.0,
-            "end": 10.0, "session_minutes": 60,
+            "day_index": block_start.weekday(), "start": block_start.hour + block_start.minute / 60,
+            "end": block_end.hour + block_end.minute / 60, "session_minutes": 60,
             "planned_work_minutes": 60,
-            "start_at": (now + timedelta(minutes=30)).isoformat(),
-            "end_at": (now + timedelta(minutes=90)).isoformat(),
+            "start_at": block_start.isoformat(),
+            "end_at": block_end.isoformat(),
         }
         proposal = self.store.save_proposed_plan("u", {"plan_patch": [self.block]}, {"week_id": "2026-08-03", "request_id": "proposal"})
+        validation = self.store.validate_confirmed_schedule("u", {
+            "week_id": "2026-08-03", "plan_patch": [self.block], "unscheduled_tasks": [],
+            "ai_task_analysis": {}, "decision": proposal,
+        })
+        self.assertTrue(validation["valid"], validation)
         self.plan = self.store.confirm_plan("u", {
             "plan_id": proposal["plan_id"], "plan_revision": proposal["plan_revision"],
             "week_id": "2026-08-03", "plan_patch": [self.block], "unscheduled_tasks": [],
@@ -50,10 +63,11 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
         with self.store.connect() as conn:
             conn.execute(
                 "UPDATE execution_sessions SET planned_start_at=?, planned_end_at=? WHERE user_id='u'",
-                ((now + timedelta(minutes=30)).isoformat(), (now + timedelta(minutes=90)).isoformat()),
+                (block_start.isoformat(), block_end.isoformat()),
             )
 
     def tearDown(self):
+        self.clock_patch.stop()
         self.tmp.cleanup()
 
     def current(self):
@@ -79,7 +93,7 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
 
     def test_04_due_start_time_without_click_remains_ready(self):
         session = self.current()["session"]
-        past = (datetime.now(ZoneInfo("Asia/Shanghai")) - timedelta(minutes=1)).isoformat()
+        past = (self.now - timedelta(minutes=1)).isoformat()
         with self.store.connect() as conn:
             conn.execute("UPDATE execution_sessions SET planned_start_at=? WHERE id=?", (past, session["execution_session_id"]))
         result = self.current()
@@ -111,7 +125,7 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
 
     def test_overdue_running_session_does_not_replace_time_relevant_focus(self):
         session = self.start()
-        past = (datetime.now(ZoneInfo("Asia/Shanghai")) - timedelta(minutes=1)).isoformat()
+        past = (self.now - timedelta(minutes=1)).isoformat()
         with self.store.connect() as conn:
             conn.execute("UPDATE execution_sessions SET planned_end_at=? WHERE id=?", (past, session["execution_session_id"]))
         current = self.current()
@@ -123,7 +137,7 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
 
     def test_missed_ready_session_does_not_replace_future_session(self):
         first = self.current()["session"]
-        now = datetime.now(ZoneInfo("Asia/Shanghai"))
+        now = self.now
         with self.store.connect() as conn:
             conn.execute(
                 "UPDATE execution_sessions SET planned_start_at=?,planned_end_at=? WHERE id=?",
@@ -254,6 +268,9 @@ class ConfirmedExecutionRailTests(unittest.TestCase):
         self.assertEqual("paused", execution["execution_session"]["status"])
         self.assertEqual(session["execution_session_id"], execution["interruption_episode"]["source_execution_session_id"])
         self.assertEqual("short_break", execution["interruption_episode"]["interruption_action"])
+        effects = self.store.interruption_recovery_summary("u")["recommendation_effects"]
+        self.assertEqual((1, 1, 1), (effects["recommendation_count"], effects["accepted_count"], effects["linked_episode_count"]))
+        self.assertEqual(execution["interruption_episode"]["id"], effects["recent"][0]["interruption_episode_id"])
 
     def test_atomic_interrupt_requires_idempotency_key(self):
         session = self.start()
