@@ -29,6 +29,11 @@ are not evidence that HumanOS is usable or effective.
 - `codebook.md`: version 0.1 code definitions and evidence-strength rules;
 - `event_index.md`: anonymized first-pass index of one focal episode per
   interview;
+- `event_segmentation_audit.md`: transcript-checked event boundaries and
+  evidence-status distinctions before coding or theme development;
+- `开放编码表_P01-P03.md`: 中文开放编码试表，用前三位参与者检查证据粒度与记录格式；
+- `开放编码表_P04-P06.md`: 按 v0.1 规则完成的第二批中文开放编码；
+- `中文开放编码规则_v0.1.md`: 根据前三位参与者试编码固化的中文记录规范、证据边界与检查清单；
 - `coded_cases.md`: timestamped, paraphrased coding record for P01–P14;
 - `cross_case_matrix.md`: case-by-code charting, candidate themes, and
   countercases;
