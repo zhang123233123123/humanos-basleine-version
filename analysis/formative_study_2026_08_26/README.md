@@ -29,6 +29,11 @@ are not evidence that HumanOS is usable or effective.
 - `codebook.md`: version 0.1 code definitions and evidence-strength rules;
 - `event_index.md`: anonymized first-pass index of one focal episode per
   interview;
+- `coded_cases.md`: timestamped, paraphrased coding record for P01–P14;
+- `cross_case_matrix.md`: case-by-code charting, candidate themes, and
+  countercases;
+- `design_requirements.md`: traceable mapping from evidence to candidate JITAI
+  components, HumanOS mechanisms, and future measures;
 - `preliminary_findings.md`: provisional cross-case patterns and countercases.
 
 ## Status
