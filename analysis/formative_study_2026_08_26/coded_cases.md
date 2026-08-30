@@ -1,5 +1,7 @@
 # Coded case records v0.1
 
+> **Legacy preliminary artifact:** these case summaries predate the Chinese v0.3 open-coding audit. They must not override the evidence types, identifiers, or boundaries in the five Chinese `开放编码表_*.md` files.
+
 These records paraphrase the transcripts to minimize disclosure. Timestamps
 refer to the source transcript and allow an authorized researcher to audit the
 interpretation. No quotation in this file should be used in a paper; publication

@@ -1,5 +1,7 @@
 # First-pass focal-event index
 
+> **Legacy preliminary artifact:** this index predates the Chinese v0.3 open-coding audit. Use the five Chinese `开放编码表_*.md` files and `全语料开放编码审计.md` as the source of truth for evidence type and record identifiers.
+
 This table is an anonymized navigation aid. It summarizes one focal account per
 interview and does not replace transcript-level coding. “Strength” concerns the
 episode as evidence about task interruption/resumption, not participant quality.
