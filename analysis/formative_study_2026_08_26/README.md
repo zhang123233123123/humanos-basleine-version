@@ -34,6 +34,7 @@ are not evidence that HumanOS is usable or effective.
 - `开放编码表_P01-P03.md`: 中文开放编码试表，用前三位参与者检查证据粒度与记录格式；
 - `开放编码表_P04-P06.md`: 按 v0.1 规则完成的第二批中文开放编码；
 - `开放编码表_P07-P09.md`: 经 v0.3 复查的第三批中文开放编码，保留长期连锁延期、非核心事件与强引导材料的差异；
+- `开放编码表_P10-P12.md`: 按 v0.3 规则完成的第四批中文开放编码，区分具体事件、一般经验、自报与假设回答；
 - `中文开放编码规则_v0.3.md`: 经 P07–P09 第二次复查后新增强引导编号和单一证据性质要求的中文规则；
 - `coded_cases.md`: timestamped, paraphrased coding record for P01–P14;
 - `cross_case_matrix.md`: case-by-code charting, candidate themes, and
