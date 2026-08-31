@@ -1,5 +1,10 @@
 # Evidence-to-design mapping v0.1
 
+> **Status:** Preliminary mapping written before the full Chinese open coding
+> and final thematic analysis. Use `JITAI理论对照_v1.0.md` for the current
+> theory mapping and evidence limits. The requirements below remain design
+> candidates, not validated decision rules or intervention effects.
+
 These are candidate formative requirements. “Supported” means supported as a
 design direction by interview evidence; it does not mean that the implemented
 mechanism is effective.

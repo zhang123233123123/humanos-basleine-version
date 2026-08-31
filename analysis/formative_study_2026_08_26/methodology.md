@@ -1,4 +1,11 @@
-# Methodology
+# Methodology (pre-analysis plan)
+
+> **Status:** This file records the earlier analytic protocol. The completed
+> corpus analysis used the Chinese open-coding rules, focused coding, thematic
+> review matrix, and final theme evidence package listed in this directory.
+> Before paper submission, this plan must be reconciled into one accurate
+> retrospective Method section; it must not be cited as if every planned team
+> coding or Framework Analysis step was completed.
 
 ## Analytic position
 
